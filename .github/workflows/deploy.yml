@@ -2,9 +2,9 @@ name: CI / Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   # ── 1. Testes ───────────────────────────────────────────────────
@@ -36,7 +36,7 @@ jobs:
   deploy:
     name: Deploy → PythonAnywhere
     needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     env:
