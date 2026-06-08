@@ -80,19 +80,29 @@ jobs:
 
       - name: Upload templates
         run: |
-          for f in templates/*.html; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${PA_API}/files/path${REMOTE}/${f}" \
-                 -H "Authorization: Token ${PA_TOKEN}" \
-                 -F "content=@${f}")
-            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
-              echo "  ✓ ${f} (${STATUS})"
-            else
-              echo "  ✗ ${f} (${STATUS}) — retrying..."
-              sleep 2
-              curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+          pa_upload() {
+            local f=$1
+            for attempt in 1 2 3; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${PA_API}/files/path${REMOTE}/${f}" \
                    -H "Authorization: Token ${PA_TOKEN}" \
-                   -F "content=@${f}" && echo "  ✓ ${f} (retry OK)"
-            fi
+                   -F "content=@${f}")
+              if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+                echo "  ✓ ${f}"
+                return 0
+              elif [ "$STATUS" = "429" ]; then
+                echo "  ⏳ ${f} rate-limited, aguardar ${attempt}0s..."
+                sleep $((attempt * 10))
+              else
+                echo "  ✗ ${f} HTTP ${STATUS}"
+                return 1
+              fi
+            done
+            echo "  ✗ ${f} falhou após 3 tentativas"
+            return 1
+          }
+          for f in templates/*.html; do
+            pa_upload "$f"
+            sleep 1
           done
 
       - name: Upload static (CSS + JS)
