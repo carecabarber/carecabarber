@@ -81,10 +81,18 @@ jobs:
       - name: Upload templates
         run: |
           for f in templates/*.html; do
-            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${PA_API}/files/path${REMOTE}/${f}" \
                  -H "Authorization: Token ${PA_TOKEN}" \
-                 -F "content=@${f}"
-            echo "  ✓ ${f}"
+                 -F "content=@${f}")
+            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+              echo "  ✓ ${f} (${STATUS})"
+            else
+              echo "  ✗ ${f} (${STATUS}) — retrying..."
+              sleep 2
+              curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                   -H "Authorization: Token ${PA_TOKEN}" \
+                   -F "content=@${f}" && echo "  ✓ ${f} (retry OK)"
+            fi
           done
 
       - name: Upload static (CSS + JS)
