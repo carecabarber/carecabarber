@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header"><h1>Estatísticas</h1></div>
+
+<!-- Resumo hoje / semana / mês -->
+<div class="stats-grid">
+    {% for periodo, label in [('hoje','Hoje'), ('semana','Esta semana'), ('mes','Este mês')] %}
+    <div class="stat-card">
+        <div class="stat-label">{{ label }}</div>
+        <div class="stat-val">{{ stats[periodo].valor | moeda }} <small>ECV</small></div>
+        <div class="stat-sub">{{ stats[periodo].clientes }} clientes</div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if stats.hora_top %}
+<div class="card" style="margin-bottom:16px;text-align:center">
+    <div class="section-title">Hora mais movimentada</div>
+    <div style="font-size:2rem;font-weight:800;color:var(--accent);margin-top:6px">
+        {{ stats.hora_top[0] }}h
+    </div>
+    <div style="font-size:0.8rem;color:var(--text2)">{{ stats.hora_top[1] }} cortes registados</div>
+</div>
+{% endif %}
+
+<!-- Top serviços -->
+{% if stats.top_servicos %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title">Serviços mais populares</h2>
+    <div class="card" style="padding:14px">
+        {% set max_count = stats.top_servicos[0].count %}
+        {% for s in stats.top_servicos %}
+        <div class="stat-bar-row">
+            <div class="stat-bar-label">{{ s.nome }}</div>
+            <div class="stat-bar-track">
+                <div class="stat-bar-fill" style="width:{{ (s.count / max_count * 100)|int }}%"></div>
+            </div>
+            <div class="stat-bar-info">
+                <span>{{ s.count }}x</span>
+                {% if s.media_real %}
+                <span class="stat-tempo">
+                    Real {{ s.media_real }} min
+                    {% if s.media_real > s.duracao_estimada %}
+                    <span class="delta neg">+{{ (s.media_real - s.duracao_estimada)|round(1) }}</span>
+                    {% elif s.media_real < s.duracao_estimada %}
+                    <span class="delta pos">-{{ (s.duracao_estimada - s.media_real)|round(1) }}</span>
+                    {% endif %}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Desempenho por barbeiro (chefe) -->
+{% if stats.barbeiros_stats %}
+<section>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h2 class="section-title" style="margin:0">Desempenho da equipa</h2>
+        <div class="tab-toggle">
+            <button class="tab-btn tab-btn-active" id="btn-mes" onclick="switchTab('mes')">Este mês</button>
+            <button class="tab-btn" id="btn-sem" onclick="switchTab('sem')">Esta semana</button>
+        </div>
+    </div>
+    <ul class="lista-agendamentos">
+        {% for b in stats.barbeiros_stats %}
+        <li class="item-agendamento" style="cursor:pointer"
+            onclick="window.location='{{ url_for('estatisticas_barbeiro', id=b.id) }}'">
+            <div class="barb-avatar" style="width:36px;height:36px;font-size:1rem;flex-shrink:0">{{ b.nome[0]|upper }}</div>
+            <div class="item-body">
+                <div class="item-cliente">{{ b.nome }}</div>
+                <div class="item-servico tab-content-mes">{{ b.clientes }} clientes · {{ b.valor | moeda }} ECV</div>
+                <div class="item-servico tab-content-sem" style="display:none">{{ b.clientes_sem }} clientes · {{ b.valor_sem | moeda }} ECV</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                <div class="tab-content-mes" style="font-size:1rem;font-weight:800;color:var(--accent)">{{ b.valor | moeda }}</div>
+                <div class="tab-content-sem" style="display:none;font-size:1rem;font-weight:800;color:var(--accent)">{{ b.valor_sem | moeda }}</div>
+                <div style="font-size:0.7rem;color:var(--text2)">ECV</div>
+                <div style="font-size:0.7rem;color:var(--accent);margin-top:2px">→</div>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+
+<script>
+function switchTab(tab) {
+    const isMes = tab === 'mes';
+    document.getElementById('btn-mes').classList.toggle('tab-btn-active', isMes);
+    document.getElementById('btn-sem').classList.toggle('tab-btn-active', !isMes);
+    document.querySelectorAll('.tab-content-mes').forEach(el => el.style.display = isMes ? '' : 'none');
+    document.querySelectorAll('.tab-content-sem').forEach(el => el.style.display = isMes ? 'none' : '');
+}
+</script>
+{% endif %}
+
+{% if not stats.top_servicos and not stats.barbeiros_stats %}
+<div class="empty-state"><p>Ainda sem dados suficientes.</p></div>
+{% endif %}
+{% endblock %}

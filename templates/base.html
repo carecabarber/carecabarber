@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f0f0f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Barbearia</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    {% if session.get('root_gerir') %}
+    <div style="background:#7c3aed;color:#fff;text-align:center;padding:7px 16px;font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:12px;position:sticky;top:0;z-index:9999">
+        🔑 Root — a gerir barbearia ID {{ session.get('barbearia_id') }}
+        <a href="{{ url_for('root_sair_barbearia') }}"
+           style="background:rgba(255,255,255,0.2);color:#fff;padding:3px 10px;border-radius:20px;text-decoration:none;font-size:0.75rem">
+            ← Voltar ao Root
+        </a>
+    </div>
+    {% endif %}
+    <header class="topbar">
+        <span class="logo">✂️ Barbearia</span>
+        <div class="user-info">
+            <span class="user-nome">{% if session.get('root_gerir') %}🔑{% elif session.get('role')=='chefe' %}👑{% else %}💈{% endif %} {{ session.get('user_nome','') }}</span>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+        </div>
+    </header>
+
+    <main class="container">{% block content %}{% endblock %}</main>
+
+    <!-- Modal terminar -->
+    <div class="modal-overlay" id="modalOverlay" onclick="fecharModal()">
+        <div class="modal-box" onclick="event.stopPropagation()">
+            <div class="modal-titulo">Terminar atendimento</div>
+            <div class="modal-cliente" id="modalCliente"></div>
+            <div class="modal-servico" id="modalServico"></div>
+            <div class="modal-duracao" id="modalDuracao"></div>
+            <div class="field" style="margin-top:16px">
+                <label for="modalValor">Valor cobrado (ECV)</label>
+                <input type="number" id="modalValor" placeholder="Ex: 700" min="0" inputmode="numeric" autocomplete="off">
+            </div>
+            <div class="modal-acoes">
+                <button class="btn btn-cancel" onclick="fecharModal()">Cancelar</button>
+                <button class="btn btn-terminar-modal" onclick="confirmarTerminar()">✓ Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAB -->
+    <div class="fab-group">
+        <div class="fab-menu" id="fabMenu">
+            <a href="{{ url_for('novo') }}"   class="fab-item">📅 Agendamento</a>
+            <a href="{{ url_for('walkin') }}"  class="fab-item fab-walkin">⚡ Walk-in</a>
+        </div>
+        <button class="fab" id="fabBtn" onclick="toggleFab()">+</button>
+    </div>
+
+    <!-- Navegação inferior -->
+    <nav class="bottom-nav">
+        <a href="{{ url_for('index') }}" class="bnav-item {% if request.endpoint=='index' %}active{% endif %}">
+            <span class="bnav-icon">🏠</span><span class="bnav-label">Hoje</span>
+        </a>
+        <a href="{{ url_for('historico') }}" class="bnav-item {% if request.endpoint=='historico' %}active{% endif %}">
+            <span class="bnav-icon">📅</span><span class="bnav-label">Histórico</span>
+        </a>
+        <a href="{{ url_for('estatisticas') }}" class="bnav-item {% if request.endpoint=='estatisticas' %}active{% endif %}">
+            <span class="bnav-icon">📊</span><span class="bnav-label">Stats</span>
+        </a>
+        {% if session.get('role')=='chefe' %}
+        <a href="{{ url_for('configuracoes') }}" class="bnav-item {% if request.endpoint in ['configuracoes','barbeiros','servicos'] %}active{% endif %}">
+            <span class="bnav-icon">⚙️</span><span class="bnav-label">Gerir</span>
+        </a>
+        {% endif %}
+        <a href="{{ url_for('perfil') }}" class="bnav-item {% if request.endpoint=='perfil' %}active{% endif %}">
+            <span class="bnav-icon">👤</span><span class="bnav-label">Perfil</span>
+        </a>
+    </nav>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script>
+    // Injeta CSRF em todos os forms da página automaticamente
+    (function() {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!token) return;
+        document.querySelectorAll('form').forEach(function(f) {
+            if (!f.querySelector('[name="csrf_token"]')) {
+                const inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                f.prepend(inp);
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

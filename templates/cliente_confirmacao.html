@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Marcação confirmada — {{ barbearia.nome }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px">
+            {% else %}✂️ {% endif %}{{ barbearia.nome }}
+        </span>
+        <div class="user-info">
+            <span class="user-nome">👤 {{ session.get('user_nome', '') }}</span>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+        </div>
+    </header>
+
+    <main class="container" style="text-align:center;padding-top:40px">
+        <div style="font-size:4rem;margin-bottom:16px">✅</div>
+        <h1 style="font-size:1.4rem;font-weight:800;color:var(--green);margin-bottom:8px">Marcação confirmada!</h1>
+        <p style="color:var(--text2);font-size:0.9rem;margin-bottom:32px">Até já, {{ session.get('user_nome','') }}!</p>
+
+        <div class="card" style="text-align:left;margin-bottom:24px">
+            <div class="section-title" style="margin-bottom:14px">Detalhes da marcação</div>
+
+            <div class="confirm-row">
+                <span class="confirm-label">✂️ Serviço</span>
+                <span class="confirm-val">{{ servico.nome if servico else '—' }}</span>
+            </div>
+            <div class="confirm-row">
+                <span class="confirm-label">📅 Data</span>
+                <span class="confirm-val">{{ ag.data_hora[8:10] }}/{{ ag.data_hora[5:7] }}/{{ ag.data_hora[:4] }}</span>
+            </div>
+            <div class="confirm-row">
+                <span class="confirm-label">🕐 Hora</span>
+                <span class="confirm-val">{{ ag.data_hora[11:16] }}</span>
+            </div>
+            {% if barbeiro %}
+            <div class="confirm-row">
+                <span class="confirm-label">💈 Barbeiro</span>
+                <span class="confirm-val">{{ barbeiro.nome }}</span>
+            </div>
+            {% endif %}
+            <div class="confirm-row">
+                <span class="confirm-label">⏱ Duração est.</span>
+                <span class="confirm-val">{{ servico.duracao_min if servico else '—' }} min</span>
+            </div>
+            {% if servico and servico.preco %}
+            <div class="confirm-row">
+                <span class="confirm-label">💰 Valor</span>
+                <span class="confirm-val" style="color:var(--accent);font-weight:700">
+                    {{ servico.preco | moeda }} ECV
+                </span>
+            </div>
+            {% endif %}
+        </div>
+
+        <a href="{{ url_for('cliente_home', slug=barbearia.slug) }}"
+           class="btn btn-primary btn-full">Ver as minhas marcações</a>
+        <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
+           class="btn btn-outline-small"
+           style="margin-top:10px;display:block;padding:12px;text-align:center">
+            + Nova marcação
+        </a>
+    </main>
+</body>
+</html>

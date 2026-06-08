@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('index') }}" class="btn-back">← Voltar</a>
+    <h1>Novo Agendamento</h1>
+</div>
+
+{% if erro %}
+<div class="login-erro" style="margin-bottom:16px">⚠️ {{ erro }}</div>
+{% endif %}
+
+<form action="{{ url_for('novo') }}" method="post" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field-row">
+        <div class="field">
+            <label for="cliente">Nome do cliente</label>
+            <input type="text" id="cliente" name="cliente" placeholder="Ex: João Silva"
+                   required autocomplete="off" autocapitalize="words">
+        </div>
+        <div class="field">
+            <label for="telefone">Telemóvel</label>
+            <input type="tel" id="telefone" name="telefone" placeholder="9911234"
+                   autocomplete="off" inputmode="tel">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="servico_id">Serviço</label>
+        <select id="servico_id" name="servico_id" required>
+            {% for s in servicos %}
+            <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
+                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} ECV{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% if session.get('role') == 'chefe' and barbeiros %}
+    <div class="field">
+        <label for="barbeiro_id">Barbeiro</label>
+        <select id="barbeiro_id" name="barbeiro_id">
+            <option value="">— Qualquer —</option>
+            {% for b in barbeiros %}
+            <option value="{{ b.id }}">{{ b.nome }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+
+    <div class="field">
+        <label for="data">Data</label>
+        <input type="date" id="data" name="data" value="{{ hoje }}" required min="{{ hoje }}">
+    </div>
+
+    <div id="slots-wrap" style="display:none">
+        <div class="slots-section-label">Horários disponíveis</div>
+        <div id="slots-list"></div>
+        <div id="slots-vazio" class="slots-vazio" style="display:none">
+            Sem horários disponíveis neste dia.
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="hora">Hora</label>
+        <input type="time" id="hora" name="hora" value="{{ agora }}" required>
+    </div>
+
+    <div class="duracao-preview">
+        ⏱ Estimado: <strong id="dur-label">{{ servicos[0].duracao_min if servicos else 0 }} min</strong>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full">Agendar</button>
+</form>
+
+<script>
+const duracoes = { {% for s in servicos %}{{ s.id }}: {{ s.duracao_min }},{% endfor %} };
+// Se não for chefe, usar o próprio ID como barbeiro
+const minhaBarbId = {{ (session.get('user_id') | tojson) if session.get('role') != 'chefe' else 'null' }};
+const selS      = document.getElementById("servico_id");
+const selB      = document.getElementById("barbeiro_id");
+const inputData = document.getElementById("data");
+const inputHora = document.getElementById("hora");
+const durLabel  = document.getElementById("dur-label");
+const slotsWrap = document.getElementById("slots-wrap");
+const slotsList = document.getElementById("slots-list");
+
+selS.addEventListener("change", () => { durLabel.textContent = (duracoes[selS.value]||0)+" min"; carregarSlots(); });
+selB && selB.addEventListener("change", carregarSlots);
+inputData.addEventListener("change", carregarSlots);
+
+const slotsVazio = document.getElementById("slots-vazio");
+
+function carregarSlots() {
+    const bid  = selB ? selB.value : (minhaBarbId || "");
+    const data = inputData.value, sid = selS.value;
+    if (!bid || !data) { slotsWrap.style.display="none"; return; }
+    setSlotLoading(slotsList, slotsWrap);
+    if (slotsVazio) slotsVazio.style.display = "none";
+    fetch(`/api/slots?barbeiro_id=${bid}&data=${data}&servico_id=${sid}`)
+        .then(r=>r.json()).then(slots => {
+            if (!slots.length) {
+                slotsList.innerHTML = "";
+                if (slotsVazio) slotsVazio.style.display = "block";
+                return;
+            }
+            if (slotsVazio) slotsVazio.style.display = "none";
+            slotsList.innerHTML = renderSlots(slots);
+        }).catch(() => { slotsWrap.style.display = "none"; });
+}
+
+function renderSlots(slots) {
+    const manha = slots.filter(s => s.hora < "12:00");
+    const tarde = slots.filter(s => s.hora >= "12:00");
+    let html = "";
+    function slotBtn(s) {
+        if (s.tipo === "ocupado") {
+            return `<div class="slot-btn slot-ocupado" title="Horário já ocupado">
+                ${s.hora}<span class="slot-ocupado-tag">Ocupado</span>
+            </div>`;
+        }
+        const enc = s.tipo === "encaixe";
+        return `<button type="button" class="slot-btn${enc?' slot-encaixe':''}" onclick="escolherHora('${s.hora}',this)">
+            ${s.hora}${enc?'<span class="slot-encaixe-tag">encaixe</span>':''}
+        </button>`;
+    }
+    if (manha.length) {
+        html += `<div class="slots-group-label">Manhã</div><div class="slots-row">`;
+        html += manha.map(slotBtn).join("");
+        html += `</div>`;
+    }
+    if (tarde.length) {
+        html += `<div class="slots-group-label">Tarde</div><div class="slots-row">`;
+        html += tarde.map(slotBtn).join("");
+        html += `</div>`;
+    }
+    return html;
+}
+
+function escolherHora(hora, btn) {
+    inputHora.value = hora;
+    document.querySelectorAll(".slot-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+}
+
+// Carregar slots no arranque se barbeiro já estiver definido
+if (minhaBarbId || (selB && selB.value)) carregarSlots();
+</script>
+
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <h1>Hoje — {{ agora }}</h1>
+</div>
+
+<div class="resumo-bar">
+    <div class="resumo-item">
+        <span class="resumo-val">{{ resumo.clientes }}</span>
+        <span class="resumo-label">Clientes</span>
+    </div>
+    <div class="resumo-sep"></div>
+    <div class="resumo-item">
+        <span class="resumo-val">{{ resumo.valor | moeda }} <small>ECV</small></span>
+        <span class="resumo-label">Faturado hoje</span>
+    </div>
+</div>
+
+{% if barbeiros %}
+<div class="filtro-bar">
+    <a href="{{ url_for('index') }}" class="filtro-btn {% if not barbeiro_id_sel %}active{% endif %}">Todos</a>
+    {% for b in barbeiros %}
+    <a href="{{ url_for('index', barbeiro_id=b.id) }}"
+       class="filtro-btn {% if barbeiro_id_sel == b.id %}active{% endif %}">{{ b.nome }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Atendimento em curso -->
+{% for a in em_andamento %}
+<div class="card card-active">
+    <div class="atendimento-topo">
+        <div>
+            <div class="cliente-nome">{{ a.cliente }}</div>
+            <div class="atendimento-meta">
+                {{ a.servico_nome }}
+                {% if a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
+                {% if a.tipo == 'walk-in' %}<span class="badge badge-walkin">Walk-in</span>{% endif %}
+            </div>
+            {% if a.telefone %}
+            <div class="contacto-bar">
+                <a href="tel:{{ a.telefone }}" class="btn-contacto">📞 {{ a.telefone }}</a>
+                <a href="https://wa.me/238{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">💬 WhatsApp</a>
+            </div>
+            {% endif %}
+        </div>
+        <div class="valor-tag">{{ a.valor | moeda }} ECV</div>
+    </div>
+
+    <div class="cronometro-wrap">
+        <div class="cronometro" id="cron-{{ a.id }}"
+             data-id="{{ a.id }}"
+             data-segundos="{{ a.segundos_decorridos }}"
+             data-estimado="{{ a.duracao_estimada * 60 }}">00:00</div>
+        <div class="estimativa">Estimado: {{ a.duracao_estimada }} min</div>
+        <div class="alerta-atraso" id="alerta-{{ a.id }}" style="display:none">
+            ⚠️ Tempo estimado ultrapassado!
+        </div>
+    </div>
+
+    <button type="button" class="btn btn-terminar"
+            onclick="abrirModal({{ a.id }}, {{ a.cliente | tojson }}, {{ a.duracao_estimada }}, {{ a.servico_nome | tojson }}, {{ a.preco or 0 }})">
+        ✓ Terminar atendimento
+    </button>
+    <form id="form-terminar-{{ a.id }}" action="{{ url_for('terminar', id=a.id) }}" method="post" style="display:none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="valor" id="valor-input-{{ a.id }}">
+    </form>
+</div>
+{% endfor %}
+
+<!-- Lista do dia -->
+<section class="agenda">
+    <h2 class="section-title">Agenda do dia</h2>
+
+    {% if agendamentos %}
+    <ul class="lista-agendamentos">
+        {% for a in agendamentos %}
+        <li class="item-agendamento status-{{ a.status }}">
+            <div class="item-hora">
+                {{ a.hora }}
+                {% if a.tipo == 'walk-in' %}<div style="font-size:0.6rem;color:var(--accent)">walk-in</div>{% endif %}
+            </div>
+            <div class="item-body">
+                <div class="item-cliente">{{ a.cliente }}</div>
+                <div class="item-servico">
+                    {{ a.servico_nome }}
+                    {% if a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
+                </div>
+                <!-- Telefone com links de contacto -->
+                {% if a.telefone %}
+                <div class="contacto-bar" style="margin-top:4px">
+                    <a href="tel:{{ a.telefone }}" class="btn-contacto">📞 {{ a.telefone }}</a>
+                    <a href="https://wa.me/238{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">💬</a>
+                </div>
+                {% endif %}
+                {% if a.status == 'concluido' and a.duracao_real is not none %}
+                <div class="item-duracao">
+                    Real: <strong>{{ a.duracao_real }} min</strong>
+                    {% if a.duracao_real > a.duracao_estimada %}<span class="delta neg">+{{ a.duracao_real - a.duracao_estimada }} min</span>
+                    {% elif a.duracao_real < a.duracao_estimada %}<span class="delta pos">-{{ a.duracao_estimada - a.duracao_real }} min</span>{% endif %}
+                </div>
+                {% endif %}
+            </div>
+            <div class="item-acoes">
+                {% if a.status == 'agendado' %}
+                <form action="{{ url_for('iniciar', id=a.id) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-iniciar" title="Iniciar atendimento">▶</button>
+                </form>
+                <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">📅</a>
+                <form action="{{ url_for('cancelar', id=a.id) }}" method="post"
+                      data-nome="{{ a.cliente | e }}"
+                      onsubmit="return confirm('Cancelar marcação de ' + this.dataset.nome + '?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-cancel" title="Cancelar">✕</button>
+                </form>
+                <form action="{{ url_for('nao_compareceu', id=a.id) }}" method="post"
+                      data-nome="{{ a.cliente | e }}"
+                      onsubmit="return confirm('Marcar ' + this.dataset.nome + ' como não compareceu?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-noshow" title="Não compareceu">NC</button>
+                </form>
+                {% elif a.status == 'em_andamento' %}
+                <span class="badge badge-active">Ativo</span>
+                {% elif a.status == 'concluido' %}
+                <span class="badge badge-done">✓</span>
+                {% elif a.status == 'cancelado' %}
+                <span class="badge badge-cancel">✕</span>
+                {% elif a.status == 'nao_compareceu' %}
+                <span class="badge badge-noshow">NC</span>
+                {% endif %}
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <p>Nenhum agendamento para hoje.</p>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <a href="{{ url_for('novo') }}"  class="btn btn-primary">📅 Agendar</a>
+            <a href="{{ url_for('walkin') }}" class="btn btn-walkin">⚡ Walk-in</a>
+        </div>
+    </div>
+    {% endif %}
+</section>
+
+{% endblock %}

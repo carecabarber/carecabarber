@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('index') }}" class="btn-back">← Voltar</a>
+    <h1>Walk-in <span class="badge badge-walkin">Sem marcação</span></h1>
+</div>
+
+<p class="hint">Cliente que chegou agora. A hora fica registada automaticamente.</p>
+
+<form action="{{ url_for('walkin') }}" method="post" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field-row">
+        <div class="field">
+            <label for="cliente">Nome</label>
+            <input type="text" id="cliente" name="cliente" placeholder="Ex: Pedro"
+                   required autocomplete="off" autocapitalize="words">
+        </div>
+        <div class="field">
+            <label for="telefone">Telemóvel</label>
+            <input type="tel" id="telefone" name="telefone" placeholder="9911234"
+                   inputmode="tel" autocomplete="off">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="servico_id">Serviço</label>
+        <select id="servico_id" name="servico_id" required>
+            {% for s in servicos %}
+            <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}" data-preco="{{ s.preco or 0 }}">
+                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} ECV{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% if session.get('role') == 'chefe' and barbeiros %}
+    <div class="field">
+        <label for="barbeiro_id">Barbeiro</label>
+        <select id="barbeiro_id" name="barbeiro_id">
+            <option value="">— Qualquer —</option>
+            {% for b in barbeiros %}
+            <option value="{{ b.id }}">{{ b.nome }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+
+    <div class="duracao-preview">
+        ⏱ Estimado: <strong id="dur-label">{{ servicos[0].duracao_min if servicos else 0 }} min</strong>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full">Registar</button>
+</form>
+
+<script>
+const duracoes = { {% for s in servicos %}{{ s.id }}: {{ s.duracao_min }},{% endfor %} };
+const sel = document.getElementById("servico_id");
+const durLabel = document.getElementById("dur-label");
+sel.addEventListener("change", () => {
+    durLabel.textContent = (duracoes[sel.value] || 0) + " min";
+});
+</script>
+
+{% endblock %}

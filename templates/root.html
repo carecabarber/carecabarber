@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080808">
+    <title>Root — Gestão de Barbearias</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <style>
+        .root-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+            margin-top: 8px;
+        }
+        .barb-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+            transition: opacity .2s;
+        }
+        .barb-card.inativa { opacity: .45; }
+        .barb-card-nome {
+            font-size: 1.15rem;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+        .barb-card-meta {
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-bottom: 14px;
+        }
+        .barb-link {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--accent);
+            word-break: break-all;
+            margin-bottom: 14px;
+            text-decoration: none;
+        }
+        .barb-link:hover { text-decoration: underline; }
+        .barb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .form-inline { display: flex; gap: 6px; flex: 1; min-width: 0; }
+        .form-inline input[type="text"] { flex: 1; min-width: 0; }
+        .alert-ok  { background:#0a2e1a; color:var(--green,#2ecc71); padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+        .alert-err { background:#2e0a0a; color:var(--red,#e74c3c);   padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+        .criar-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        @media(max-width:520px){ .criar-grid { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">✂️ Root</span>
+        <div class="user-info">
+            <span class="user-nome">🔑 Root</span>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="page-header">
+            <h1>Gestão de Barbearias</h1>
+        </div>
+
+        <!-- ── Alterar senha do Root ── -->
+        <details class="form-card" style="margin-bottom:20px;cursor:pointer">
+            <summary style="font-size:0.9rem;font-weight:700;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px">
+                🔑 Alterar senha do Root
+            </summary>
+            <form action="{{ url_for('root_alterar_senha') }}" method="post" style="margin-top:16px">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="criar-grid">
+                    <div class="field">
+                        <label>Senha atual</label>
+                        <input type="password" name="senha_atual" required autocomplete="current-password">
+                    </div>
+                    <div class="field">
+                        <label>Nova senha</label>
+                        <input type="password" name="senha_nova" required autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+                    </div>
+                    <div class="field">
+                        <label>Confirmar nova senha</label>
+                        <input type="password" name="senha_confirma" required autocomplete="new-password">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="margin-top:4px">Alterar senha</button>
+            </form>
+        </details>
+
+        {% if erro %}
+        <div class="alert-err">⚠️ {{ erro }}</div>
+        {% endif %}
+        {% if ok %}
+        <div class="alert-ok">✅ {{ ok }}</div>
+        {% endif %}
+
+        <!-- ── Criar nova barbearia ── -->
+        <div class="form-card" style="margin-bottom:28px">
+            <h2 style="font-size:0.95rem;font-weight:700;color:var(--muted);margin-bottom:18px;text-transform:uppercase;letter-spacing:.05em">
+                ➕ Nova Barbearia
+            </h2>
+            <form action="{{ url_for('root_criar_barbearia') }}" method="post" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="criar-grid">
+                    <div class="field">
+                        <label>Nome da Barbearia</label>
+                        <input type="text" name="nome" placeholder="Ex: Barbearia Central" required>
+                    </div>
+                    <div class="field">
+                        <label>Nome do Chefe</label>
+                        <input type="text" name="chefe_nome" placeholder="Ex: João Silva" required>
+                    </div>
+                    <div class="field">
+                        <label>Username do Chefe</label>
+                        <input type="text" name="username" placeholder="Ex: joao" required autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label>Senha do Chefe</label>
+                        <input type="password" name="senha" placeholder="Mínimo 6 caracteres" required autocomplete="new-password">
+                    </div>
+                    <div class="field">
+                        <label>Logo da Barbearia <small style="color:var(--muted)">(opcional — jpg, png, webp)</small></label>
+                        <input type="file" name="logo" accept="image/jpeg,image/png,image/webp,image/gif">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="margin-top:4px">
+                    Criar Barbearia
+                </button>
+            </form>
+        </div>
+
+        <!-- ── Lista de barbearias ── -->
+        <h2 style="font-size:0.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">
+            Barbearias ({{ barbearias|length }})
+        </h2>
+
+        {% if barbearias %}
+        <div class="root-grid">
+            {% for b in barbearias %}
+            <div class="barb-card{% if not b.ativa %} inativa{% endif %}">
+                <div class="barb-card-nome">✂️ {{ b.nome }}</div>
+                {% if b.logo %}
+                <div style="margin-bottom:12px">
+                    <img src="{{ url_for('static', filename='logos/' + b.logo) }}"
+                         alt="Logo" style="max-height:50px;max-width:120px;object-fit:contain;border-radius:6px">
+                </div>
+                {% endif %}
+                <div class="barb-card-meta">
+                    ID {{ b.id }} &nbsp;·&nbsp;
+                    {% if b.ativa %}
+                    <span style="color:var(--green,#2ecc71)">● Ativa</span>
+                    {% else %}
+                    <span style="color:var(--muted)">● Inativa</span>
+                    {% endif %}
+                </div>
+
+                <a class="barb-link"
+                   href="{{ url_for('cliente_entrada', slug=b.slug) }}"
+                   target="_blank">
+                    🔗 /cliente/{{ b.slug }}
+                </a>
+
+                <div class="barb-actions">
+                    <!-- Entrar como chefe -->
+                    {% if b.ativa %}
+                    <a href="{{ url_for('root_gerir_barbearia', id=b.id) }}"
+                       class="btn btn-sm btn-primary" style="text-decoration:none">
+                        🔑 Gerir
+                    </a>
+                    {% endif %}
+                    <!-- Editar nome -->
+                    <form action="{{ url_for('root_editar_barbearia', id=b.id) }}" method="post" class="form-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="text" name="nome" value="{{ b.nome }}">
+                        <button type="submit" class="btn btn-sm">✏️</button>
+                    </form>
+                    <!-- Toggle ativo/inativo -->
+                    <form action="{{ url_for('root_toggle_barbearia', id=b.id) }}" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm {% if b.ativa %}btn-danger{% endif %}">
+                            {% if b.ativa %}🔴{% else %}🟢{% endif %}
+                        </button>
+                    </form>
+                    <!-- Logo upload -->
+                    <form action="{{ url_for('root_logo_barbearia', id=b.id) }}" method="post"
+                          enctype="multipart/form-data" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="file" name="logo" accept="image/jpeg,image/png,image/webp"
+                               style="font-size:0.7rem;flex:1;min-width:0">
+                        <button type="submit" class="btn btn-sm" title="Atualizar logo">🖼️</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align:center;color:var(--muted);padding:60px 0;font-size:0.95rem">
+            Nenhuma barbearia ainda. Cria a primeira acima! ✂️
+        </div>
+        {% endif %}
+    </main>
+
+    <script>
+    (function() {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!token) return;
+        document.querySelectorAll('form').forEach(function(f) {
+            if (!f.querySelector('[name="csrf_token"]')) {
+                const inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                f.prepend(inp);
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

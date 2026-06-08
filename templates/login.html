@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Barbearia — Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="login-logo">✂️</div>
+        <h1 class="login-titulo">Barbearia</h1>
+        <p style="color:var(--text2);font-size:0.8rem;margin-bottom:28px;text-align:center;font-weight:500">
+            Acesso exclusivo para a equipa
+        </p>
+
+        <form action="{{ url_for('login') }}" method="post" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if erro %}
+            <div class="login-erro">⚠️ {{ erro }}</div>
+            {% endif %}
+
+            <div class="field">
+                <label for="username">Utilizador</label>
+                <input type="text" id="username" name="username"
+                       placeholder="nome de utilizador" required autocomplete="username"
+                       autocapitalize="none" spellcheck="false">
+            </div>
+
+            <div class="field">
+                <label for="senha">Senha</label>
+                <input type="password" id="senha" name="senha"
+                       placeholder="••••••" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full" style="margin-top:4px">
+                Entrar →
+            </button>
+        </form>
+
+        <p class="login-link" style="color:var(--muted)">
+            Clientes: usa o link QR da tua barbearia.
+        </p>
+    </div>
+</body>
+</html>

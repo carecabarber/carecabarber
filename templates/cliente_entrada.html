@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>{{ barbearia.nome }} — Marcar Corte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="login-wrap">
+        {% if barbearia.logo %}
+        <div class="login-logo">
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="max-height:80px;max-width:160px;object-fit:contain">
+        </div>
+        {% else %}
+        <div class="login-logo">✂️</div>
+        {% endif %}
+        <h1 class="login-titulo">{{ barbearia.nome }}</h1>
+        <p style="color:var(--text2);font-size:0.88rem;margin-bottom:24px;text-align:center">
+            Entra com o teu nome e telemóvel para marcares o teu corte.
+        </p>
+
+        <form action="{{ url_for('cliente_entrada', slug=barbearia.slug) }}" method="post" class="form-card">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if erro %}
+            <div class="login-erro">{{ erro }}</div>
+            {% endif %}
+
+            <div class="field">
+                <label for="nome">Nome</label>
+                <input type="text" id="nome" name="nome"
+                       placeholder="Ex: João Silva" required
+                       autocapitalize="words" autocomplete="name">
+            </div>
+
+            <div class="field">
+                <label for="telefone">Telemóvel</label>
+                <input type="tel" id="telefone" name="telefone"
+                       placeholder="Ex: 9911234" required
+                       autocomplete="tel" inputmode="tel">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full">Entrar</button>
+        </form>
+
+        <p class="login-link">
+            És barbeiro? <a href="{{ url_for('login') }}">Login da equipa</a>
+        </p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header"><h1>Configurações</h1></div>
+
+<!-- Acesso rápido -->
+<section class="config-section">
+    <h2 class="section-title">Gestão</h2>
+    <div class="config-cards-row">
+        <a href="{{ url_for('barbeiros') }}" class="config-nav-card">
+            <span class="config-nav-icon">💈</span>
+            <span class="config-nav-label">Equipa</span>
+            <span class="config-nav-arrow">›</span>
+        </a>
+        <a href="{{ url_for('servicos') }}" class="config-nav-card">
+            <span class="config-nav-icon">✂️</span>
+            <span class="config-nav-label">Serviços</span>
+            <span class="config-nav-arrow">›</span>
+        </a>
+    </div>
+</section>
+
+<!-- Geral -->
+<section class="config-section">
+    <h2 class="section-title">Geral</h2>
+    <form action="{{ url_for('configuracoes') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="acao" value="geral">
+        <div class="config-cards-row">
+            <div class="config-card">
+                <div class="config-card-icon">⏱</div>
+                <div class="config-card-body">
+                    <label class="config-card-label">Buffer entre cortes</label>
+                    <div class="config-card-input">
+                        <input type="number" name="buffer_minutos"
+                               value="{{ configs.get('buffer_minutos','10') }}"
+                               min="0" max="60" inputmode="numeric">
+                        <span class="config-unit">min</span>
+                    </div>
+                </div>
+            </div>
+            <div class="config-card">
+                <div class="config-card-icon">📋</div>
+                <div class="config-card-body">
+                    <label class="config-card-label">Máx. por dia</label>
+                    <div class="config-card-input">
+                        <input type="number" name="max_por_dia"
+                               value="{{ configs.get('max_por_dia','20') }}"
+                               min="1" max="100" inputmode="numeric">
+                        <span class="config-unit">marc.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:12px">Guardar</button>
+    </form>
+</section>
+
+<!-- Horário semanal -->
+<section class="config-section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <h2 class="section-title" style="margin-bottom:0">Horário de funcionamento</h2>
+        <button type="button" class="btn btn-outline-small" onclick="copiarHorario()">↓ Copiar Seg</button>
+    </div>
+    <form action="{{ url_for('configuracoes') }}" method="post" id="form-horario">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="acao" value="horario">
+        {% for h in horario %}
+        <div class="horario-card {{ 'fechado' if h.fechado }}" id="hcard-{{ h.dia_semana }}">
+            <div class="horario-dia-nome">{{ dias_pt[h.dia_semana][:3] }}</div>
+            <label class="horario-toggle">
+                <input type="checkbox" name="aberto_{{ h.dia_semana }}"
+                       {{ 'checked' if not h.fechado }}
+                       onchange="toggleDiaCard({{ h.dia_semana }}, this.checked)">
+                <span class="toggle-pill">
+                    <span class="pill-on">● Aberto</span>
+                    <span class="pill-off">○ Fechado</span>
+                </span>
+            </label>
+            <div class="horario-times" id="htimes-{{ h.dia_semana }}"
+                 style="{{ 'display:none' if h.fechado }}">
+                <input type="time" name="abertura_{{ h.dia_semana }}"
+                       value="{{ h.hora_abertura }}" id="ab-{{ h.dia_semana }}">
+                <span class="times-sep">—</span>
+                <input type="time" name="fecho_{{ h.dia_semana }}"
+                       value="{{ h.hora_fecho }}" id="fc-{{ h.dia_semana }}">
+            </div>
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:14px">Guardar horário</button>
+    </form>
+</section>
+
+<!-- Dias fechados -->
+<section class="config-section">
+    <h2 class="section-title">Dias fechados / Feriados</h2>
+    <form action="{{ url_for('configuracoes') }}" method="post" class="form-card" style="margin-bottom:12px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="acao" value="dia_fechado">
+        <div class="field-row">
+            <div class="field">
+                <label>Data</label>
+                <input type="date" name="data_fechada" required min="{{ hoje }}">
+            </div>
+            <div class="field">
+                <label>Motivo (opcional)</label>
+                <input type="text" name="motivo_fechado" placeholder="Ex: Feriado">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Adicionar</button>
+    </form>
+    {% if dias_fechados %}
+    <ul class="lista-agendamentos">
+        {% for d in dias_fechados %}
+        <li class="item-agendamento">
+            <div class="item-hora" style="color:var(--red)">{{ d.data[8:10] }}/{{ d.data[5:7] }}</div>
+            <div class="item-body">
+                <div class="item-cliente">{{ d.motivo or 'Dia fechado' }}</div>
+                <div class="item-servico">{{ d.data }}</div>
+            </div>
+            <form action="{{ url_for('configuracoes') }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="acao" value="remover_dia">
+                <input type="hidden" name="dia_id" value="{{ d.id }}">
+                <button type="submit" class="btn btn-cancel" style="padding:7px 10px">🗑</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p style="color:var(--text2);font-size:0.85rem;padding:12px 0">Nenhum dia fechado registado.</p>
+    {% endif %}
+</section>
+
+<script>
+function toggleDiaCard(dia, aberto) {
+    const card  = document.getElementById("hcard-"  + dia);
+    const times = document.getElementById("htimes-" + dia);
+    if (card)  card.classList.toggle("fechado", !aberto);
+    if (times) times.style.display = aberto ? "flex" : "none";
+}
+
+function copiarHorario() {
+    const ab0 = document.getElementById("ab-0")?.value;
+    const fc0 = document.getElementById("fc-0")?.value;
+    if (!ab0 || !fc0) return;
+    for (let d = 1; d < 7; d++) {
+        const ab = document.getElementById("ab-" + d);
+        const fc = document.getElementById("fc-" + d);
+        const cb = document.querySelector(`input[name="aberto_${d}"]`);
+        if (ab) ab.value = ab0;
+        if (fc) fc.value = fc0;
+        if (cb && !cb.checked) { cb.checked = true; toggleDiaCard(d, true); }
+    }
+}
+</script>
+{% endblock %}

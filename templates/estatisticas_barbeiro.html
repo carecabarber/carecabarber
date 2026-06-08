@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('estatisticas') }}" class="btn-back">← Voltar</a>
+    <h1>{{ det.barbeiro.nome }}</h1>
+</div>
+
+<!-- Resumo: Hoje / Semana / Mês -->
+<div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+    {% for periodo, label in [('hoje','Hoje'), ('semana','Semana'), ('mes','Mês')] %}
+    <div class="stat-card">
+        <div class="stat-label">{{ label }}</div>
+        <div class="stat-val" style="font-size:1.2rem">{{ det[periodo].valor | moeda }} <small>ECV</small></div>
+        <div class="stat-sub">{{ det[periodo].clientes }} clientes</div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Destaques -->
+<div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+    <div class="stat-card" style="text-align:center">
+        <div class="stat-label">Total geral</div>
+        <div class="stat-val" style="font-size:1.1rem">{{ det.total_geral }}</div>
+        <div class="stat-sub">atendimentos</div>
+    </div>
+    <div class="stat-card" style="text-align:center">
+        <div class="stat-label">Atraso médio</div>
+        <div class="stat-val" style="font-size:1.1rem;color:{{ 'var(--red)' if det.media_atraso > 0 else 'var(--green)' }}">
+            {{ '+' if det.media_atraso > 0 else '' }}{{ det.media_atraso }} min
+        </div>
+        <div class="stat-sub">vs estimado</div>
+    </div>
+    <div class="stat-card" style="text-align:center">
+        <div class="stat-label">Não compareceu</div>
+        <div class="stat-val" style="font-size:1.1rem;color:{{ 'var(--red)' if det.nao_compareceu > 0 else 'var(--text)' }}">{{ det.nao_compareceu }}</div>
+        <div class="stat-sub">clientes</div>
+    </div>
+</div>
+
+<!-- Top serviços -->
+{% if det.top_servicos %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title">Serviços realizados</h2>
+    <div class="card" style="padding:14px">
+        {% set max_count = det.top_servicos[0].count %}
+        {% for s in det.top_servicos %}
+        <div class="stat-bar-row {{ 'gargalo-row' if s.delta and s.delta > 0 else '' }}">
+            <div class="stat-bar-label">
+                {{ s.nome }}
+                {% if s.delta and s.delta > 3 %}
+                <span class="badge-gargalo">Gargalo</span>
+                {% endif %}
+            </div>
+            <div class="stat-bar-track">
+                <div class="stat-bar-fill {{ 'stat-bar-gargalo' if s.delta and s.delta > 3 else '' }}"
+                     style="width:{{ (s.count / max_count * 100)|int }}%"></div>
+            </div>
+            <div class="stat-bar-info">
+                <span>{{ s.count }}x</span>
+                {% if s.media_real %}
+                <span class="stat-tempo">
+                    {{ s.media_real }} min
+                    {% if s.delta and s.delta > 0 %}
+                    <span class="delta neg">+{{ s.delta }}</span>
+                    {% elif s.delta and s.delta < 0 %}
+                    <span class="delta pos">{{ s.delta }}</span>
+                    {% endif %}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Gargalhos -->
+{% if det.gargalhos %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title" style="color:var(--red)">⚠ Gargalhos identificados</h2>
+    <div class="card" style="padding:14px;border-left:3px solid var(--red)">
+        <p style="font-size:0.8rem;color:var(--text2);margin-bottom:12px">
+            Serviços onde o tempo real excede consistentemente o tempo estimado.
+        </p>
+        {% for g in det.gargalhos %}
+        <div class="stat-bar-row" style="margin-bottom:12px">
+            <div style="flex:1">
+                <div style="font-weight:600;font-size:0.88rem">{{ g.nome }}</div>
+                <div style="font-size:0.75rem;color:var(--text2)">
+                    Estimado: {{ g.duracao_estimada }} min &nbsp;·&nbsp;
+                    Real médio: <span style="color:var(--red);font-weight:700">{{ g.media_real }} min</span>
+                    <span class="delta neg" style="margin-left:4px">+{{ g.delta }} min</span>
+                </div>
+                <div style="font-size:0.72rem;color:var(--text2);margin-top:2px">{{ g.count }} atendimentos analisados</div>
+            </div>
+        </div>
+        {% endfor %}
+        <p style="font-size:0.75rem;color:var(--text2);margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
+            💡 Sugestão: ajuste o tempo estimado destes serviços ou melhore o processo.
+        </p>
+    </div>
+</section>
+{% endif %}
+
+<!-- Distribuição por hora -->
+{% if det.horas_dist %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title">Movimento por hora</h2>
+    <div class="card" style="padding:14px">
+        {% set max_h = det.horas_dist | map(attribute='count') | max %}
+        {% for h in det.horas_dist %}
+        <div class="stat-bar-row" style="margin-bottom:6px">
+            <div class="stat-bar-label" style="min-width:38px;font-size:0.78rem">{{ h.hora }}h</div>
+            <div class="stat-bar-track">
+                <div class="stat-bar-fill" style="width:{{ (h.count / max_h * 100)|int if max_h else 0 }}%"></div>
+            </div>
+            <div class="stat-bar-info">{{ h.count }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Distribuição por dia da semana -->
+{% if det.dias_dist %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title">Movimento por dia da semana</h2>
+    <div class="card" style="padding:14px">
+        {% set max_d = det.dias_dist | map(attribute='count') | max %}
+        {% for d in det.dias_dist %}
+        {% if d.count > 0 %}
+        <div class="stat-bar-row" style="margin-bottom:6px">
+            <div class="stat-bar-label" style="min-width:46px;font-size:0.78rem">{{ dias_pt[d.dia_semana] }}</div>
+            <div class="stat-bar-track">
+                <div class="stat-bar-fill" style="width:{{ (d.count / max_d * 100)|int if max_d else 0 }}%"></div>
+            </div>
+            <div class="stat-bar-info">{{ d.count }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Atendimentos recentes -->
+{% if det.recentes %}
+<section style="margin-bottom:28px">
+    <h2 class="section-title">Últimos atendimentos</h2>
+    <ul class="lista-agendamentos">
+        {% for r in det.recentes %}
+        <li class="item-agendamento">
+            <div class="item-hora" style="font-size:0.72rem;min-width:48px;line-height:1.4">
+                {{ r.data_hora[8:10] }}/{{ r.data_hora[5:7] }}<br>
+                <span style="color:var(--text2)">{{ r.data_hora[11:16] }}</span>
+            </div>
+            <div class="item-body">
+                <div class="item-cliente">{{ r.cliente }}</div>
+                <div class="item-servico">{{ r.servico_nome }}</div>
+                {% if r.duracao_real is not none %}
+                <div class="item-duracao">
+                    Real: <strong>{{ r.duracao_real }} min</strong>
+                    {% if r.duracao_real > r.duracao_estimada %}
+                    <span class="delta neg">+{{ r.duracao_real - r.duracao_estimada }} min</span>
+                    {% elif r.duracao_real < r.duracao_estimada %}
+                    <span class="delta pos">-{{ r.duracao_estimada - r.duracao_real }} min</span>
+                    {% else %}
+                    <span style="color:var(--green);font-size:0.72rem">✓ No tempo</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:0.85rem;font-weight:700;color:var(--accent)">{{ r.valor | moeda }} ECV</div>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+{% if not det.top_servicos and not det.recentes %}
+<div class="empty-state"><p>Ainda sem dados para este barbeiro.</p></div>
+{% endif %}
+
+{% endblock %}

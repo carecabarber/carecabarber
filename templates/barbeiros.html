@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('configuracoes') }}" class="btn-back">← Voltar</a>
+    <h1>Equipa</h1>
+</div>
+
+<!-- Adicionar barbeiro -->
+<form action="{{ url_for('barbeiros') }}" method="post" class="form-card" style="margin-bottom:24px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-row">
+        <div class="field">
+            <label>Nome do novo barbeiro</label>
+            <input type="text" name="nome" placeholder="Ex: Carlos"
+                   required autocapitalize="words" autocomplete="off">
+        </div>
+        <div style="display:flex;align-items:flex-end">
+            <button type="submit" class="btn btn-primary" style="white-space:nowrap">+ Adicionar</button>
+        </div>
+    </div>
+</form>
+
+<!-- Lista de barbeiros -->
+<h2 class="section-title">Barbeiros ({{ barbeiros|length }})</h2>
+
+{% if barbeiros %}
+<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:28px">
+    {% for b in barbeiros %}
+    <div class="barb-card {{ '' if b.ativo else 'barb-inativo' }}">
+
+        <!-- Cabeçalho do card -->
+        <div class="barb-card-topo">
+            <div class="barb-avatar">{{ b.nome[0]|upper }}</div>
+            <div class="barb-info">
+                <div class="barb-nome">{{ b.nome }}
+                    {% if b.role == 'chefe' %}<span class="badge badge-active" style="font-size:0.6rem">Chefe</span>{% endif %}
+                </div>
+                <div class="barb-meta">
+                    {% if b.username %}
+                    👤 <strong>{{ b.username }}</strong>
+                    {% else %}
+                    <span style="color:var(--red)">⚠ Sem acesso definido</span>
+                    {% endif %}
+                    · <span style="{{ 'color:var(--green)' if b.ativo else 'color:var(--red)' }}">
+                        {{ 'Ativo' if b.ativo else 'Inativo' }}
+                    </span>
+                </div>
+            </div>
+            <div class="barb-acoes">
+                <button class="btn btn-outline-small" onclick="togglePanel('edit-{{ b.id }}')">✏️ Editar</button>
+                <button class="btn btn-outline-small {{ '' if b.username else 'btn-sem-acesso' }}"
+                        onclick="togglePanel('acesso-{{ b.id }}')">
+                    🔑 {{ 'Acesso' if b.username else '⚠ Sem acesso' }}
+                </button>
+                <form action="{{ url_for('toggle_barbeiro', id=b.id) }}" method="post" style="margin:0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn {{ 'btn-cancel' if b.ativo else 'btn-iniciar' }}" style="padding:7px 10px">
+                        {{ '⏸' if b.ativo else '▶' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Painel: Editar nome -->
+        <div id="edit-{{ b.id }}" class="barb-panel" style="display:none">
+            <div class="barb-panel-titulo">✏️ Editar nome</div>
+            <form action="{{ url_for('editar_barbeiro', id=b.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="field-row">
+                    <div class="field">
+                        <label>Nome</label>
+                        <input type="text" name="nome" value="{{ b.nome }}"
+                               required autocapitalize="words" autocomplete="off">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">Guardar nome</button>
+            </form>
+        </div>
+
+        <!-- Painel: Acesso (utilizador + senha juntos) -->
+        <div id="acesso-{{ b.id }}" class="barb-panel" style="display:none">
+            <div class="barb-panel-titulo">🔑 Acesso — <span style="color:var(--accent)">{{ b.nome }}</span></div>
+            {% if not b.username %}
+            <div class="login-erro" style="margin-bottom:12px;font-size:0.78rem">⚠ Este barbeiro ainda não tem acesso definido.</div>
+            {% endif %}
+            <form action="{{ url_for('set_credenciais', id=b.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="field-row">
+                    <div class="field">
+                        <label>Utilizador</label>
+                        <input type="text" name="username" value="{{ b.username or '' }}"
+                               placeholder="Ex: carlos" required
+                               autocapitalize="none" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label>Nova senha</label>
+                        <input type="password" name="senha" placeholder="Mín. 6 caracteres"
+                               required autocomplete="new-password" autocapitalize="none">
+                    </div>
+                </div>
+                <p style="font-size:0.72rem;color:var(--text2);margin-top:4px">
+                    Após entrar, o barbeiro pode alterar a sua senha no perfil.
+                </p>
+                <button type="submit" class="btn btn-primary btn-full" style="margin-top:10px">Guardar acesso</button>
+            </form>
+        </div>
+
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state" style="margin-bottom:28px">
+    <p>Nenhum barbeiro registado ainda.</p>
+</div>
+{% endif %}
+
+<!-- Ausências da equipa -->
+<h2 class="section-title">Ausências da equipa</h2>
+
+<form action="{{ url_for('criar_ausencia') }}" method="post" class="form-card" style="margin-bottom:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-row">
+        <div class="field">
+            <label>Barbeiro</label>
+            <select name="barbeiro_id" required>
+                <option value="">— Selecionar —</option>
+                {% for b in todos_barbeiros %}
+                <option value="{{ b.id }}">{{ b.nome }}{% if not b.ativo %} (inativo){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label>Tipo</label>
+            <select name="tipo" required>
+                <option value="ausencia">Ausência</option>
+                <option value="falta">Falta</option>
+                <option value="ferias">Férias</option>
+            </select>
+        </div>
+    </div>
+    <div class="field">
+        <label>Motivo (opcional)</label>
+        <input type="text" name="motivo" placeholder="Ex: Consulta médica">
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Data início</label>
+            <input type="date" name="data_inicio" required min="{{ hoje }}">
+        </div>
+        <div class="field">
+            <label>Data fim</label>
+            <input type="date" name="data_fim" required min="{{ hoje }}">
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label>Hora início (opcional)</label>
+            <input type="time" name="hora_inicio">
+        </div>
+        <div class="field">
+            <label>Hora fim (opcional)</label>
+            <input type="time" name="hora_fim">
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-full">Registar ausência</button>
+</form>
+
+{% if ausencias %}
+<ul class="lista-agendamentos">
+    {% for aus in ausencias %}
+    <li class="item-agendamento">
+        <div class="item-hora" style="font-size:0.7rem;min-width:48px;line-height:1.4">
+            {{ aus.data_inicio[8:10] }}/{{ aus.data_inicio[5:7] }}
+            {% if aus.data_fim != aus.data_inicio %}<br>→{{ aus.data_fim[8:10] }}/{{ aus.data_fim[5:7] }}{% endif %}
+        </div>
+        <div class="item-body">
+            <div class="item-cliente">{{ aus.barbeiro_nome }}</div>
+            <div class="item-servico">
+                <span class="badge badge-ausencia-{{ aus.tipo }}">{{ aus.tipo|capitalize }}</span>
+                {% if aus.motivo %} · {{ aus.motivo }}{% endif %}
+                {% if aus.hora_inicio and aus.hora_fim %} · {{ aus.hora_inicio }}–{{ aus.hora_fim }}{% endif %}
+            </div>
+        </div>
+        <form action="{{ url_for('apagar_ausencia', id=aus.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-cancel" style="padding:7px 10px">🗑</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p style="color:var(--text2);font-size:0.85rem;padding:12px 0">Nenhuma ausência registada.</p>
+{% endif %}
+
+<script>
+// Validação: data_fim >= data_inicio
+document.querySelector('input[name="data_fim"]')?.addEventListener('change', function() {
+    const di = document.querySelector('input[name="data_inicio"]')?.value;
+    if (di && this.value < di) {
+        alert('A data de fim não pode ser anterior à data de início.');
+        this.value = di;
+    }
+});
+document.querySelector('input[name="data_inicio"]')?.addEventListener('change', function() {
+    const df = document.querySelector('input[name="data_fim"]');
+    if (df && df.value && df.value < this.value) df.value = this.value;
+});
+
+function togglePanel(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const visible = el.style.display !== "none";
+    // Fechar todos os painéis do mesmo card primeiro
+    el.closest(".barb-card").querySelectorAll(".barb-panel").forEach(p => p.style.display = "none");
+    if (!visible) el.style.display = "block";
+}
+</script>
+
+{% endblock %}

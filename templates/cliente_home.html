@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>{{ barbearia.nome }} — As minhas marcações</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px">
+            {% else %}✂️ {% endif %}{{ barbearia.nome }}
+        </span>
+        <div class="user-info">
+            <span class="user-nome">👤 {{ session.get('user_nome', '') }}</span>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="page-header">
+            <h1>As minhas marcações</h1>
+        </div>
+
+        <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
+           class="btn btn-primary btn-full"
+           style="margin-bottom:20px;display:flex;justify-content:center">
+            📅 Nova marcação
+        </a>
+
+        {% set proximas = (agendamentos | selectattr('status', 'equalto', 'agendado') | list) + (agendamentos | selectattr('status', 'equalto', 'em_andamento') | list) %}
+        {% set outras   = agendamentos | rejectattr('status', 'equalto', 'agendado') | rejectattr('status', 'equalto', 'em_andamento') | list %}
+
+        {% if proximas %}
+        <h2 class="section-title">Próximas</h2>
+        <ul class="lista-agendamentos" style="margin-bottom:20px">
+            {% for a in proximas %}
+            <li class="item-agendamento status-{{ a.status }}">
+                <div class="item-hora">
+                    <div>{{ a.hora }}</div>
+                    <div class="item-data-small">{{ a.data }}</div>
+                </div>
+                <div class="item-body">
+                    <div class="item-cliente">{{ a.servico_nome }}</div>
+                    <div class="item-servico">
+                        {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}Qualquer barbeiro{% endif %}
+                        · {{ a.duracao_estimada }} min est.
+                    </div>
+                    {% if a.minutos_ate is defined and a.minutos_ate >= 0 and a.minutos_ate <= 30 %}
+                    <div class="lembrete-badge">⏰ Em {{ a.minutos_ate }} min</div>
+                    {% endif %}
+                </div>
+                <div class="item-acoes">
+                    <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
+                       class="btn btn-reagendar">📅</a>
+                    <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
+                          method="post"
+                          data-nome="{{ a.servico_nome | e }}"
+                          onsubmit="return confirm('Cancelar marcação de ' + this.dataset.nome + '?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-cancel">✕</button>
+                    </form>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if outras %}
+        <h2 class="section-title">Histórico</h2>
+        <ul class="lista-agendamentos">
+            {% for a in outras %}
+            <li class="item-agendamento status-{{ a.status }}">
+                <div class="item-hora">
+                    <div>{{ a.hora }}</div>
+                    <div class="item-data-small">{{ a.data }}</div>
+                </div>
+                <div class="item-body">
+                    <div class="item-cliente">{{ a.servico_nome }}</div>
+                    <div class="item-servico">
+                        {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}—{% endif %}
+                    </div>
+                </div>
+                <div class="item-acoes">
+                    {% if a.status == 'concluido' %}
+                    <span class="badge badge-done">✓</span>
+                    {% elif a.status == 'cancelado' %}
+                    <span class="badge badge-cancel">Cancelado</span>
+                    {% elif a.status == 'em_andamento' %}
+                    <span class="badge badge-active">A decorrer</span>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if not agendamentos %}
+        <div class="empty-state">
+            <p>Ainda não tens marcações.</p>
+        </div>
+        {% endif %}
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script>
+    (function() {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!token) return;
+        document.querySelectorAll('form').forEach(function(f) {
+            if (!f.querySelector('[name="csrf_token"]')) {
+                const inp = document.createElement('input');
+                inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                f.prepend(inp);
+            }
+        });
+    })();
+
+    document.addEventListener("DOMContentLoaded", () => {
+        pedirPermissaoNotificacao();
+        iniciarPollingStatusCliente();
+    });
+    </script>
+</body>
+</html>

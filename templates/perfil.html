@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header"><h1>Perfil</h1></div>
+
+<div class="card" style="margin-bottom:20px;display:flex;align-items:center;gap:14px">
+    <div style="font-size:2.5rem">{% if session.get('role')=='chefe' %}👑{% else %}💈{% endif %}</div>
+    <div>
+        <div style="font-size:1.1rem;font-weight:700">{{ session.get('user_nome') }}</div>
+        <div style="font-size:0.8rem;color:var(--text2)">{{ 'Chefe' if session.get('role')=='chefe' else 'Barbeiro' }}</div>
+    </div>
+</div>
+
+<h2 class="section-title">Alterar senha</h2>
+<form action="{{ url_for('perfil') }}" method="post" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if erro %}<div class="login-erro">{{ erro }}</div>{% endif %}
+    {% if ok %}<div class="login-ok">{{ ok }}</div>{% endif %}
+
+    <div class="field">
+        <label>Senha atual</label>
+        <input type="password" name="senha_atual" placeholder="••••••" required autocomplete="current-password">
+    </div>
+    <div class="field">
+        <label>Nova senha</label>
+        <input type="password" name="senha_nova" placeholder="Mín. 6 caracteres" required autocomplete="new-password">
+    </div>
+    <div class="field">
+        <label>Confirmar nova senha</label>
+        <input type="password" name="senha_confirma" placeholder="Repete a nova senha" required autocomplete="new-password">
+    </div>
+    <button type="submit" class="btn btn-primary btn-full">Alterar senha</button>
+</form>
+{% endblock %}
