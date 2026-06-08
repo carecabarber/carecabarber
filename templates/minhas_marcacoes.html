@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header" style="margin-bottom:20px">
+    <h1>Marcações</h1>
+    {% if total > 0 %}
+    <span style="font-size:0.78rem;color:var(--muted);font-weight:500">{{ total }} pendente{{ 's' if total != 1 }}</span>
+    {% endif %}
+</div>
+
+{% if grupos %}
+
+{% for data, items in grupos.items() %}
+<div style="margin-bottom:24px">
+
+    {# — Cabeçalho do grupo (data) — #}
+    {% if data == hoje %}
+    <div class="grupo-data-header">Hoje</div>
+    {% elif data == amanha %}
+    <div class="grupo-data-header">Amanhã</div>
+    {% else %}
+    <div class="grupo-data-header">{{ data[8:10] }}/{{ data[5:7] }}/{{ data[:4] }}</div>
+    {% endif %}
+
+    <ul class="marcacoes-lista">
+    {% for a in items %}
+    <li class="marc-item status-{{ a.status }}">
+
+        {# Coluna da hora #}
+        <div class="marc-hora">{{ a.hora }}</div>
+
+        {# Corpo principal #}
+        <div class="marc-body">
+            <div class="marc-cliente">
+                {{ a.cliente }}
+                {% if a.tipo == 'walk-in' %}
+                <span class="badge badge-walkin" style="margin-left:5px">walk-in</span>
+                {% endif %}
+            </div>
+            <div class="marc-servico">{{ a.servico_nome }} · {{ a.duracao_estimada }} min</div>
+            {% if a.notas %}
+            <div class="marc-notas">{{ a.notas }}</div>
+            {% endif %}
+        </div>
+
+        {# Estado / badge #}
+        <div class="marc-estado">
+            {% if a.status == 'em_andamento' %}
+            <span class="badge badge-active">Em curso</span>
+            {% elif a.status == 'agendado' %}
+            <span class="badge badge-agendado">Agendado</span>
+            {% elif a.status == 'walk-in' %}
+            <span class="badge badge-walkin">Walk-in</span>
+            {% endif %}
+        </div>
+
+    </li>
+    {% endfor %}
+    </ul>
+
+</div>
+{% endfor %}
+
+{% else %}
+<div style="text-align:center;padding:60px 0;color:var(--muted)">
+    <div style="font-size:1.6rem;font-weight:800;margin-bottom:8px">—</div>
+    <div style="font-size:0.9rem">Sem marcações pendentes para os próximos dias.</div>
+</div>
+{% endif %}
+
+<style>
+    .grupo-data-header {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--muted);
+        margin-bottom: 8px;
+        padding: 0 2px;
+    }
+    .marcacoes-lista {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .marc-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 14px;
+    }
+    .marc-item.status-em_andamento {
+        border-color: rgba(46,204,113,.35);
+        background: rgba(46,204,113,.05);
+    }
+    .marc-hora {
+        font-size: 1rem;
+        font-weight: 800;
+        color: var(--accent);
+        min-width: 40px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .marc-body {
+        flex: 1;
+        min-width: 0;
+    }
+    .marc-cliente {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 2px;
+    }
+    .marc-servico {
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
+    .marc-notas {
+        font-size: 0.72rem;
+        color: var(--text2);
+        margin-top: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .marc-estado {
+        flex-shrink: 0;
+    }
+    .badge-agendado {
+        background: rgba(255,255,255,.07);
+        color: var(--text2);
+        border: 1px solid var(--border);
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+    }
+</style>
+
+{% endblock %}

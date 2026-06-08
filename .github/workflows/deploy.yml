@@ -1,0 +1,111 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── 1. Testes ───────────────────────────────────────────────────
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Correr testes
+        env:
+          SECRET_KEY: ci-secret-apenas-testes
+        run: python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
+
+  # ── 2. Deploy para PythonAnywhere ──────────────────────────────
+  # Corre apenas em push para main E se os testes passaram
+  deploy:
+    name: Deploy → PythonAnywhere
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    env:
+      PA_USER:   ${{ secrets.PA_USER }}
+      PA_TOKEN:  ${{ secrets.PA_TOKEN }}
+      PA_DOMAIN: ${{ secrets.PA_DOMAIN }}
+      PA_API:    https://www.pythonanywhere.com/api/v0/user/${{ secrets.PA_USER }}
+      REMOTE:    /home/${{ secrets.PA_USER }}/barbearia
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload ficheiros Python principais
+        run: |
+          for f in app.py database.py helpers.py helpers_booking.py helpers_security.py wsgi.py; do
+            [ -f "$f" ] || continue
+            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                 -H "Authorization: Token ${PA_TOKEN}" \
+                 -F "content=@${f}"
+            echo "  ✓ ${f}"
+          done
+
+      - name: Upload módulo db/
+        run: |
+          for f in db/__init__.py db/_conn.py db/barbearia.py db/barbeiros.py db/servicos.py db/agendamentos.py db/relatorios.py db/push.py; do
+            [ -f "$f" ] || continue
+            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                 -H "Authorization: Token ${PA_TOKEN}" \
+                 -F "content=@${f}"
+            echo "  ✓ ${f}"
+          done
+
+      - name: Upload blueprints/
+        run: |
+          for f in blueprints/*.py; do
+            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                 -H "Authorization: Token ${PA_TOKEN}" \
+                 -F "content=@${f}"
+            echo "  ✓ ${f}"
+          done
+
+      - name: Upload templates
+        run: |
+          for f in templates/*.html; do
+            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                 -H "Authorization: Token ${PA_TOKEN}" \
+                 -F "content=@${f}"
+            echo "  ✓ ${f}"
+          done
+
+      - name: Upload static (CSS + JS)
+        run: |
+          for f in static/style.css static/app.js static/sw.js; do
+            [ -f "$f" ] || continue
+            curl -sf -X POST "${PA_API}/files/path${REMOTE}/${f}" \
+                 -H "Authorization: Token ${PA_TOKEN}" \
+                 -F "content=@${f}"
+            echo "  ✓ ${f}"
+          done
+
+      - name: Reload webapp
+        run: |
+          curl -sf -X POST "${PA_API}/webapps/${PA_DOMAIN}/reload/" \
+               -H "Authorization: Token ${PA_TOKEN}"
+          echo "✅ Deploy concluído → https://${PA_DOMAIN}"
+
+      - name: Health check (aguardar 10s + verificar /healthz)
+        run: |
+          sleep 10
+          STATUS=$(curl -sf "https://${PA_DOMAIN}/healthz" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'])")
+          echo "Health: ${STATUS}"
+          [ "${STATUS}" = "ok" ]

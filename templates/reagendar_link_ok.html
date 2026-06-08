@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Marcação reagendada — {{ barbearia.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="login-wrap" style="gap:10px">
+    {% if barbearia.logo %}
+    <div style="margin-bottom:4px">
+        <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+             alt="{{ barbearia.nome }}" style="max-height:60px;max-width:140px;object-fit:contain"
+             class="js-logo-img">
+    </div>
+    {% endif %}
+    <div style="font-size:3rem"></div>
+    <h1 class="login-titulo">Marcação reagendada!</h1>
+
+    <div class="card" style="width:100%;max-width:360px;text-align:left;margin-top:8px">
+        <div style="font-size:0.78rem;color:var(--text2);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Detalhes</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--text2);font-size:0.85rem">Cliente</span>
+                <strong>{{ ag.cliente }}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--text2);font-size:0.85rem">{{ vocab.servico }}</span>
+                <strong>{{ ag.servico_nome }}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--text2);font-size:0.85rem">{{ vocab.profissional }}</span>
+                <strong>{{ ag.barbeiro_nome }}</strong>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+                <span style="color:var(--text2);font-size:0.85rem">Nova data</span>
+                <strong>{{ ag.data }} às {{ ag.hora }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <p style="color:var(--text2);font-size:0.82rem;text-align:center;margin-top:12px">
+        Podes fechar esta página. Até breve na {{ barbearia.nome }}!
+    </p>
+</div>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+</script>
+</body>
+</html>

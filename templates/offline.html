@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Sem ligação — CarecaBarber</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0a;
+            color: #f0f0f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .icon { font-size: 4rem; margin-bottom: 24px; animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.5; }
+        }
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+            color: #fff;
+        }
+        p {
+            color: #999;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            max-width: 320px;
+            margin-bottom: 32px;
+        }
+        .btn {
+            background: #e8c46a;
+            color: #0a0a0a;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 28px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 16px;
+            width: 100%;
+            max-width: 280px;
+        }
+        .btn:active { opacity: 0.8; }
+        .btn-sec {
+            background: transparent;
+            color: #999;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 13px 28px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            width: 100%;
+            max-width: 280px;
+        }
+        .status {
+            margin-top: 24px;
+            font-size: 0.78rem;
+            color: #555;
+        }
+        .online-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #e74c3c;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .online-dot.online { background: #2ecc71; }
+    </style>
+</head>
+<body>
+    <div class="icon"></div>
+    <h1>Sem ligação à internet</h1>
+    <p>
+        A app precisa de ligação para mostrar os agendamentos do dia.
+        Verifica o teu Wi-Fi ou dados móveis e tenta novamente.
+    </p>
+
+    <button class="btn" id="btn-retry">↺ Tentar de novo</button>
+    <a href="/" class="btn-sec">← Voltar ao início</a>
+
+    <div class="status">
+        <span class="online-dot" id="dot"></span>
+        <span id="status-txt">A verificar ligação…</span>
+    </div>
+
+    <script nonce="{{ csp_nonce }}">
+    document.getElementById('btn-retry').addEventListener('click', function() {
+        window.location.reload();
+    });
+
+    function verificarLigacao() {
+        const dot = document.getElementById('dot');
+        const txt = document.getElementById('status-txt');
+        if (navigator.onLine) {
+            dot.classList.add('online');
+            txt.textContent = 'Ligação detectada — a redirecionar…';
+            setTimeout(() => { window.location.href = '/'; }, 800);
+        } else {
+            dot.classList.remove('online');
+            txt.textContent = 'Sem ligação — ' + new Date().toLocaleTimeString('pt-PT');
+        }
+    }
+
+    // Verificar a cada 3 segundos
+    verificarLigacao();
+    const _ivOffline = setInterval(verificarLigacao, 3000);
+    window.addEventListener('pagehide', () => clearInterval(_ivOffline));
+
+    // Redirecionar quando a ligação voltar
+    window.addEventListener('online', () => {
+        setTimeout(() => { window.location.href = document.referrer || '/'; }, 500);
+    });
+    </script>
+</body>
+</html>

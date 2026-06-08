@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Erro — CarecaBarber</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">CarecaBarber</span>
+    </header>
+    <main class="container" style="text-align:center;padding-top:60px">
+        <div style="font-size:3rem;margin-bottom:16px">⚠</div>
+        <h1 style="color:var(--red);margin-bottom:12px">Algo correu mal</h1>
+        <p style="color:var(--text2);max-width:320px;margin:0 auto">{{ msg }}</p>
+    </main>
+</body>
+</html>

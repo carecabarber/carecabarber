@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Marcação — {% if barbearia %}{{ barbearia.nome }}{% else %}CarecaBarber{% endif %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .ag-card {
+            background: var(--card);
+            border-radius: 14px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+        .ag-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            margin-bottom: 16px;
+        }
+        .status-agendado  { background: rgba(59,130,246,.15); color: #60a5fa; }
+        .status-walk-in   { background: rgba(168,85,247,.15);  color: #c084fc; }
+        .status-em_andamento { background: rgba(251,146,60,.15); color: #fb923c; }
+        .status-concluido { background: rgba(34,197,94,.15);  color: #4ade80; }
+        .ag-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 7px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+        .ag-row:last-child { border-bottom: none; }
+        .ag-label { color: var(--text2); }
+        .ag-valor { font-weight: 600; }
+        .valor-input-wrap {
+            margin: 16px 0 20px;
+        }
+        .valor-input-wrap label {
+            display: block;
+            font-size: 0.82rem;
+            color: var(--text2);
+            margin-bottom: 6px;
+        }
+        .valor-input-wrap input {
+            width: 100%;
+            padding: 12px 14px;
+            background: var(--input-bg, #1a1a1a);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 1.1rem;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia and barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% endif %}{% if barbearia %}{{ barbearia.nome }}{% else %}CarecaBarber{% endif %}
+        </span>
+    </header>
+
+    <main class="container" style="padding-top:24px;max-width:480px;margin:0 auto">
+
+        {% if erro %}
+        <div class="login-erro" style="margin-bottom:16px">{{ erro }}</div>
+        {% endif %}
+
+        <div class="ag-card">
+            <!-- Estado -->
+            {% set st = ag.status %}
+            <span class="ag-status status-{{ st }}">
+                {% if st == 'agendado' %}Agendado
+                {% elif st == 'walk-in' %}Walk-in
+                {% elif st == 'em_andamento' %}{{ vocab.mesa_icon }} Em andamento
+                {% elif st == 'concluido' %}Concluído
+                {% elif st == 'cancelado' %}✕ Cancelado
+                {% else %}{{ st }}
+                {% endif %}
+            </span>
+
+            <!-- Detalhes da marcação -->
+            <div class="ag-row">
+                <span class="ag-label">Cliente</span>
+                <span class="ag-valor">{{ ag.nome }}</span>
+            </div>
+            {% if servico %}
+            <div class="ag-row">
+                <span class="ag-label">{{ vocab.servico }}</span>
+                <span class="ag-valor">{{ servico.nome }}</span>
+            </div>
+            {% endif %}
+            {% if barbeiro %}
+            <div class="ag-row">
+                <span class="ag-label">{{ vocab.profissional }}</span>
+                <span class="ag-valor">{{ barbeiro.nome }}</span>
+            </div>
+            {% endif %}
+            <div class="ag-row">
+                <span class="ag-label">Data / Hora</span>
+                <span class="ag-valor">{{ ag.data_hora[:16] | replace('T', ' ') }}</span>
+            </div>
+            {% if ag.status == 'em_andamento' and ag.inicio %}
+            <div class="ag-row">
+                <span class="ag-label">Início</span>
+                <span class="ag-valor">{{ ag.inicio[11:16] }}</span>
+            </div>
+            {% endif %}
+            {% if ag.status == 'concluido' and ag.valor %}
+            <div class="ag-row">
+                <span class="ag-label">Valor cobrado</span>
+                <span class="ag-valor">{{ ag.valor }} {{ moeda_simbolo }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Ações -->
+        {% if ag.status in ('agendado', 'walk-in') %}
+        <form method="post" action="{{ url_for('ag_acao_cliente', token=token) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="acao" value="iniciar">
+            <button type="submit" class="btn btn-primary btn-full" style="font-size:1rem;padding:14px">
+                ▶ Iniciar atendimento
+            </button>
+        </form>
+
+        {% elif ag.status == 'em_andamento' %}
+        <form method="post" action="{{ url_for('ag_acao_cliente', token=token) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="acao" value="terminar">
+            <div class="valor-input-wrap">
+                <label for="valor">Valor cobrado ({{ moeda_simbolo }}) — opcional</label>
+                <input type="number" id="valor" name="valor" min="0" max="999999"
+                       inputmode="numeric" placeholder="Ex: 700" autocomplete="off">
+            </div>
+            <button type="submit" class="btn btn-primary btn-full" style="font-size:1rem;padding:14px;background:var(--green,#22c55e)">
+                Terminar atendimento
+            </button>
+        </form>
+
+        {% elif ag.status == 'concluido' %}
+        <div style="text-align:center;padding:20px 0;color:var(--text2);font-size:0.95rem">
+            Atendimento concluído. Obrigado!
+        </div>
+
+        {% elif ag.status == 'cancelado' %}
+        <div style="text-align:center;padding:20px 0;color:var(--text2);font-size:0.95rem">
+            Esta {{ vocab.agendamento | lower }} foi cancelada.
+        </div>
+        {% endif %}
+
+    </main>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+</script>
+</body>
+</html>

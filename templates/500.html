@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080808">
+    <title>Erro no servidor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .error-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+            text-align: center;
+            padding: 32px 24px;
+        }
+        .error-code {
+            font-size: 5rem;
+            font-weight: 900;
+            color: var(--accent);
+            line-height: 1;
+            margin-bottom: 12px;
+        }
+        .error-msg {
+            font-size: 1.1rem;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        .error-detail {
+            font-size: 0.78rem;
+            color: var(--muted);
+            opacity: .5;
+            margin-bottom: 28px;
+        }
+        .error-btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    </style>
+</head>
+<body>
+    <div class="error-wrap">
+        <div class="error-code">500</div>
+        <div class="error-msg">Ocorreu um erro inesperado.</div>
+        <div class="error-detail">
+            {% if path %}{{ path }}{% endif %}
+            — se o problema persistir, tenta recarregar a página.
+        </div>
+        <div class="error-btns">
+            <button onclick="location.reload()" class="btn btn-primary">↺ Tentar novamente</button>
+            <button onclick="history.back()" class="btn">← Voltar</button>
+            <a href="{{ url_for('login') }}" class="btn">Início</a>
+        </div>
+    </div>
+</body>
+</html>

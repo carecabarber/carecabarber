@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080808">
+    <title>Preços dos Planos — Root</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <style>
+        .back-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            cursor: pointer;
+            transition: color .15s, border-color .15s;
+        }
+        .back-btn:hover { color: var(--text); border-color: var(--text2); }
+
+        .section-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px 20px;
+            margin-bottom: 16px;
+        }
+
+        .precos-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        @media(min-width: 480px) {
+            .precos-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+
+        .alert-ok  { background:#0a2e1a; color:var(--green,#2ecc71); padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+        .alert-err { background:#2e0a0a; color:var(--red,#e74c3c);   padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">Root</span>
+        <div class="user-info">
+            <span class="user-nome">Root</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="back-bar">
+            <a href="{{ url_for('root_dashboard') }}" class="back-btn">← Voltar</a>
+        </div>
+
+        <div class="page-header">
+            <h1>Preços dos Planos</h1>
+        </div>
+
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:20px">
+            Preços globais — aplicam-se a todos os estabelecimentos.
+        </p>
+
+        {% if erro %}
+        <div class="alert-err">{{ erro }}</div>
+        {% endif %}
+        {% if ok %}
+        <div class="alert-ok">{{ ok }}</div>
+        {% endif %}
+
+        <div class="section-card">
+            <form action="{{ url_for('root_definir_precos') }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="_next" value="{{ url_for('root_precos') }}">
+                <div class="precos-grid">
+                    {% for cod, (nome, dias) in planos_def.items() %}
+                    <div class="field">
+                        <label style="font-size:0.75rem;color:var(--muted)">
+                            {{ nome }} <span style="opacity:.5">({{ dias }}d)</span>
+                        </label>
+                        <div style="display:flex;align-items:center;gap:6px">
+                            <input type="number" name="preco_{{ cod }}"
+                                   value="{{ precos.get(cod, 0) }}"
+                                   min="0" step="1"
+                                   style="font-size:0.85rem;padding:7px 10px;width:100%">
+                            <span style="font-size:0.75rem;color:var(--muted);white-space:nowrap">CVE</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="btn btn-primary" style="margin-top:16px;font-size:0.85rem;padding:9px 20px">
+                    Guardar
+                </button>
+            </form>
+        </div>
+    </main>
+
+    <script nonce="{{ csp_nonce }}">
+    (function() {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (token) {
+            document.querySelectorAll('form').forEach(function(f) {
+                if (!f.querySelector('[name="csrf_token"]')) {
+                    const inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                    f.prepend(inp);
+                }
+            });
+        }
+    })();
+    </script>
+</body>
+</html>

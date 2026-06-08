@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Marcação cancelada — {{ barbearia.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% endif %}{{ barbearia.nome }}
+        </span>
+    </header>
+
+    <main class="container" style="text-align:center;padding-top:40px">
+        
+        <h1 style="color:var(--red);margin-bottom:8px">Marcação cancelada</h1>
+        <p style="color:var(--text2);margin-bottom:24px">
+            A tua marcação de <strong>{{ ag.servico_nome }}</strong><br>
+            no dia <strong>{{ ag.data }} às {{ ag.hora }}</strong> foi cancelada.
+        </p>
+        <p style="color:var(--text2);font-size:0.85rem">
+            Se mudares de ideias, liga para {{ barbearia.nome }} para marcar um novo horário.
+        </p>
+    </main>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+</script>
+</body>
+</html>

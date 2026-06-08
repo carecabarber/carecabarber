@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Walk-in — {{ barbeiro.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="login-wrap" style="max-width:420px">
+
+    <!-- Cabeçalho -->
+    <div style="text-align:center;margin-bottom:24px">
+        {% if barbearia.logo %}
+        <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+             alt="{{ barbearia.nome }}" style="max-height:70px;max-width:140px;object-fit:contain;margin-bottom:10px"
+             class="js-logo-img">
+        {% else %}
+        <div style="font-size:2.5rem;margin-bottom:8px">◈</div>
+        {% endif %}
+        <h1 style="font-size:1.3rem;font-weight:800;margin:0 0 4px">{{ barbearia.nome }}</h1>
+        <div style="font-size:0.88rem;color:var(--text2)">{{ vocab.mesa_icon }} {{ barbeiro.nome }}</div>
+    </div>
+
+    <!-- Ecrã: formulário walk-in -->
+    <div id="ecrã-form">
+        <div style="font-size:1rem;font-weight:700;margin-bottom:16px;text-align:center">
+            Iniciar sem marcação
+        </div>
+        <div class="form-card" style="padding:20px">
+            <div class="field" style="margin-bottom:14px">
+                <label>O teu nome</label>
+                <input type="text" id="wi-nome" placeholder="Ex: João Silva"
+                       autocomplete="name" autocapitalize="words"
+                       style="font-size:1rem">
+            </div>
+            <div class="field" style="margin-bottom:18px">
+                <label>{{ vocab.servico }}</label>
+                <select id="wi-servico"
+                        style="background:var(--surface3);border:1px solid var(--border);
+                               border-radius:8px;padding:10px;color:var(--text);font-size:0.95rem;width:100%">
+                    <option value="">Escolhe um {{ vocab.servico | lower }}…</option>
+                    {% for s in servicos %}
+                    <option value="{{ s.id }}" data-duracao="{{ s.duracao_min or 30 }}"
+                            data-preco="{{ s.preco or 0 }}">
+                        {{ s.nome }}{% if s.preco %} — {{ s.preco }} {{ moeda_simbolo }}{% endif %}
+                        (~{{ s.duracao_min or 30 }} min)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="wi-erro" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
+                 border-radius:8px;padding:10px;font-size:0.82rem;color:var(--red);margin-bottom:12px"></div>
+            <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="font-size:1rem;padding:14px">
+                Começar agora
+            </button>
+        </div>
+    </div>
+
+    <!-- Ecrã: serviço em curso -->
+    <div id="ecrã-ativo" style="display:none;text-align:center">
+        <div class="form-card" style="padding:28px 20px">
+            <div style="font-size:3rem;margin-bottom:12px">◈</div>
+            <div style="font-size:1.2rem;font-weight:800;color:var(--accent);margin-bottom:8px">
+                {{ vocab.servico }} em curso!
+            </div>
+            <div id="ativo-info" style="font-size:0.88rem;color:var(--text2);margin-bottom:6px"></div>
+            <div style="font-size:0.78rem;color:var(--text2);margin-bottom:20px">
+                Quando o teu {{ vocab.servico | lower }} acabar, indica o valor e clica em terminar.
+            </div>
+            <div class="field" style="margin-bottom:18px;text-align:left">
+                <label>Valor cobrado ({{ moeda_simbolo }})</label>
+                <input type="number" id="wi-valor" min="0" max="999999"
+                       placeholder="0" autocomplete="off"
+                       style="font-size:1.1rem;text-align:center">
+            </div>
+            <button id="btn-terminar" class="btn btn-full"
+                    style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);
+                           color:var(--red);padding:14px;font-size:0.95rem;margin-bottom:12px">
+                Terminar serviço
+            </button>
+            <div id="ativo-msg" style="font-size:0.85rem;color:#f5c842;min-height:18px"></div>
+        </div>
+    </div>
+
+    <!-- Ecrã: concluído -->
+    <div id="ecrã-fim" style="display:none;text-align:center">
+        <div class="form-card" style="padding:32px 20px">
+            <div style="font-size:3rem;margin-bottom:12px"></div>
+            <div style="font-size:1.2rem;font-weight:800;margin-bottom:8px">Obrigado!</div>
+            <div style="font-size:0.88rem;color:var(--text2);margin-bottom:20px">
+                {{ vocab.servico }} concluído. Volta sempre!
+            </div>
+            <button id="btn-novo-walkin" class="btn btn-outline-small" style="padding:10px 24px">
+                Novo walk-in
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const LS_KEY     = "wi_mesa_sessao";
+    const MESA_TOKEN = {{ mesa_token | tojson }};
+    const _SERVC     = {{ vocab.servico | lower | tojson }};
+    const eForm      = document.getElementById("ecrã-form");
+    const eAtivo     = document.getElementById("ecrã-ativo");
+    const eFim       = document.getElementById("ecrã-fim");
+    const erroDiv    = document.getElementById("wi-erro");
+    const ativoMsg   = document.getElementById("ativo-msg");
+    let _agId = null;
+    let _mesaToken = MESA_TOKEN;  // pode ser sobreposto pelo token guardado na sessão
+
+    function mostrar(ecrã) {
+        [eForm, eAtivo, eFim].forEach(e => e.style.display = "none");
+        ecrã.style.display = "block";
+    }
+
+    function mostrarErro(txt) {
+        erroDiv.textContent = txt;
+        erroDiv.style.display = "block";
+    }
+
+    // Recuperar sessão activa (ex: voltou à página)
+    try {
+        const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+        if (s && s.agId) {
+            _agId = s.agId;
+            _mesaToken = s.mesaToken || MESA_TOKEN;  // usar token guardado — não o do URL atual
+            document.getElementById("ativo-info").textContent = s.nome + " · " + s.servico;
+            const valorInp = document.getElementById("wi-valor");
+            if (valorInp && s.preco > 0) valorInp.value = s.preco;
+            mostrar(eAtivo);
+        }
+    } catch(e) {}
+
+    // Iniciar walk-in
+    document.getElementById("wi-btn-comecar").addEventListener("click", async function() {
+        const nome = document.getElementById("wi-nome").value.trim();
+        const sel  = document.getElementById("wi-servico");
+        const sid  = parseInt(sel.value || "0", 10);
+        erroDiv.style.display = "none";
+        if (!nome || nome.length < 2) { mostrarErro("Escreve o teu nome (mín. 2 letras)."); return; }
+        if (!sid) { mostrarErro("Escolhe um " + _SERVC + "."); return; }
+        this.disabled = true; this.textContent = "A iniciar…";
+        try {
+            const resp = await fetch("/mesa/" + MESA_TOKEN + "/walkin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nome, servico_id: sid })
+            });
+            const r = await resp.json();
+            if (r.ok) {
+                _agId = r.ag_id;
+                // Guardar preço do serviço seleccionado para pré-preencher o campo de valor
+                const selOpt = sel.options[sel.selectedIndex];
+                const preco = selOpt ? parseFloat(selOpt.dataset.preco || "0") || 0 : 0;
+                localStorage.setItem(LS_KEY, JSON.stringify({
+                    agId: _agId, mesaToken: MESA_TOKEN, nome: r.cliente, servico: r.servico_nome, preco: preco
+                }));
+                document.getElementById("ativo-info").textContent = r.cliente + " · " + r.servico_nome;
+                const valorInp = document.getElementById("wi-valor");
+                if (valorInp) valorInp.value = preco > 0 ? preco : "";
+                ativoMsg.textContent = "";
+                mostrar(eAtivo);
+            } else {
+                mostrarErro(r.error || "Erro ao iniciar.");
+            }
+        } catch(e) { mostrarErro("Erro de ligação. Tenta novamente."); }
+        this.disabled = false; this.textContent = "Começar agora";
+    });
+
+    // Terminar serviço
+    document.getElementById("btn-terminar").addEventListener("click", async function() {
+        if (!_agId) return;
+        const valorInput = document.getElementById("wi-valor");
+        const valor = Math.max(0, parseInt(valorInput ? valorInput.value || "0" : "0", 10) || 0);
+        this.disabled = true; this.textContent = "A terminar…";
+        ativoMsg.textContent = "";
+        try {
+            const resp = await fetch("/mesa/" + _mesaToken + "/terminar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ag_id: _agId, valor })
+            });
+            const r = await resp.json();
+            if (r.ok) {
+                localStorage.removeItem(LS_KEY);
+                mostrar(eFim);
+            } else {
+                ativoMsg.textContent = "" + (r.error || "Erro ao terminar.");
+                this.disabled = false; this.textContent = "Terminar serviço";
+            }
+        } catch(e) {
+            ativoMsg.textContent = "Erro de ligação.";
+            this.disabled = false; this.textContent = "Terminar serviço";
+        }
+    });
+
+    // Botão "Novo walk-in" (substitui onclick= inline — CSP)
+    document.getElementById("btn-novo-walkin")?.addEventListener("click", function() {
+        location.reload();
+    });
+
+    // Logo onerror (substitui onerror= inline — CSP)
+    document.querySelectorAll(".js-logo-img").forEach(function(img) {
+        img.addEventListener("error", function() { img.style.display = "none"; });
+    });
+})();
+</script>
+</body>
+</html>

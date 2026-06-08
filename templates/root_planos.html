@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080808">
+    <title>Planos — {{ b.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <style>
+        .back-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: transparent;
+            cursor: pointer;
+            transition: color .15s, border-color .15s;
+        }
+        .back-btn:hover { color: var(--text); border-color: var(--text2); }
+
+        .plano-hero {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 24px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .plano-hero-icon { font-size: 2.8rem; line-height: 1; }
+        .plano-hero-info { flex: 1; min-width: 0; }
+        .plano-hero-nome {
+            font-size: 1.25rem;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+        .plano-hero-sub {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+        .plano-status-big {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+            font-weight: 800;
+            padding: 10px 18px;
+            border-radius: 12px;
+            margin-top: 14px;
+        }
+        .status-ok   { background: rgba(46,204,113,.12); color: #2ecc71; border: 1px solid rgba(46,204,113,.3); }
+        .status-warn { background: rgba(243,156,18,.12);  color: #f39c12; border: 1px solid rgba(243,156,18,.3); }
+        .status-exp  { background: rgba(231,76,60,.12);   color: #e74c3c; border: 1px solid rgba(231,76,60,.3); }
+        .status-sem  { background: rgba(255,255,255,.06); color: #888;    border: 1px solid rgba(255,255,255,.1); }
+
+        .section-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px 20px;
+            margin-bottom: 16px;
+        }
+        .section-title {
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: var(--muted);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .plano-btns {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        @media(min-width: 480px) {
+            .plano-btns { grid-template-columns: repeat(4, 1fr); }
+        }
+        .plano-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 14px 8px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
+            text-align: center;
+            min-height: 70px;
+        }
+        .plano-btn:hover { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
+        .plano-btn .preco-label {
+            font-size: 0.72rem;
+            font-weight: 500;
+            opacity: .7;
+        }
+        .plano-btn:hover .preco-label { opacity: .8; }
+        /* Botão de experiência — estilo distinto (verde/grátis) */
+        .plano-btn-exp {
+            border-color: rgba(46,204,113,.35);
+            background: rgba(46,204,113,.08);
+            color: #2ecc71;
+            grid-column: 1 / -1;   /* ocupa linha completa */
+        }
+        .plano-btn-exp:hover { background: #2ecc71; color: #0a0a0a; border-color: #2ecc71; }
+        /* Badges de plano activo — hero */
+        .status-exp-trial { background: rgba(46,204,113,.1); color: #2ecc71; border: 1px solid rgba(46,204,113,.3); }
+
+        .hist-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 12px;
+            background: rgba(255,255,255,.03);
+            border-radius: 8px;
+            gap: 12px;
+            font-size: 0.78rem;
+        }
+        .hist-row + .hist-row { margin-top: 6px; }
+        .hist-nome { font-weight: 600; color: var(--text); }
+        .hist-ate  { color: var(--muted); }
+        .hist-right { text-align: right; white-space: nowrap; }
+        .hist-preco { color: var(--accent); font-weight: 700; font-size: 0.82rem; }
+        .hist-data  { color: var(--muted); font-size: 0.68rem; margin-top: 2px; }
+
+        .precos-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        @media(min-width: 480px) {
+            .precos-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+
+        .alert-ok  { background:#0a2e1a; color:var(--green,#2ecc71); padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+        .alert-err { background:#2e0a0a; color:var(--red,#e74c3c);   padding:12px 16px; border-radius:8px; margin-bottom:16px; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">Root</span>
+        <div class="user-info">
+            <span class="user-nome">Root</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Voltar -->
+        <div class="back-bar">
+            <a href="{{ url_for('root_dashboard') }}" class="back-btn">← Voltar</a>
+            <span style="font-size:0.82rem;color:var(--muted)">Gestão de Plano</span>
+        </div>
+
+        {% if erro %}
+        <div class="alert-err">{{ erro }}</div>
+        {% endif %}
+        {% if ok %}
+        <div class="alert-ok">{{ ok }}</div>
+        {% endif %}
+
+        <!-- Hero: estado actual do plano -->
+        <div class="plano-hero">
+            <div class="plano-hero-icon"></div>
+            <div class="plano-hero-info">
+                <div class="plano-hero-nome">{{ b.nome }}</div>
+                <div class="plano-hero-sub">ID {{ b.id }} &nbsp;·&nbsp;
+                    {% if b.ativa %}<span style="color:var(--green,#2ecc71)">● Ativo</span>
+                    {% else %}<span style="color:var(--muted)">● Inativo</span>{% endif %}
+                </div>
+
+                {% set is_trial = plano and plano.codigo_plano == plano_exp[0] %}
+                {% if plano %}
+                  {% if is_trial and plano.ativo %}
+                    <div class="plano-status-big status-exp-trial">Experiência activa · sem prazo</div>
+                  {% elif plano.sem_limite %}
+                    <div class="plano-status-big status-sem">∞ Sem limite de plano</div>
+                  {% elif plano.ativo and plano.dias_restantes >= 0 %}
+                    {% if plano.dias_restantes <= 5 %}
+                    <div class="plano-status-big status-warn">⚠ {{ plano.dias_restantes }} dia{{ 's' if plano.dias_restantes != 1 }} restante{{ 's' if plano.dias_restantes != 1 }} · expira {{ plano.expira_em }}</div>
+                    {% else %}
+                    <div class="plano-status-big status-ok">✓ Plano activo · {{ plano.dias_restantes }} dias · válido até {{ plano.expira_em }}</div>
+                    {% endif %}
+                  {% else %}
+                    <div class="plano-status-big status-exp">Plano expirado{% if plano.expira_em and plano.expira_em != '9999-12-31' %} em {{ plano.expira_em }}{% endif %}</div>
+                  {% endif %}
+                {% else %}
+                  <div class="plano-status-big status-exp">Sem plano activo</div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% set plano_ativo = plano and not plano.sem_limite and plano.ativo and plano.dias_restantes is not none and plano.dias_restantes >= 0 %}
+        {% set is_trial = plano and plano.codigo_plano == plano_exp[0] %}
+        {% set pode_cancelar = plano_ativo or (plano and plano.ativo and is_trial) %}
+        {# Escapar nome para uso seguro em confirm() — evita quebra se tiver apóstrofo #}
+        {% set nome_js = b.nome | replace("'", "\\'") | replace('"', '\\"') %}
+
+        <!-- Acções do plano -->
+        {% if plano and plano.sem_limite and not is_trial %}
+        <!-- Sem limite real: bloquear acções acidentais -->
+        <div class="section-card" style="border-color:rgba(255,255,255,.06)">
+            <div class="section-title" style="color:var(--muted)">∞ Conta Sem Limite</div>
+            <p style="font-size:0.82rem;color:var(--muted);margin:0">
+                Este estabelecimento tem acesso ilimitado. Não é necessário registar plano.
+            </p>
+        </div>
+        {% elif pode_cancelar %}
+        <!-- Cancelar plano activo (inclui trial) -->
+        <div class="section-card">
+            <div class="section-title">{{ 'Terminar Experiência' if is_trial else 'Cancelar Plano' }}</div>
+            <p style="font-size:0.82rem;color:var(--muted);margin-bottom:16px">
+                {% if is_trial %}
+                Termina o período de experiência imediatamente. O acesso é suspenso e poderás registar um plano pago.
+                {% else %}
+                Cancela o plano activo imediatamente. O acesso é suspenso e poderás registar um novo plano.
+                {% endif %}
+            </p>
+            <form action="{{ url_for('root_cancelar_plano', id=b.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="_next" value="{{ url_for('root_planos_barbearia', id=b.id) }}">
+                <button type="submit" class="btn btn-danger"
+                        onclick="return confirm('{{ 'Terminar a experiência' if is_trial else 'Cancelar o plano' }} de {{ nome_js }}? O acesso será suspenso imediatamente.')">
+                    {{ 'Terminar Experiência' if is_trial else 'Cancelar Plano Activo' }}
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <!-- Registar novo plano -->
+        <div class="section-card">
+            <div class="section-title">Registar Pagamento</div>
+            <p style="font-size:0.82rem;color:var(--muted);margin-bottom:18px">
+                Escolhe o plano a activar. O período começa hoje.
+            </p>
+            <form action="{{ url_for('root_registar_pagamento', id=b.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="_next" value="{{ url_for('root_planos_barbearia', id=b.id) }}">
+                <div class="plano-btns">
+                    {% for cod, (nome, dias) in planos_def.items() %}
+                    {% set p = precos.get(cod, {}) %}
+                    <button type="submit" name="plano" value="{{ cod }}" class="plano-btn">
+                        {{ nome }}
+                        <span style="font-size:0.7rem;color:inherit;opacity:.6">{{ dias }} dias</span>
+                        {% if p.preco %}
+                        <span class="preco-label">{{ p.preco }} {{ p.moeda }}</span>
+                        {% endif %}
+                    </button>
+                    {% endfor %}
+                    <!-- Plano de experiência gratuito -->
+                    <button type="submit" name="plano" value="{{ plano_exp[0] }}" class="plano-btn plano-btn-exp">
+                        {{ plano_exp[1] }}
+                        <span style="font-size:0.7rem;color:inherit;opacity:.7">Gratuito · sem prazo</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- Preços específicos deste estabelecimento -->
+        {% if not (plano and plano.sem_limite) %}
+        <div class="section-card" style="border-color:rgba(255,255,255,.08)">
+            <div class="section-title">Preços deste Estabelecimento</div>
+            <p style="font-size:0.8rem;color:var(--muted);margin-bottom:16px">
+                Define preços e moeda para <strong>{{ b.nome }}</strong>. Deixa em branco para usar os preços globais.
+            </p>
+            <form action="{{ url_for('root_precos_barbearia', id=b.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="field" style="margin-bottom:14px">
+                    <label style="font-size:0.75rem;color:var(--muted)">Moeda deste estabelecimento</label>
+                    <select name="moeda" style="font-size:0.85rem;padding:8px 10px;
+                            background:var(--surface2,#111);color:var(--text);
+                            border:1px solid var(--border);border-radius:8px;width:100%">
+                        {% for cod, sim, nome_m in moedas %}
+                        <option value="{{ cod }}" {% if moeda_b == cod %}selected{% endif %}>
+                            {{ sim }} — {{ nome_m }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="precos-grid">
+                    {% for cod, (nome, dias) in planos_def.items() %}
+                    {% set p = precos.get(cod, {}) %}
+                    <div class="field">
+                        <label style="font-size:0.75rem;color:var(--muted)">
+                            {{ nome }} <span style="opacity:.5">({{ dias }}d)</span>
+                        </label>
+                        <input type="number" name="preco_{{ cod }}"
+                               value="{{ p.preco or 0 }}"
+                               min="0" step="1"
+                               style="font-size:0.85rem;padding:7px 10px;width:100%">
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="btn btn-primary" style="margin-top:16px;font-size:0.85rem;padding:9px 20px">
+                    Guardar
+                </button>
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- Histórico de pagamentos -->
+        {% if historico %}
+        <div class="section-card">
+            <div class="section-title">Histórico de Pagamentos <span style="opacity:.4;font-weight:400;text-transform:none;letter-spacing:0">({{ historico|length }})</span></div>
+            <div>
+                {% for pg in historico %}
+                <div class="hist-row">
+                    <div>
+                        <span class="hist-nome">{{ pg.nome_plano }}</span>
+                        <span class="hist-ate"> · {{ 'sem prazo' if pg.expira_em == '9999-12-31' else 'válido até ' + pg.expira_em }}</span>
+                    </div>
+                    <div class="hist-right">
+                        {% if pg.preco %}<div class="hist-preco">{{ pg.preco }} {{ pg.moeda or 'ECV' }}</div>{% endif %}
+                        <div class="hist-data">{{ pg.registado_em[:10] }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="section-card" style="text-align:center;color:var(--muted);padding:32px 20px">
+            <div style="font-size:0.82rem">Sem histórico de pagamentos.</div>
+        </div>
+        {% endif %}
+
+    </main>
+
+    <script nonce="{{ csp_nonce }}">
+    (function() {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (token) {
+            document.querySelectorAll('form').forEach(function(f) {
+                if (!f.querySelector('[name="csrf_token"]')) {
+                    const inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                    f.prepend(inp);
+                }
+            });
+        }
+    })();
+    </script>
+</body>
+</html>

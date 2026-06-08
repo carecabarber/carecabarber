@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Mesa — {{ barbeiro.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% else %}{% endif %}{{ barbearia.nome }}
+        </span>
+        <span style="font-size:0.82rem;color:var(--text2);font-weight:600">
+            {{ vocab.mesa_icon }} {{ barbeiro.nome }}
+        </span>
+    </header>
+
+    <main class="container" style="padding-bottom:40px">
+
+        <!-- ── Agendamentos de hoje ─────────────────────── -->
+        <div class="section-title" style="margin:20px 0 12px">Hoje — {{ hoje[8:10] }}/{{ hoje[5:7] }}/{{ hoje[:4] }}</div>
+
+        <div id="lista-ags">
+        {% if agendamentos %}
+            {% for ag in agendamentos %}
+            <div class="card ag-card" id="ag-{{ ag.id }}"
+                 data-id="{{ ag.id }}" data-status="{{ ag.status }}"
+                 data-valor="{{ ag.valor or ag.preco or 0 }}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                    <div>
+                        <div style="font-weight:700;font-size:1rem">{{ ag.cliente }}</div>
+                        <div style="font-size:0.82rem;color:var(--text2);margin-top:2px">
+                            {{ ag.servico_nome or '—' }}
+                            {% if ag.preco %} · {{ ag.preco | moeda }} {{ moeda_simbolo }}{% endif %}
+                        </div>
+                        <div style="font-size:0.78rem;color:var(--text2);margin-top:2px">
+                            {{ ag.data_hora[11:16] }}
+                            {% if ag.status == 'em_andamento' %}
+                            <span class="ag-status-badge" style="color:var(--accent);font-weight:700;margin-left:6px">● Em andamento</span>
+                            {% elif ag.status in ('agendado', 'walk-in') %}
+                            <span class="ag-status-badge" style="color:var(--green);margin-left:6px">
+                                {% if ag.status == 'walk-in' %}Walk-in{% else %}Agendado{% endif %}
+                            </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="ag-btns" style="display:flex;flex-direction:column;gap:6px;min-width:110px">
+                        {% if ag.status in ('agendado', 'walk-in') %}
+                        <button class="btn btn-primary" style="padding:8px 10px;font-size:0.8rem"
+                                data-ag-id="{{ ag.id }}" data-action="iniciar">▶ Iniciar</button>
+                        {% elif ag.status == 'em_andamento' %}
+                        <button class="btn btn-outline-small" style="padding:8px 10px;font-size:0.8rem;color:var(--text);border-color:var(--border)"
+                                data-ag-id="{{ ag.id }}" data-action="terminar">⏹ Terminar</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="card" style="text-align:center;color:var(--text2);padding:32px 16px" id="sem-ags">
+                <div style="font-size:2rem;margin-bottom:8px"></div>
+                Sem marcações para hoje.
+            </div>
+        {% endif %}
+        </div>
+
+        <!-- ── Modal terminar ─────────────────────────── -->
+        <div id="modal-terminar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);
+             z-index:1000;align-items:center;justify-content:center;padding:20px">
+            <div class="card" style="width:100%;max-width:360px">
+                <div style="font-size:1rem;font-weight:700;margin-bottom:16px">⏹ Terminar serviço</div>
+                <div class="field">
+                    <label>Valor cobrado ({{ moeda_simbolo }})</label>
+                    <input type="number" id="input-valor" min="0" max="999999" placeholder="0"
+                           style="font-size:1.1rem;padding:10px 12px">
+                </div>
+                <div style="display:flex;gap:10px;margin-top:8px">
+                    <button class="btn btn-outline-small" style="flex:1;padding:12px"
+                            id="btn-cancelar-terminar">Cancelar</button>
+                    <button class="btn btn-primary" style="flex:1;padding:12px"
+                            id="btn-confirmar-terminar">✔ Confirmar</button>
+                </div>
+                <div id="modal-erro" style="color:var(--red);font-size:0.82rem;margin-top:8px;display:none"></div>
+            </div>
+        </div>
+
+        <!-- ── Walk-in ─────────────────────────────────── -->
+        <div class="section-title" style="margin:28px 0 12px">Walk-in — cliente sem marcação</div>
+        <div class="card" id="card-walkin">
+            <div class="field">
+                <label>Nome do cliente</label>
+                <input type="text" id="wi-nome" placeholder="Nome" maxlength="60"
+                       autocapitalize="words" autocomplete="name"
+                       style="font-size:1rem;padding:10px 12px">
+            </div>
+            <div class="field">
+                <label>{{ vocab.servico }}</label>
+                <select id="wi-servico" style="font-size:1rem;padding:10px 12px">
+                    <option value="">— Escolhe o serviço —</option>
+                    {% for s in servicos %}
+                    <option value="{{ s.id }}">{{ s.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div id="wi-erro" style="color:var(--red);font-size:0.82rem;margin-bottom:8px;display:none"></div>
+            <button class="btn btn-primary btn-full" id="btn-walkin">
+                Registar walk-in
+            </button>
+            <div id="wi-ok" style="display:none;background:rgba(46,204,113,0.12);border:1px solid rgba(46,204,113,0.3);
+                 border-radius:10px;padding:12px;margin-top:10px;text-align:center;
+                 color:var(--green);font-weight:700">
+            </div>
+        </div>
+
+        <!-- ── QR desta mesa (para imprimir) ──────────── -->
+        <div class="section-title" style="margin:28px 0 12px">QR desta mesa</div>
+        <div class="card" style="text-align:center;padding:20px">
+            <p style="font-size:0.8rem;color:var(--text2);margin-bottom:14px">
+                Imprime e coloca na mesa. Clientes e chefe podem iniciar/terminar serviços ao escanear.
+            </p>
+            <div id="qr-container" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
+            <div style="font-size:0.7rem;color:var(--text2);word-break:break-all;margin-bottom:12px" id="qr-url"></div>
+            <div>
+                <button class="btn btn-outline-small" style="padding:8px 18px"
+                        id="btn-imprimir">Imprimir</button>
+            </div>
+        </div>
+    </main>
+
+<!-- qrcode.min.js é servido localmente — 'self' no script-src já o cobre -->
+<script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+'use strict';
+const MESA_TOKEN = {{ mesa_token | tojson }};
+
+// ── Utilitário de escaping ───────────────────────────────────
+function escHtml(s) {
+    return String(s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── Gerar QR code da mesa ───────────────────────────────────
+(function() {
+    const mesaUrl = window.location.origin + "/mesa/" + MESA_TOKEN + "/entrar";
+    document.getElementById("qr-url").textContent = mesaUrl;
+    try {
+        const qr = qrcode(0, "M");
+        qr.addData(mesaUrl);
+        qr.make();
+        document.getElementById("qr-container").innerHTML = qr.createImgTag(4, 4);
+    } catch(e) {
+        document.getElementById("qr-container").textContent = mesaUrl;
+    }
+})();
+
+// ── Logo onerror ─────────────────────────────────────────────
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+
+// ── Estado ──────────────────────────────────────────────────
+let _agTerminar    = null;
+let _processando   = false;   // guard contra cliques duplos
+
+// ── Event delegation nos botões de agendamento ──────────────
+document.getElementById("lista-ags").addEventListener("click", function(e) {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn || _processando) return;
+    const id     = parseInt(btn.dataset.agId, 10);
+    const action = btn.dataset.action;
+    if (action === "iniciar")   iniciarAg(id, btn);
+    else if (action === "terminar") abrirTerminar(id);
+});
+
+// ── Iniciar serviço ─────────────────────────────────────────
+async function iniciarAg(id, btn) {
+    if (_processando) return;
+    _processando = true;
+    const textoOriginal = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+        const r = await fetch("/mesa/" + MESA_TOKEN + "/iniciar", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ag_id: id})
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.ok) {
+            const card = document.getElementById("ag-" + id);
+            if (card) {
+                card.dataset.status = "em_andamento";
+                // Substituir botão Iniciar por Terminar
+                const btnsEl = card.querySelector(".ag-btns");
+                btnsEl.innerHTML = "";
+                const btnT = document.createElement("button");
+                btnT.className = "btn btn-outline-small";
+                btnT.style.cssText = "padding:8px 10px;font-size:0.8rem;color:var(--text);border-color:var(--border)";
+                btnT.dataset.agId = id;
+                btnT.dataset.action = "terminar";
+                btnT.textContent = "⏹ Terminar";
+                btnsEl.appendChild(btnT);
+                // Actualizar badge de estado
+                const badge = card.querySelector(".ag-status-badge");
+                if (badge) {
+                    badge.textContent = "● Em andamento";
+                    badge.style.color = "var(--accent)";
+                    badge.style.fontWeight = "700";
+                }
+            }
+        } else {
+            alert("Erro: " + (d.error || "desconhecido"));
+            btn.disabled = false;
+            btn.textContent = textoOriginal;
+        }
+    } catch(err) {
+        alert("Erro de rede. Tenta novamente.");
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+    }
+    _processando = false;
+}
+
+// ── Modal Terminar ───────────────────────────────────────────
+const _modal = document.getElementById("modal-terminar");
+
+function abrirTerminar(id) {
+    _agTerminar = id;
+    // Pré-preencher com o valor do agendamento (preço do serviço)
+    const card = document.getElementById("ag-" + id);
+    const valorCard = card ? parseInt(card.dataset.valor || "0", 10) : 0;
+    document.getElementById("input-valor").value = valorCard > 0 ? valorCard : "";
+    document.getElementById("modal-erro").style.display = "none";
+    _modal.style.display = "flex";
+    setTimeout(() => document.getElementById("input-valor").focus(), 100);
+}
+function fecharModal() {
+    _modal.style.display = "none";
+    _agTerminar = null;
+    document.getElementById("btn-confirmar-terminar").disabled = false;
+}
+
+document.getElementById("btn-cancelar-terminar").addEventListener("click", fecharModal);
+_modal.addEventListener("click", function(e) { if (e.target === this) fecharModal(); });
+document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && _modal.style.display === "flex") fecharModal();
+});
+
+document.getElementById("btn-confirmar-terminar").addEventListener("click", async function() {
+    if (!_agTerminar || _processando) return;
+    _processando = true;
+    const valor  = Math.max(0, parseInt(document.getElementById("input-valor").value, 10) || 0);
+    const btnC   = this;
+    const erroEl = document.getElementById("modal-erro");
+    btnC.disabled = true;
+    erroEl.style.display = "none";
+    try {
+        const r = await fetch("/mesa/" + MESA_TOKEN + "/terminar", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ag_id: _agTerminar, valor: valor})
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.ok) {
+            const card = document.getElementById("ag-" + _agTerminar);
+            if (card) {
+                card.style.opacity = "0.4";
+                card.querySelector(".ag-btns").innerHTML = "";
+                const badge = card.querySelector(".ag-status-badge");
+                if (badge) {
+                    badge.textContent = "Concluído";
+                    badge.style.color = "var(--green)";
+                    badge.style.fontWeight = "600";
+                }
+            }
+            fecharModal();
+        } else {
+            erroEl.textContent = "" + (d.error || "Erro desconhecido");
+            erroEl.style.display = "block";
+            btnC.disabled = false;
+        }
+    } catch {
+        erroEl.textContent = "Erro de rede. Tenta novamente.";
+        erroEl.style.display = "block";
+        btnC.disabled = false;
+    }
+    _processando = false;
+});
+
+// ── Walk-in ─────────────────────────────────────────────────
+document.getElementById("btn-walkin").addEventListener("click", async function() {
+    const nome   = document.getElementById("wi-nome").value.trim();
+    const sid    = document.getElementById("wi-servico").value;
+    const btn    = this;
+    const erroEl = document.getElementById("wi-erro");
+    erroEl.style.display = "none";
+    if (!nome || nome.length < 2) {
+        erroEl.textContent = "Escreve o nome do cliente.";
+        erroEl.style.display = "block";
+        return;
+    }
+    if (!sid) {
+        erroEl.textContent = "Escolhe o " + {{ vocab.servico | lower | tojson }} + ".";
+        erroEl.style.display = "block";
+        return;
+    }
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "A registar…";
+    try {
+        const r = await fetch("/mesa/" + MESA_TOKEN + "/walkin", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({nome: nome, servico_id: parseInt(sid, 10)})
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.ok) {
+            document.getElementById("wi-nome").value = "";
+            document.getElementById("wi-servico").value = "";
+            const okEl = document.getElementById("wi-ok");
+            okEl.textContent = "Walk-in de " + escHtml(d.cliente) + " iniciado!";
+            okEl.style.display = "block";
+            // Esconder "sem marcações"
+            const semAgs = document.getElementById("sem-ags");
+            if (semAgs) semAgs.style.display = "none";
+            // Adicionar card na lista
+            const lista  = document.getElementById("lista-ags");
+            const novoCard = document.createElement("div");
+            novoCard.className = "card ag-card";
+            novoCard.id = "ag-" + d.ag_id;
+            novoCard.dataset.id = d.ag_id;
+            novoCard.dataset.status = "em_andamento";
+            novoCard.dataset.valor = "0";
+            const btnT = document.createElement("button");
+            btnT.className = "btn btn-outline-small";
+            btnT.style.cssText = "padding:8px 10px;font-size:0.8rem;color:var(--text);border-color:var(--border)";
+            btnT.dataset.agId = d.ag_id;
+            btnT.dataset.action = "terminar";
+            btnT.textContent = "⏹ Terminar";
+            novoCard.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                    <div>
+                        <div style="font-weight:700;font-size:1rem">${escHtml(d.cliente)}</div>
+                        <div style="font-size:0.78rem;color:var(--text2);margin-top:2px">
+                            Walk-in
+                            <span class="ag-status-badge" style="color:var(--accent);font-weight:700;margin-left:6px">● Em andamento</span>
+                        </div>
+                    </div>
+                    <div class="ag-btns" style="display:flex;flex-direction:column;gap:6px;min-width:110px"></div>
+                </div>`;
+            novoCard.querySelector(".ag-btns").appendChild(btnT);
+            lista.appendChild(novoCard);
+            setTimeout(() => { okEl.style.display = "none"; }, 4000);
+        } else {
+            erroEl.textContent = "" + (d.error || "Erro desconhecido");
+            erroEl.style.display = "block";
+        }
+    } catch {
+        erroEl.textContent = "Erro de rede. Tenta novamente.";
+        erroEl.style.display = "block";
+    }
+    btn.disabled = false;
+    btn.textContent = "Registar walk-in";
+});
+
+// ── Botão imprimir ───────────────────────────────────────────
+document.getElementById("btn-imprimir").addEventListener("click", () => window.print());
+
+// ── Auto-reload inteligente ─────────────────────────────────
+// Só recarrega se o utilizador não estiver a preencher o walk-in nem com o modal aberto
+function _podeRecarregar() {
+    if (_modal.style.display === "flex") return false;
+    if (document.getElementById("wi-nome").value.trim()) return false;
+    if (document.getElementById("wi-servico").value) return false;
+    return true;
+}
+const _mesaReloadId = setInterval(function() {
+    if (_podeRecarregar()) location.reload();
+}, 60000);
+window.addEventListener("pagehide", function() {
+    clearInterval(_mesaReloadId);
+}, { once: true });
+</script>
+
+<style>
+@media print {
+    .topbar, #lista-ags, #card-walkin,
+    .section-title:nth-of-type(1), .section-title:nth-of-type(2) { display: none !important; }
+    .section-title:nth-of-type(3) { display: block !important; }
+    main { padding: 0; }
+    .card { box-shadow: none; border: 1px solid #ccc; }
+    #btn-imprimir { display: none !important; }
+}
+</style>
+</body>
+</html>

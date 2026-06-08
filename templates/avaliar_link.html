@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>Avaliar serviço — {{ barbearia.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .star-big { display:flex; gap:10px; justify-content:center; margin:24px 0; }
+        .star-big input[type=radio] { display:none; }
+        .star-big label {
+            font-size:2.8rem; cursor:pointer; color:var(--text3,#444);
+            transition:color .15s, transform .15s;
+        }
+        .star-big input[type=radio]:checked ~ label,
+        .star-big label:hover,
+        .star-big label:hover ~ label { color:#f59e0b; }
+        /* Trick: reverse the star order so CSS sibling selector works */
+        .star-big { flex-direction:row-reverse; justify-content:center; }
+        .star-big label:hover,
+        .star-big label:hover ~ label { transform:scale(1.15); }
+        .av-card {
+            background:var(--surface2,#1a1a1a);
+            border:1px solid var(--border,#2a2a2a);
+            border-radius:14px; padding:16px; margin-bottom:20px; text-align:left;
+        }
+        .av-row { display:flex; justify-content:space-between; padding:7px 0;
+                  border-bottom:1px solid var(--border,#222); font-size:.9rem; }
+        .av-row:last-child { border-bottom:none; }
+        .av-label { color:var(--text2,#888); }
+        .av-val   { font-weight:600; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% endif %}{{ barbearia.nome }}
+        </span>
+    </header>
+
+    <main class="container" style="padding-top:32px;max-width:480px">
+
+        {% if sucesso or ja_avaliou %}
+        <!-- Obrigado -->
+        <div style="text-align:center;padding:40px 0">
+            <div style="font-size:4rem;margin-bottom:12px">★</div>
+            <h1 style="font-size:1.4rem;font-weight:800;color:var(--green,#2ecc71)">
+                Obrigado pela avaliação!
+            </h1>
+            <p style="color:var(--text2);margin-top:8px;font-size:.9rem">
+                A tua opinião ajuda-nos a melhorar.
+            </p>
+        </div>
+
+        {% elif ag.status != 'concluido' %}
+        <!-- Serviço ainda não concluído -->
+        <div style="text-align:center;padding:40px 0">
+            <div style="font-size:3rem;margin-bottom:12px"></div>
+            <h1 style="font-size:1.2rem;font-weight:700">Serviço ainda não concluído</h1>
+            <p style="color:var(--text2);margin-top:8px;font-size:.88rem">
+                Este link ficará disponível assim que o teu atendimento terminar.
+            </p>
+        </div>
+
+        {% else %}
+        <!-- Formulário de avaliação -->
+        <div class="page-header" style="margin-bottom:20px">
+            <h1>Como foi o serviço?</h1>
+        </div>
+
+        <div class="av-card">
+            <div class="av-row">
+                <span class="av-label">{{ vocab.servico }}</span>
+                <span class="av-val">{{ servico.nome if servico else '—' }}</span>
+            </div>
+            {% if barbeiro %}
+            <div class="av-row">
+                <span class="av-label">{{ vocab.mesa_icon }} {{ vocab.profissional }}</span>
+                <span class="av-val">{{ barbeiro.nome }}</span>
+            </div>
+            {% endif %}
+            <div class="av-row">
+                <span class="av-label">Data</span>
+                <span class="av-val">
+                    {{ ag.data_hora[8:10] }}/{{ ag.data_hora[5:7] }}/{{ ag.data_hora[:4] }}
+                    às {{ ag.data_hora[11:16] }}
+                </span>
+            </div>
+        </div>
+
+        {% if erro %}
+        <div style="color:var(--red,#e74c3c);margin-bottom:16px;text-align:center;font-size:.9rem">
+            {{ erro }}
+        </div>
+        {% endif %}
+
+        <form action="" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <p style="text-align:center;color:var(--text2);font-size:.88rem;margin-bottom:4px">
+                Toca numa estrela para avaliar
+            </p>
+
+            <!-- Estrelas (ordem inversa para o truque CSS hover funcionar) -->
+            <div class="star-big">
+                {% for i in [5,4,3,2,1] %}
+                <input type="radio" name="nota" id="star{{ i }}" value="{{ i }}">
+                <label for="star{{ i }}" title="{{ i }} estrela{{ 's' if i > 1 }}">★</label>
+                {% endfor %}
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full">Enviar avaliação</button>
+        </form>
+        {% endif %}
+
+    </main>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+</script>
+</body>
+</html>

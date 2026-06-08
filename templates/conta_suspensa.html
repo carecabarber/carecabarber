@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0a0a">
+    <title>Conta Suspensa</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0a;
+            color: #f0f0f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 24px;
+            text-align: center;
+        }
+        .icon { font-size: 3.5rem; margin-bottom: 24px; }
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+        p {
+            color: #888;
+            font-size: 0.92rem;
+            line-height: 1.65;
+            max-width: 320px;
+            margin-bottom: 28px;
+        }
+        .expira-info {
+            background: rgba(231,76,60,.12);
+            border: 1px solid rgba(231,76,60,.3);
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 0.82rem;
+            color: #e74c3c;
+            margin-bottom: 28px;
+            max-width: 320px;
+        }
+        .btn {
+            background: #e8c46a;
+            color: #0a0a0a;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 28px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            width: 100%;
+            max-width: 280px;
+            margin-bottom: 12px;
+        }
+        .btn:active { opacity: 0.8; }
+        .btn-sec {
+            background: transparent;
+            color: #666;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 13px 28px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            width: 100%;
+            max-width: 280px;
+        }
+    </style>
+</head>
+<body>
+    <div class="icon"></div>
+    <h1>Conta Suspensa</h1>
+    <p>O plano desta barbearia expirou e o acesso foi suspenso.</p>
+
+    {% if plano and plano.expira_em %}
+    <div class="expira-info">
+        Plano expirou em {{ plano.expira_em }}
+    </div>
+    {% endif %}
+
+    <p style="font-size:0.82rem;color:#555;max-width:300px;margin-bottom:28px">
+        Contacta o administrador do sistema para renovar o plano e recuperar o acesso.
+    </p>
+
+    <a href="{{ url_for('logout') }}" class="btn-sec"
+       onclick="this.closest('form') ? null : (document.getElementById('form-logout').submit(); return false)">
+        ← Sair
+    </a>
+
+    <form id="form-logout" action="{{ url_for('logout') }}" method="post" style="display:none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    </form>
+
+    <script nonce="{{ csp_nonce }}">
+    document.querySelector('.btn-sec').addEventListener('click', function(e) {
+        e.preventDefault();
+        document.getElementById('form-logout').submit();
+    });
+    </script>
+</body>
+</html>
