@@ -80,9 +80,11 @@ jobs:
 
       - name: Upload templates
         run: |
+          echo "Aguardar 60s para reset do rate-limit PA..."
+          sleep 60
           pa_upload() {
             local f=$1
-            for attempt in 1 2 3; do
+            for attempt in 1 2 3 4; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${PA_API}/files/path${REMOTE}/${f}" \
                    -H "Authorization: Token ${PA_TOKEN}" \
                    -F "content=@${f}")
@@ -90,19 +92,19 @@ jobs:
                 echo "  ✓ ${f}"
                 return 0
               elif [ "$STATUS" = "429" ]; then
-                echo "  ⏳ ${f} rate-limited, aguardar ${attempt}0s..."
-                sleep $((attempt * 10))
+                echo "  ⏳ ${f} rate-limited, aguardar ${attempt}m..."
+                sleep $((attempt * 60))
               else
                 echo "  ✗ ${f} HTTP ${STATUS}"
                 return 1
               fi
             done
-            echo "  ✗ ${f} falhou após 3 tentativas"
+            echo "  ✗ ${f} falhou após 4 tentativas"
             return 1
           }
           for f in templates/*.html; do
             pa_upload "$f"
-            sleep 1
+            sleep 3
           done
 
       - name: Upload static (CSS + JS)
