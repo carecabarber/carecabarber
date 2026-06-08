@@ -7,7 +7,7 @@
 </div>
 
 {% if erro %}
-<div class="login-erro" style="margin-bottom:16px">⚠️ {{ erro }}</div>
+<div class="login-erro" style="margin-bottom:16px">{{ erro }}</div>
 {% endif %}
 
 <form action="{{ url_for('novo') }}" method="post" class="form-card">
@@ -31,15 +31,19 @@
         <select id="servico_id" name="servico_id" required>
             {% for s in servicos %}
             <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
-                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} ECV{% endif %}
+                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
             </option>
             {% endfor %}
         </select>
     </div>
 
     {% if session.get('role') == 'chefe' and barbeiros %}
+    {% if barbeiros | length == 1 %}
+    {# Solo — auto-seleccionar sem mostrar dropdown #}
+    <input type="hidden" id="barbeiro_id" name="barbeiro_id" value="{{ barbeiros[0].id }}">
+    {% else %}
     <div class="field">
-        <label for="barbeiro_id">Barbeiro</label>
+        <label for="barbeiro_id">{{ vocab.profissional }}</label>
         <select id="barbeiro_id" name="barbeiro_id">
             <option value="">— Qualquer —</option>
             {% for b in barbeiros %}
@@ -48,81 +52,163 @@
         </select>
     </div>
     {% endif %}
+    {% endif %}
 
     <div class="field">
         <label for="data">Data</label>
         <input type="date" id="data" name="data" value="{{ hoje }}" required min="{{ hoje }}">
     </div>
 
-    <div id="slots-wrap" style="display:none">
-        <div class="slots-section-label">Horários disponíveis</div>
+    <!-- Campo de hora oculto — preenchido pelos botões de slot -->
+    <input type="hidden" id="hora" name="hora" value="">
+
+    <!-- Painel de slots -->
+    <div class="slots-panel">
+        <div class="slots-panel-header">
+            <span class="slots-section-label">Horário</span>
+            <span id="hora-badge" class="hora-badge" style="display:none"></span>
+        </div>
+        <div id="slots-prompt" class="slots-prompt">
+            {% if session.get('role') == 'chefe' and barbeiros and barbeiros | length > 1 %}
+            Seleciona um {{ vocab.profissional | lower }} para ver os horários disponíveis
+            {% else %}
+            A carregar horários…
+            {% endif %}
+        </div>
         <div id="slots-list"></div>
         <div id="slots-vazio" class="slots-vazio" style="display:none">
             Sem horários disponíveis neste dia.
         </div>
     </div>
 
-    <div class="field">
-        <label for="hora">Hora</label>
-        <input type="time" id="hora" name="hora" value="{{ agora }}" required>
-    </div>
-
     <div class="duracao-preview">
         ⏱ Estimado: <strong id="dur-label">{{ servicos[0].duracao_min if servicos else 0 }} min</strong>
     </div>
 
-    <button type="submit" class="btn btn-primary btn-full">Agendar</button>
+    <div class="field">
+        <label for="notas">Notas <span style="color:var(--text2);font-size:0.75rem">(opcional)</span></label>
+        <textarea id="notas" name="notas" rows="2" placeholder="Ex: alergia ao produto X, preferências…"
+                  maxlength="300"
+                  style="resize:vertical;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;color:var(--text);font-size:0.9rem;width:100%;box-sizing:border-box;font-family:inherit"></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-full" id="btn-agendar" disabled>Agendar</button>
 </form>
 
-<script>
-const duracoes = { {% for s in servicos %}{{ s.id }}: {{ s.duracao_min }},{% endfor %} };
-// Se não for chefe, usar o próprio ID como barbeiro
+<script nonce="{{ csp_nonce }}">
+const _PROF       = {{ vocab.profissional | lower | tojson }};
+const duracoes    = { {% for s in servicos %}{{ s.id | int }}: {{ s.duracao_min | int }},{% endfor %} };
 const minhaBarbId = {{ (session.get('user_id') | tojson) if session.get('role') != 'chefe' else 'null' }};
 const selS      = document.getElementById("servico_id");
 const selB      = document.getElementById("barbeiro_id");
 const inputData = document.getElementById("data");
 const inputHora = document.getElementById("hora");
 const durLabel  = document.getElementById("dur-label");
-const slotsWrap = document.getElementById("slots-wrap");
 const slotsList = document.getElementById("slots-list");
+const slotsVazio  = document.getElementById("slots-vazio");
+const slotsPrompt = document.getElementById("slots-prompt");
+const horaBadge   = document.getElementById("hora-badge");
+const btnAgendar  = document.getElementById("btn-agendar");
 
 selS.addEventListener("change", () => { durLabel.textContent = (duracoes[selS.value]||0)+" min"; carregarSlots(); });
 selB && selB.addEventListener("change", carregarSlots);
 inputData.addEventListener("change", carregarSlots);
 
-const slotsVazio = document.getElementById("slots-vazio");
+function mostrarPrompt(msg) {
+    slotsPrompt.textContent = msg;
+    slotsPrompt.style.display = "block";
+    slotsList.innerHTML = "";
+    slotsVazio.style.display = "none";
+}
+
+// AbortController activo — cancela fetch anterior quando o utilizador muda barbeiro/data
+let _slotsAbort = null;
 
 function carregarSlots() {
     const bid  = selB ? selB.value : (minhaBarbId || "");
-    const data = inputData.value, sid = selS.value;
-    if (!bid || !data) { slotsWrap.style.display="none"; return; }
-    setSlotLoading(slotsList, slotsWrap);
-    if (slotsVazio) slotsVazio.style.display = "none";
-    fetch(`/api/slots?barbeiro_id=${bid}&data=${data}&servico_id=${sid}`)
-        .then(r=>r.json()).then(slots => {
-            if (!slots.length) {
-                slotsList.innerHTML = "";
-                if (slotsVazio) slotsVazio.style.display = "block";
-                return;
-            }
-            if (slotsVazio) slotsVazio.style.display = "none";
-            slotsList.innerHTML = renderSlots(slots);
-        }).catch(() => { slotsWrap.style.display = "none"; });
+    const data = inputData.value;
+    const sid  = selS.value;
+
+    // Resetar hora e botão sempre que muda filtro
+    inputHora.value = "";
+    horaBadge.style.display = "none";
+    btnAgendar.disabled = true;
+
+    if (!bid) {
+        mostrarPrompt("Seleciona um " + _PROF + " para ver os horários disponíveis");
+        return;
+    }
+    if (!data) {
+        mostrarPrompt("Seleciona uma data para ver os horários disponíveis");
+        return;
+    }
+
+    slotsPrompt.style.display = "none";
+    slotsVazio.style.display = "none";
+
+    // Cancelar fetch anterior em curso (evita race condition de respostas desordenadas)
+    if (_slotsAbort) { _slotsAbort.abort(); }
+    _slotsAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+
+    _fetchSlots(bid, data, sid, 1, _slotsAbort);
 }
 
+function _fetchSlots(bid, data, sid, tentativa, controller) {
+    const maxTentativas = 3;
+    const url = `/api/slots?barbeiro_id=${bid}&data=${data}&servico_id=${sid}`;
+
+    if (tentativa === 1) {
+        slotsList.innerHTML = `<div class="slots-loading"><div class="spinner"></div> A verificar horários…</div>`;
+    } else {
+        slotsList.innerHTML = `<div class="slots-loading"><div class="spinner"></div> A tentar novamente… (${tentativa}/${maxTentativas})</div>`;
+    }
+
+    const opts = controller ? { signal: controller.signal } : {};
+    fetch(url, opts)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(slots => {
+            if (!Array.isArray(slots)) throw new Error("resposta inválida");
+            if (!slots.length) {
+                slotsList.innerHTML = "";
+                slotsVazio.style.display = "block";
+                return;
+            }
+            slotsVazio.style.display = "none";
+            slotsList.innerHTML = renderSlots(slots);
+        })
+        .catch(err => {
+            if (err && err.name === "AbortError") return;  // fetch cancelado intencionalmente
+            if (tentativa < maxTentativas) {
+                // Retry automático após 2 segundos
+                setTimeout(() => _fetchSlots(bid, data, sid, tentativa + 1, controller), 2000);
+            } else {
+                mostrarPrompt("Não foi possível carregar os horários. Tenta novamente.");
+                if (typeof mostrarToast === "function") {
+                    mostrarToast("Erro ao carregar horários. Recarrega a página.", "aviso");
+                }
+            }
+        });
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 function renderSlots(slots) {
     const manha = slots.filter(s => s.hora < "12:00");
     const tarde = slots.filter(s => s.hora >= "12:00");
+    const temEncaixe = slots.some(s => s.tipo === "encaixe");
+    const temOcupado = slots.some(s => s.tipo === "ocupado");
     let html = "";
     function slotBtn(s) {
+        const hora = escHtml(s.hora);
         if (s.tipo === "ocupado") {
             return `<div class="slot-btn slot-ocupado" title="Horário já ocupado">
-                ${s.hora}<span class="slot-ocupado-tag">Ocupado</span>
+                ${hora}<span class="slot-ocupado-tag">Ocupado</span>
             </div>`;
         }
         const enc = s.tipo === "encaixe";
-        return `<button type="button" class="slot-btn${enc?' slot-encaixe':''}" onclick="escolherHora('${s.hora}',this)">
-            ${s.hora}${enc?'<span class="slot-encaixe-tag">encaixe</span>':''}
+        return `<button type="button" class="slot-btn${enc ? ' slot-encaixe' : ''}" data-hora="${hora}">
+            ${hora}${enc ? '<span class="slot-encaixe-tag">Encaixe</span>' : ''}
         </button>`;
     }
     if (manha.length) {
@@ -135,6 +221,13 @@ function renderSlots(slots) {
         html += tarde.map(slotBtn).join("");
         html += `</div>`;
     }
+    // Legenda
+    html += `<div class="slots-legenda">
+        <span class="slots-legenda-item"><span class="slots-legenda-dot livre"></span>Disponível</span>
+        <span class="slots-legenda-item"><span class="slots-legenda-dot selecionado"></span>Selecionado</span>
+        ${temOcupado ? '<span class="slots-legenda-item"><span class="slots-legenda-dot ocupado"></span>Ocupado</span>' : ''}
+        ${temEncaixe ? '<span class="slots-legenda-item"><span class="slots-legenda-dot encaixe"></span>Encaixe</span>' : ''}
+    </div>`;
     return html;
 }
 
@@ -142,7 +235,16 @@ function escolherHora(hora, btn) {
     inputHora.value = hora;
     document.querySelectorAll(".slot-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
+    horaBadge.textContent = "" + hora + " selecionado";
+    horaBadge.style.display = "inline-flex";
+    btnAgendar.disabled = false;
 }
+
+// Event delegation para slot buttons (CSP não permite onclick inline em innerHTML)
+slotsList.addEventListener('click', function(e) {
+    const btn = e.target.closest('.slot-btn:not(.slot-ocupado)[data-hora]');
+    if (btn) escolherHora(btn.dataset.hora, btn);
+});
 
 // Carregar slots no arranque se barbeiro já estiver definido
 if (minhaBarbId || (selB && selB.value)) carregarSlots();

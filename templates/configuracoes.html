@@ -2,22 +2,134 @@
 {% block content %}
 <div class="page-header"><h1>Configurações</h1></div>
 
+{% if plano_info %}
+<div class="form-card" style="margin-bottom:20px">
+    <div style="font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">
+        Estado do Plano
+    </div>
+    {% if plano_info.sem_limite %}
+    <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.4rem">∞</span>
+        <div>
+            <div style="font-weight:700;font-size:0.95rem">Plano ilimitado</div>
+            <div style="font-size:0.78rem;color:var(--muted)">Sem data de expiração</div>
+        </div>
+    </div>
+    {% elif plano_info.dias_restantes is not none and plano_info.dias_restantes >= 0 %}
+    <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.4rem">{% if plano_info.dias_restantes <= 5 %}⚠{% else %}{% endif %}</span>
+        <div>
+            <div style="font-weight:700;font-size:0.95rem;color:{% if plano_info.dias_restantes <= 5 %}var(--red,#e74c3c){% else %}var(--green,#2ecc71){% endif %}">
+                {{ plano_info.dias_restantes }} dia{{ 's' if plano_info.dias_restantes != 1 }} restante{{ 's' if plano_info.dias_restantes != 1 }}
+            </div>
+            <div style="font-size:0.78rem;color:var(--muted)">Válido até {{ plano_info.expira_em }}</div>
+        </div>
+    </div>
+    {% if plano_info.dias_restantes <= 5 %}
+    <div style="margin-top:12px;font-size:0.8rem;color:var(--muted);background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.2);border-radius:8px;padding:10px 14px">
+        ⚠ O plano expira em breve. Contacta o administrador para renovar.
+    </div>
+    {% endif %}
+    {% else %}
+    <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:1.4rem"></span>
+        <div>
+            <div style="font-weight:700;font-size:0.95rem;color:var(--red,#e74c3c)">Plano expirado</div>
+            <div style="font-size:0.78rem;color:var(--muted)">Expirou em {{ plano_info.expira_em }}</div>
+        </div>
+    </div>
+    <div style="margin-top:12px;font-size:0.8rem;color:var(--muted);background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.2);border-radius:8px;padding:10px 14px">
+        Contacta o administrador para renovar o plano.
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Acesso rápido -->
 <section class="config-section">
     <h2 class="section-title">Gestão</h2>
     <div class="config-cards-row">
         <a href="{{ url_for('barbeiros') }}" class="config-nav-card">
-            <span class="config-nav-icon">💈</span>
+            <span class="config-nav-icon"></span>
             <span class="config-nav-label">Equipa</span>
             <span class="config-nav-arrow">›</span>
         </a>
         <a href="{{ url_for('servicos') }}" class="config-nav-card">
-            <span class="config-nav-icon">✂️</span>
-            <span class="config-nav-label">Serviços</span>
+            <span class="config-nav-icon"></span>
+            <span class="config-nav-label">{{ vocab.servicos }}</span>
             <span class="config-nav-arrow">›</span>
         </a>
     </div>
 </section>
+
+<!-- QR dos clientes -->
+{% if barbearia and barbearia.slug %}
+<section class="config-section">
+    <h2 class="section-title">QR dos Clientes</h2>
+    <div class="card" style="text-align:center;padding:20px">
+        <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
+            Partilha este QR com os clientes para marcarem online. Coloca no {{ vocab.estabelecimento | lower }} ou partilha nas redes sociais.
+        </p>
+        <div id="qr-clientes-box" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
+        <div style="font-size:0.72rem;color:var(--text2);word-break:break-all;margin-bottom:12px" id="qr-clientes-url"></div>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <a href="{{ url_for('cliente_entrada', slug=barbearia.slug) }}" target="_blank"
+               class="btn btn-outline-small" style="padding:9px 18px">
+                Abrir link
+            </a>
+            <button class="btn btn-outline-small" id="btn-copiar-link" style="padding:9px 18px">
+                Copiar link
+            </button>
+            <button class="btn btn-outline-small" id="btn-imprimir-qr-clientes" style="padding:9px 18px">
+                Imprimir
+            </button>
+        </div>
+    </div>
+</section>
+<script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const clienteUrl    = window.location.origin + {{ url_for('cliente_entrada', slug=barbearia.slug) | tojson }};
+    const _AGENDAMENTO  = {{ vocab.agendamento | lower | tojson }};
+    document.getElementById("qr-clientes-url").textContent = clienteUrl;
+    try {
+        const qr = qrcode(0, "M");
+        qr.addData(clienteUrl);
+        qr.make();
+        document.getElementById("qr-clientes-box").innerHTML = qr.createImgTag(4, 4);
+    } catch(e) {}
+
+    document.getElementById("btn-copiar-link").addEventListener("click", function() {
+        navigator.clipboard?.writeText(clienteUrl).then(() => {
+            this.textContent = "Copiado!";
+            setTimeout(() => { this.textContent = "Copiar link"; }, 2000);
+        }).catch(() => {
+            prompt("Copia este link:", clienteUrl);
+        });
+    });
+
+    document.getElementById("btn-imprimir-qr-clientes").addEventListener("click", function() {
+        const box  = document.getElementById("qr-clientes-box");
+        const nome = ({{ barbearia.nome | tojson }}).replace(/`/g, "'");
+        const w = window.open("", "_blank", "width=420,height=540");
+        if (!w) { alert("Popup bloqueado. Autoriza popups para imprimir o QR."); return; }
+        w.document.write(`<!DOCTYPE html><html><head><title>QR — ${nome}</title>
+            <style>body{font-family:sans-serif;text-align:center;padding:30px}
+            h2{font-size:1.1rem;margin-bottom:4px}
+            p{font-size:0.75rem;color:#666;margin-bottom:14px}
+            small{font-size:0.65rem;color:#888;word-break:break-all}</style>
+            </head><body>
+            <h2>${nome}</h2>
+            <p>Marca o teu ${_AGENDAMENTO} online</p>
+            ${box.innerHTML}
+            <br><small>${clienteUrl}</small>
+            <script>window.onload=function(){window.print();window.close();}<\/script>
+            </body></html>`);
+        w.document.close();
+    });
+})();
+</script>
+{% endif %}
 
 <!-- Geral -->
 <section class="config-section">
@@ -29,7 +141,7 @@
             <div class="config-card">
                 <div class="config-card-icon">⏱</div>
                 <div class="config-card-body">
-                    <label class="config-card-label">Buffer entre cortes</label>
+                    <label class="config-card-label">Buffer entre {{ vocab.servicos | lower }}</label>
                     <div class="config-card-input">
                         <input type="number" name="buffer_minutos"
                                value="{{ configs.get('buffer_minutos','10') }}"
@@ -39,7 +151,7 @@
                 </div>
             </div>
             <div class="config-card">
-                <div class="config-card-icon">📋</div>
+                <div class="config-card-icon"></div>
                 <div class="config-card-body">
                     <label class="config-card-label">Máx. por dia</label>
                     <div class="config-card-input">
@@ -51,6 +163,55 @@
                 </div>
             </div>
         </div>
+
+        {# ── Moeda ── #}
+        <div class="config-card" style="margin-top:12px">
+            <div class="config-card-icon"></div>
+            <div class="config-card-body" style="flex:1">
+                <label class="config-card-label">Moeda</label>
+                <select name="moeda"
+                        style="background:var(--surface3);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:0.88rem;width:100%;margin-top:4px">
+                    {% set moeda_atual = configs.get('moeda','ECV') %}
+                    {% for cod, sim, label in moedas %}
+                    <option value="{{ cod }}" {{ 'selected' if moeda_atual == cod }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <div style="font-size:0.72rem;color:var(--text2);margin-top:4px">
+                    Símbolo que aparece nos preços e totais em toda a app.
+                </div>
+            </div>
+        </div>
+
+        {# ── Fuso horário da barbearia ── #}
+        <div class="config-card" style="margin-top:12px">
+            <div class="config-card-icon"></div>
+            <div class="config-card-body" style="flex:1">
+                <label class="config-card-label">Fuso horário do {{ vocab.estabelecimento | lower }}</label>
+                <select name="timezone"
+                        style="background:var(--surface3);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:0.88rem;width:100%;margin-top:4px">
+                    {% set tz_atual = configs.get('timezone','Atlantic/Cape_Verde') %}
+                    {% for tz_val, tz_label in [
+                        ('Atlantic/Cape_Verde', 'Cabo Verde (UTC-1)'),
+                        ('Europe/Lisbon',       'Portugal / Lisboa (UTC+0/+1)'),
+                        ('Europe/London',       'Reino Unido (UTC+0/+1)'),
+                        ('Europe/Paris',        'França / Espanha (UTC+1/+2)'),
+                        ('Africa/Dakar',        'Senegal / Dakar (UTC+0)'),
+                        ('Africa/Abidjan',      'Costa do Marfim (UTC+0)'),
+                        ('Africa/Bissau',       'Guiné-Bissau (UTC+0)'),
+                        ('America/Sao_Paulo',   'Brasil / São Paulo (UTC-3)'),
+                        ('America/New_York',    'EUA Leste (UTC-5/-4)'),
+                        ('UTC',                 'UTC (sem fuso)')
+                    ] %}
+                    <option value="{{ tz_val }}" {{ 'selected' if tz_atual == tz_val }}>{{ tz_label }}</option>
+                    {% endfor %}
+                </select>
+                <div style="font-size:0.72rem;color:var(--text2);margin-top:4px">
+                    Usado para calcular horários disponíveis e registar marcações.
+                    Hora actual: <strong id="tz-agora-preview">—</strong>
+                </div>
+            </div>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-full" style="margin-top:12px">Guardar</button>
     </form>
 </section>
@@ -59,7 +220,7 @@
 <section class="config-section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <h2 class="section-title" style="margin-bottom:0">Horário de funcionamento</h2>
-        <button type="button" class="btn btn-outline-small" onclick="copiarHorario()">↓ Copiar Seg</button>
+        <button type="button" class="btn btn-outline-small" id="btn-copiar-horario">↓ Copiar Seg</button>
     </div>
     <form action="{{ url_for('configuracoes') }}" method="post" id="form-horario">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -70,7 +231,7 @@
             <label class="horario-toggle">
                 <input type="checkbox" name="aberto_{{ h.dia_semana }}"
                        {{ 'checked' if not h.fechado }}
-                       onchange="toggleDiaCard({{ h.dia_semana }}, this.checked)">
+                       class="js-dia-toggle" data-dia="{{ h.dia_semana }}">
                 <span class="toggle-pill">
                     <span class="pill-on">● Aberto</span>
                     <span class="pill-off">○ Fechado</span>
@@ -103,7 +264,7 @@
             </div>
             <div class="field">
                 <label>Motivo (opcional)</label>
-                <input type="text" name="motivo_fechado" placeholder="Ex: Feriado">
+                <input type="text" name="motivo_fechado" placeholder="Ex: Feriado" maxlength="300">
             </div>
         </div>
         <button type="submit" class="btn btn-primary btn-full">Adicionar</button>
@@ -117,11 +278,12 @@
                 <div class="item-cliente">{{ d.motivo or 'Dia fechado' }}</div>
                 <div class="item-servico">{{ d.data }}</div>
             </div>
-            <form action="{{ url_for('configuracoes') }}" method="post">
+            <form action="{{ url_for('configuracoes') }}" method="post"
+                  class="js-confirm-form" data-msg="Remover o dia fechado {{ d.data | e }}?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="acao" value="remover_dia">
                 <input type="hidden" name="dia_id" value="{{ d.id }}">
-                <button type="submit" class="btn btn-cancel" style="padding:7px 10px">🗑</button>
+                <button type="submit" class="btn btn-cancel" style="padding:7px 10px"></button>
             </form>
         </li>
         {% endfor %}
@@ -131,13 +293,37 @@
     {% endif %}
 </section>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function toggleDiaCard(dia, aberto) {
     const card  = document.getElementById("hcard-"  + dia);
     const times = document.getElementById("htimes-" + dia);
     if (card)  card.classList.toggle("fechado", !aberto);
     if (times) times.style.display = aberto ? "flex" : "none";
 }
+
+// ── Pré-visualização da hora actual no fuso seleccionado ──
+(function() {
+    const sel = document.querySelector('select[name="timezone"]');
+    const preview = document.getElementById("tz-agora-preview");
+    if (!sel || !preview) return;
+    function atualizarPreview() {
+        try {
+            const now = new Date();
+            const fmt = new Intl.DateTimeFormat('pt-PT', {
+                timeZone: sel.value,
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false
+            });
+            preview.textContent = fmt.format(now);
+        } catch(e) {
+            preview.textContent = "—";
+        }
+    }
+    sel.addEventListener("change", atualizarPreview);
+    atualizarPreview();
+    const _idTzPreview = setInterval(atualizarPreview, 1000);
+    window.addEventListener("pagehide", () => clearInterval(_idTzPreview), { once: true });
+})();
 
 function copiarHorario() {
     const ab0 = document.getElementById("ab-0")?.value;
@@ -152,5 +338,20 @@ function copiarHorario() {
         if (cb && !cb.checked) { cb.checked = true; toggleDiaCard(d, true); }
     }
 }
+// addEventListener (substitui onchange/onclick inline bloqueados pelo CSP)
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('btn-copiar-horario')?.addEventListener('click', copiarHorario);
+    document.querySelectorAll('.js-dia-toggle').forEach(function(cb) {
+        cb.addEventListener('change', function() { toggleDiaCard(parseInt(cb.dataset.dia), cb.checked); });
+    });
+    document.querySelectorAll('.js-confirm-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            (_confirm || function(m){ return Promise.resolve(window.confirm(m)); })(
+                form.dataset.msg || 'Confirmar?'
+            ).then(function(ok) { if (ok) form.submit(); });
+        });
+    });
+});
 </script>
 {% endblock %}

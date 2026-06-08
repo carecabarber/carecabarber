@@ -2,7 +2,10 @@
 {% block content %}
 
 <div class="page-header">
-    <h1>Hoje — {{ agora }}</h1>
+    <h1>Hoje — <span id="relogio-server">{{ agora }}</span></h1>
+    <span style="font-size:0.72rem;color:var(--text2)" title="Hora do servidor — usada nos slots">
+        servidor: {{ agora_iso[11:16] }} <span id="tz-label">({{ tz_barbearia }})</span>
+    </span>
 </div>
 
 <div class="resumo-bar">
@@ -12,7 +15,7 @@
     </div>
     <div class="resumo-sep"></div>
     <div class="resumo-item">
-        <span class="resumo-val">{{ resumo.valor | moeda }} <small>ECV</small></span>
+        <span class="resumo-val">{{ resumo.valor | moeda }} <small>{{ moeda_simbolo }}</small></span>
         <span class="resumo-label">Faturado hoje</span>
     </div>
 </div>
@@ -40,12 +43,12 @@
             </div>
             {% if a.telefone %}
             <div class="contacto-bar">
-                <a href="tel:{{ a.telefone }}" class="btn-contacto">📞 {{ a.telefone }}</a>
-                <a href="https://wa.me/238{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">💬 WhatsApp</a>
+                <a href="tel:{{ a.telefone }}" class="btn-contacto">{{ a.telefone | tel }}</a>
+                <a href="https://wa.me/{{ '238' if a.telefone|replace(' ','')|length == 7 else '' }}{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">WhatsApp</a>
             </div>
             {% endif %}
         </div>
-        <div class="valor-tag">{{ a.valor | moeda }} ECV</div>
+        <div class="valor-tag">{{ a.valor | moeda }} {{ moeda_simbolo }}</div>
     </div>
 
     <div class="cronometro-wrap">
@@ -53,14 +56,26 @@
              data-id="{{ a.id }}"
              data-segundos="{{ a.segundos_decorridos }}"
              data-estimado="{{ a.duracao_estimada * 60 }}">00:00</div>
-        <div class="estimativa">Estimado: {{ a.duracao_estimada }} min</div>
+        <div class="estimativa" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <span>Estimado: {{ a.duracao_estimada }} min</span>
+            {% if a.hora_fim_estimada %}
+            <span style="color:var(--text2)">·</span>
+            <span id="fim-est-{{ a.id }}" style="font-size:0.8rem;color:var(--text2)">
+                Termina ~{{ a.hora_fim_estimada }}
+            </span>
+            {% endif %}
+        </div>
         <div class="alerta-atraso" id="alerta-{{ a.id }}" style="display:none">
-            ⚠️ Tempo estimado ultrapassado!
+            ⚠ Tempo estimado ultrapassado!
         </div>
     </div>
 
-    <button type="button" class="btn btn-terminar"
-            onclick="abrirModal({{ a.id }}, {{ a.cliente | tojson }}, {{ a.duracao_estimada }}, {{ a.servico_nome | tojson }}, {{ a.preco or 0 }})">
+    <button type="button" class="btn btn-terminar js-terminar-btn"
+            data-id="{{ a.id }}"
+            data-cliente="{{ a.cliente | e }}"
+            data-duracao="{{ a.duracao_estimada }}"
+            data-servico="{{ a.servico_nome | e }}"
+            data-preco="{{ a.preco or 0 }}">
         ✓ Terminar atendimento
     </button>
     <form id="form-terminar-{{ a.id }}" action="{{ url_for('terminar', id=a.id) }}" method="post" style="display:none">
@@ -72,18 +87,129 @@
 
 <!-- Lista do dia -->
 <section class="agenda">
-    <h2 class="section-title">Agenda do dia</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h2 class="section-title" style="margin:0">Agenda do dia</h2>
+        <div style="display:flex;gap:6px;align-items:center">
+            <button type="button" class="btn btn-outline-small" id="btn-bloquear" style="font-size:0.75rem;padding:5px 9px"
+                    title="Bloquear um horário (almoço, pausa…)">Bloquear</button>
+            {% if agendamentos %}
+            <div class="tab-toggle" id="view-toggle">
+                <button class="tab-btn tab-btn-active" id="btn-lista">Lista</button>
+                <button class="tab-btn" id="btn-grelha">▦ Grelha</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Formulário de bloqueio de horário ── #}
+    <div id="form-bloquear" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+        <div style="font-size:0.8rem;font-weight:700;color:var(--text2);margin-bottom:10px">Bloquear horário — almoço, pausa, reunião…</div>
+        <form action="{{ url_for('bloquear_horario') }}" method="post" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="data" id="bloqueio-data-hidden">
+            {% if session.get('role') == 'chefe' and barbeiros %}
+            <div class="field" style="flex:1;min-width:120px;margin:0">
+                <label style="font-size:0.75rem">{{ vocab.profissional }}</label>
+                <select name="barbeiro_id" style="padding:7px 10px;font-size:0.82rem">
+                    {% for b in barbeiros %}
+                    <option value="{{ b.id }}">{{ b.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <div class="field" style="width:90px;margin:0">
+                <label style="font-size:0.75rem">Das</label>
+                <button type="button" id="btn-agora-inicio"
+                        title="Preencher com a hora actual"
+                        style="margin-bottom:4px;width:100%;font-size:0.7rem;padding:3px 0;border:1px solid var(--accent);border-radius:5px;background:transparent;color:var(--accent);cursor:pointer;font-weight:600">
+                    ⏱ Agora
+                </button>
+                <input type="time" id="hora_inicio_input" name="hora_inicio" required style="padding:7px 8px;font-size:0.82rem;width:100%;box-sizing:border-box">
+            </div>
+            <div class="field" style="width:90px;margin:0">
+                <label style="font-size:0.75rem">Até</label>
+                <input type="time" name="hora_fim" required style="padding:7px 8px;font-size:0.82rem;width:100%;box-sizing:border-box">
+            </div>
+            <div class="field" style="flex:2;min-width:120px;margin:0">
+                <label style="font-size:0.75rem">Motivo (opcional)</label>
+                <input type="text" name="motivo" placeholder="ex: Almoço" maxlength="100"
+                       style="padding:7px 10px;font-size:0.82rem;width:100%;box-sizing:border-box">
+            </div>
+            <button type="submit" class="btn btn-primary" style="padding:7px 14px;font-size:0.82rem">Bloquear</button>
+        </form>
+    </div>
+
+    {# ── Bloqueios activos ── #}
+    {% if bloqueios %}
+    <ul class="lista-agendamentos" style="margin-bottom:10px">
+        {% for b in bloqueios %}
+        <li class="item-agendamento" style="background:rgba(149,165,166,0.08);border-color:rgba(149,165,166,0.3)">
+            <div class="item-hora" style="color:var(--text2)">
+                {{ b.hora_inicio }}<div style="font-size:0.65rem;color:var(--text2)">{{ b.hora_fim }}</div>
+            </div>
+            <div class="item-body">
+                <div class="item-cliente" style="color:var(--text2)">Bloqueio — {{ b.barbeiro_nome }}</div>
+                {% if b.motivo %}<div class="item-servico">{{ b.motivo }}</div>{% endif %}
+            </div>
+            <div class="item-acoes">
+                <form action="{{ url_for('desbloquear_horario', id=b.id) }}" method="post"
+                      data-confirm="Remover este bloqueio?">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-cancel" title="Remover bloqueio">✕</button>
+                </form>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
 
     {% if agendamentos %}
-    <ul class="lista-agendamentos">
+
+    {# Dados para a grelha (JSON) + hora do servidor para "Linha Agora" #}
+    <script nonce="{{ csp_nonce }}">
+    const _AG_DATA = {{ agendamentos | omit_keys('token_reagendar','token_avaliar','link_reagendar','telefone') | tojson }};
+    const _BARBEIROS_NOMES = {};
+    _AG_DATA.forEach(a => { if (a.barbeiro_nome && a.barbeiro_id) _BARBEIROS_NOMES[a.barbeiro_id] = a.barbeiro_nome; });
+    // _SERVER_NOW já injectado em base.html via context processor
+    </script>
+
+    <!-- Vista grelha horária -->
+    <div id="vista-grelha" style="display:none;overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <div id="grelha-container"></div>
+    </div>
+
+    {# ID do próximo agendado — só destacar se houver alguém em atendimento #}
+    {% if em_andamento %}
+    {% set proximo = agendamentos | selectattr('status','equalto','agendado') | list | first %}
+    {% else %}
+    {% set proximo = none %}
+    {% endif %}
+
+    <ul class="lista-agendamentos" id="vista-lista">
         {% for a in agendamentos %}
-        <li class="item-agendamento status-{{ a.status }}">
+        <li class="item-agendamento status-{{ a.status }}{% if proximo and a.id == proximo.id %} item-proximo{% endif %}">
+            {% if proximo and a.id == proximo.id %}
+            <div style="position:absolute;top:-10px;left:12px">
+                <span style="background:var(--accent);color:#fff;font-size:0.65rem;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:0.03em">
+                    A SEGUIR
+                </span>
+            </div>
+            {% endif %}
             <div class="item-hora">
                 {{ a.hora }}
                 {% if a.tipo == 'walk-in' %}<div style="font-size:0.6rem;color:var(--accent)">walk-in</div>{% endif %}
             </div>
             <div class="item-body">
-                <div class="item-cliente">{{ a.cliente }}</div>
+                <div class="item-cliente">
+                    {{ a.cliente }}
+                    {% if a.num_visitas > 0 %}
+                    {# num_visitas = visitas concluídas anteriores; esta é a (num_visitas+1)ª #}
+                    {% set _vn = a.num_visitas + 1 %}
+                    <span class="badge badge-visita" title="{{ a.num_visitas }} visita{% if a.num_visitas != 1 %}s{% endif %} concluída{% if a.num_visitas != 1 %}s{% endif %} anteriores">
+                        {{- _vn -}}ª v.
+                    </span>
+                    {% endif %}
+                </div>
                 <div class="item-servico">
                     {{ a.servico_nome }}
                     {% if a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
@@ -91,9 +217,12 @@
                 <!-- Telefone com links de contacto -->
                 {% if a.telefone %}
                 <div class="contacto-bar" style="margin-top:4px">
-                    <a href="tel:{{ a.telefone }}" class="btn-contacto">📞 {{ a.telefone }}</a>
-                    <a href="https://wa.me/238{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">💬</a>
+                    <a href="tel:{{ a.telefone }}" class="btn-contacto">{{ a.telefone | tel }}</a>
+                    <a href="https://wa.me/{{ '238' if a.telefone|replace(' ','')|length == 7 else '' }}{{ a.telefone | replace(' ','') }}" target="_blank" class="btn-contacto btn-whatsapp">WA</a>
                 </div>
+                {% endif %}
+                {% if a.notas %}
+                <div class="item-notas" title="{{ a.notas | e }}">{{ a.notas | e }}</div>
                 {% endif %}
                 {% if a.status == 'concluido' and a.duracao_real is not none %}
                 <div class="item-duracao">
@@ -109,16 +238,19 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-iniciar" title="Iniciar atendimento">▶</button>
                 </form>
-                <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">📅</a>
+                <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">↺</a>
+                {% if a.link_reagendar and a.telefone %}
+                {% set _msg_wa = 'Olá ' ~ a.cliente ~ '! A tua marcação de ' ~ a.servico_nome ~ ' é no dia ' ~ a.data ~ ' às ' ~ a.hora ~ '.\nReagendar: ' ~ a.link_reagendar ~ '\nCancelar: ' ~ request.host_url ~ 'cancelar-link/' ~ a.token_reagendar %}
+                <a href="https://wa.me/{{ '238' if a.telefone|replace(' ','')|length == 7 else '' }}{{ a.telefone | replace(' ','') }}?text={{ _msg_wa | urlencode }}"
+                   target="_blank" class="btn btn-reagendar" title="Enviar links via WhatsApp" style="font-size:0.7rem">WA</a>
+                {% endif %}
                 <form action="{{ url_for('cancelar', id=a.id) }}" method="post"
-                      data-nome="{{ a.cliente | e }}"
-                      onsubmit="return confirm('Cancelar marcação de ' + this.dataset.nome + '?')">
+                      data-confirm="Cancelar marcação de {{ a.cliente | e }}?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-cancel" title="Cancelar">✕</button>
                 </form>
                 <form action="{{ url_for('nao_compareceu', id=a.id) }}" method="post"
-                      data-nome="{{ a.cliente | e }}"
-                      onsubmit="return confirm('Marcar ' + this.dataset.nome + ' como não compareceu?')">
+                      data-confirm="Marcar {{ a.cliente | e }} como não compareceu?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-noshow" title="Não compareceu">NC</button>
                 </form>
@@ -135,15 +267,236 @@
         </li>
         {% endfor %}
     </ul>
+
     {% else %}
     <div class="empty-state">
         <p>Nenhum agendamento para hoje.</p>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            <a href="{{ url_for('novo') }}"  class="btn btn-primary">📅 Agendar</a>
-            <a href="{{ url_for('walkin') }}" class="btn btn-walkin">⚡ Walk-in</a>
+            <a href="{{ url_for('novo') }}"  class="btn btn-primary">Agendar</a>
+            <a href="{{ url_for('walkin') }}" class="btn btn-walkin">Walk-in</a>
         </div>
     </div>
     {% endif %}
+
+    {# ── Resumo automático do fim do dia ── #}
+    {% if resumo_fim_dia %}
+    <div style="margin-top:18px;background:linear-gradient(135deg,rgba(46,204,113,0.10) 0%,rgba(212,175,55,0.07) 100%);border:1px solid rgba(46,204,113,0.3);border-radius:14px;padding:16px 18px">
+        <div style="font-size:0.85rem;font-weight:700;color:var(--green);margin-bottom:12px">Dia concluído!</div>
+        <div style="display:flex;gap:0;flex-wrap:wrap">
+            <div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">
+                <div style="font-size:1.5rem;font-weight:800;color:var(--text)">{{ resumo_fim_dia.concluidos }}</div>
+                <div style="font-size:0.7rem;color:var(--text2)">Concluídos</div>
+            </div>
+            {% if resumo_fim_dia.cancelados or resumo_fim_dia.nao_compareceu %}
+            <div style="width:1px;background:var(--border);margin:6px 0"></div>
+            <div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">
+                <div style="font-size:1.5rem;font-weight:800;color:var(--text2)">{{ resumo_fim_dia.cancelados + resumo_fim_dia.nao_compareceu }}</div>
+                <div style="font-size:0.7rem;color:var(--text2)">Faltas/Cancel.</div>
+            </div>
+            {% endif %}
+            <div style="width:1px;background:var(--border);margin:6px 0"></div>
+            <div style="flex:2;min-width:120px;text-align:center;padding:8px 4px">
+                <div style="font-size:1.5rem;font-weight:800;color:var(--accent)">{{ resumo_fim_dia.total_valor | moeda }} <small style="font-size:0.7rem">{{ moeda_simbolo }}</small></div>
+                <div style="font-size:0.7rem;color:var(--text2)">Faturado hoje</div>
+            </div>
+            {% if resumo_fim_dia.media_avaliacao %}
+            <div style="width:1px;background:var(--border);margin:6px 0"></div>
+            <div style="flex:1;min-width:80px;text-align:center;padding:8px 4px">
+                <div style="font-size:1.5rem;font-weight:800;color:#f5c842">{{ resumo_fim_dia.media_avaliacao }}★</div>
+                <div style="font-size:0.7rem;color:var(--text2)">Média ({{ resumo_fim_dia.n_avals }})</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
 </section>
+
+<script nonce="{{ csp_nonce }}">
+// ── Vista de grelha horária ──────────────────────────────────
+const _HORA_INICIO = 7;   // primeira hora da grelha
+const _HORA_FIM    = 21;  // última hora da grelha
+const _PX_MIN      = 2;   // 2px por minuto  →  1h = 120px
+const _PROF        = {{ vocab.profissional | tojson }};
+
+function setVista(v) {
+    try { localStorage.setItem('vista_agenda', v); } catch(e) {}
+    const isGrelha = v === 'grelha';
+    document.getElementById('btn-lista').classList.toggle('tab-btn-active', !isGrelha);
+    document.getElementById('btn-grelha').classList.toggle('tab-btn-active', isGrelha);
+    document.getElementById('vista-lista').style.display   = isGrelha ? 'none' : '';
+    document.getElementById('vista-grelha').style.display  = isGrelha ? 'block' : 'none';
+    if (isGrelha) construirGrelha();
+}
+
+let _grelhaFeita = false;
+function construirGrelha() {
+    if (_grelhaFeita) return;
+    _grelhaFeita = true;
+
+    const totalMin  = (_HORA_FIM - _HORA_INICIO) * 60;
+    const alturaTotal = totalMin * _PX_MIN;
+
+    // Colunas: uma por barbeiro, ou "Todos" se só há 1 nome
+    const barbs = {};
+    _AG_DATA.forEach(a => {
+        const bid  = a.barbeiro_id || 0;
+        const nome = a.barbeiro_nome && a.barbeiro_nome !== '—' ? a.barbeiro_nome : ('Sem ' + _PROF);
+        barbs[bid] = nome;
+    });
+    const colunas = Object.entries(barbs);  // [[id, nome], ...]
+
+    const CORES = {
+        'agendado':       { bg: 'rgba(52,152,219,0.25)',  borda: '#3498db', txt: '#7ecfff' },
+        'em_andamento':   { bg: 'rgba(241,196,15,0.25)',  borda: '#f1c40f', txt: '#f5e642' },
+        'concluido':      { bg: 'rgba(46,204,113,0.18)',  borda: '#27ae60', txt: '#2ecc71' },
+        'cancelado':      { bg: 'rgba(231,76,60,0.15)',   borda: '#e74c3c', txt: '#e74c3c' },
+        'nao_compareceu': { bg: 'rgba(149,165,166,0.15)', borda: '#95a5a6', txt: '#95a5a6' },
+        'walk-in':        { bg: 'rgba(243,156,18,0.22)',  borda: '#e67e22', txt: '#f39c12' },
+    };
+
+    const colW = Math.max(110, Math.floor((window.innerWidth - 44) / colunas.length));
+    const totalW = 44 + colunas.length * colW;
+
+    let html = `<div style="position:relative;min-width:${totalW}px">`;
+
+    // Cabeçalho das colunas
+    html += `<div style="display:flex;margin-left:44px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;background:var(--bg)">`;
+    colunas.forEach(([,nome]) => {
+        html += `<div style="width:${colW}px;flex-shrink:0;text-align:center;padding:6px 4px;font-size:0.75rem;font-weight:700;color:var(--text2);border-left:1px solid var(--border)">${escHtml(nome)}</div>`;
+    });
+    html += `</div>`;
+
+    // Área principal
+    html += `<div style="display:flex;position:relative">`;
+
+    // Eixo de horas (esquerda)
+    html += `<div style="width:44px;flex-shrink:0;position:relative;height:${alturaTotal}px">`;
+    for (let h = _HORA_INICIO; h <= _HORA_FIM; h++) {
+        const top = (h - _HORA_INICIO) * 60 * _PX_MIN;
+        html += `<div style="position:absolute;top:${top}px;left:0;right:0;font-size:0.6rem;color:var(--text2);text-align:right;padding-right:6px;transform:translateY(-50%)">${String(h).padStart(2,'0')}h</div>`;
+    }
+    html += `</div>`;
+
+    // Colunas de agendamentos
+    colunas.forEach(([bid,]) => {
+        const agsDaCols = _AG_DATA.filter(a => (a.barbeiro_id || 0) == bid);
+        html += `<div style="width:${colW}px;flex-shrink:0;position:relative;height:${alturaTotal}px;border-left:1px solid var(--border)">`;
+
+        // Linhas de hora de fundo
+        for (let h = _HORA_INICIO; h <= _HORA_FIM; h++) {
+            const top = (h - _HORA_INICIO) * 60 * _PX_MIN;
+            html += `<div style="position:absolute;top:${top}px;left:0;right:0;height:1px;background:var(--border);opacity:0.5"></div>`;
+        }
+
+        agsDaCols.forEach(a => {
+            const [hh, mm] = (a.hora || '00:00').split(':').map(Number);
+            const minutos  = hh * 60 + mm;
+            const top      = (minutos - _HORA_INICIO * 60) * _PX_MIN;
+            const dur      = a.duracao_estimada || 30;
+            const altura   = Math.max(dur * _PX_MIN, 20);
+            const cor      = CORES[a.status] || CORES['agendado'];
+            const icone    = a.tipo === 'walk-in' ? '' : '';
+
+            if (top < 0 || top > alturaTotal) return;  // fora do intervalo
+
+            html += `<div title="${escHtml(a.cliente)} · ${escHtml(a.servico_nome)} · ${escHtml(a.hora)}" style="
+                position:absolute;
+                top:${top}px;
+                left:3px;right:3px;
+                height:${altura}px;
+                background:${cor.bg};
+                border-left:3px solid ${cor.borda};
+                border-radius:4px;
+                padding:2px 5px;
+                overflow:hidden;
+                cursor:default;
+                z-index:2;
+            ">
+                <div style="font-size:0.62rem;font-weight:700;color:${cor.txt};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${icone}${escHtml(a.hora)} ${escHtml(a.cliente)}</div>
+                ${altura > 30 ? `<div style="font-size:0.55rem;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(a.servico_nome)}</div>` : ''}
+            </div>`;
+        });
+
+        html += `</div>`;
+    });
+
+    // Linha "agora" — usa hora do servidor corrigida pelo offset cliente/servidor
+    const agora = typeof _horaServidor === "function" ? _horaServidor()
+                : (typeof _SERVER_NOW !== "undefined" ? new Date(_SERVER_NOW) : new Date());
+    const minAgora = agora.getHours() * 60 + agora.getMinutes();
+    if (minAgora >= _HORA_INICIO * 60 && minAgora <= _HORA_FIM * 60) {
+        const topAgora = (minAgora - _HORA_INICIO * 60) * _PX_MIN;
+        html += `<div style="position:absolute;top:${topAgora}px;left:44px;right:0;height:2px;background:var(--accent);z-index:5;pointer-events:none">
+            <div style="position:absolute;left:0;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--accent)"></div>
+        </div>`;
+    }
+
+    html += `</div></div>`;
+
+    document.getElementById('grelha-container').innerHTML = html;
+
+    // Scroll para a hora atual
+    const scrollEl = document.getElementById('vista-grelha');
+    const minScroll = Math.max(0, (minAgora - _HORA_INICIO * 60 - 30) * _PX_MIN);
+    setTimeout(() => { scrollEl.scrollTop = minScroll; }, 100);
+}
+
+// Sanitização HTML — evita XSS nos nomes/serviços inseridos via innerHTML na grelha
+function escHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// Restaurar preferência de vista guardada + addEventListener (substitui onclick= inline)
+document.addEventListener('DOMContentLoaded', () => {
+    // Vista lista/grelha
+    const btnLista  = document.getElementById('btn-lista');
+    const btnGrelha = document.getElementById('btn-grelha');
+    if (btnLista)  btnLista.addEventListener('click',  () => setVista('lista'));
+    if (btnGrelha) btnGrelha.addEventListener('click', () => setVista('grelha'));
+    if (btnLista) {
+        try {
+            const v = localStorage.getItem('vista_agenda');
+            if (v === 'grelha') setVista('grelha');
+        } catch(e) {}
+    }
+    // Botão bloquear
+    const btnBloquear = document.getElementById('btn-bloquear');
+    if (btnBloquear) {
+        btnBloquear.addEventListener('click', () => {
+            const f = document.getElementById('form-bloquear');
+            if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+        });
+    }
+    // Preencher data de bloqueio com a data actual do servidor no momento do submit
+    // (evita que fique congelada na data do momento do carregamento da página)
+    const _bloqueioForm = document.querySelector('#form-bloquear form');
+    if (_bloqueioForm) {
+        _bloqueioForm.addEventListener('submit', () => {
+            const _inp = document.getElementById('bloqueio-data-hidden');
+            if (_inp) _inp.value = _horaServidor().toISOString().slice(0, 10);
+        });
+    }
+    // Botão "⏱ Agora" — preenche hora_inicio com a hora actual do servidor
+    document.getElementById('btn-agora-inicio')?.addEventListener('click', () => {
+        const d   = _horaServidor();
+        const hh  = String(d.getHours()).padStart(2, '0');
+        const mm  = String(d.getMinutes()).padStart(2, '0');
+        const inp = document.getElementById('hora_inicio_input');
+        if (inp) { inp.value = hh + ':' + mm; inp.focus(); }
+    });
+    // Botões "Terminar atendimento" — event delegation
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.js-terminar-btn');
+        if (btn) abrirModalBtn(btn);
+    });
+});
+</script>
+
 
 {% endblock %}

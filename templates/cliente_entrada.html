@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>{{ barbearia.nome }} — Marcar Corte</title>
+    <title>{{ barbearia.nome }} — {{ vocab.agendamento }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -15,14 +16,13 @@
         {% if barbearia.logo %}
         <div class="login-logo">
             <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
-                 alt="{{ barbearia.nome }}" style="max-height:80px;max-width:160px;object-fit:contain">
+                 alt="{{ barbearia.nome }}" style="max-height:80px;max-width:160px;object-fit:contain"
+                 class="js-logo-img">
         </div>
-        {% else %}
-        <div class="login-logo">✂️</div>
         {% endif %}
         <h1 class="login-titulo">{{ barbearia.nome }}</h1>
         <p style="color:var(--text2);font-size:0.88rem;margin-bottom:24px;text-align:center">
-            Entra com o teu nome e telemóvel para marcares o teu corte.
+            Entra com o teu nome e telemóvel para marcares o teu {{ vocab.servico | lower }}.
         </p>
 
         <form action="{{ url_for('cliente_entrada', slug=barbearia.slug) }}" method="post" class="form-card">
@@ -34,7 +34,7 @@
             <div class="field">
                 <label for="nome">Nome</label>
                 <input type="text" id="nome" name="nome"
-                       placeholder="Ex: João Silva" required
+                       placeholder="Ex: João Silva" required maxlength="80"
                        autocapitalize="words" autocomplete="name">
             </div>
 
@@ -42,15 +42,298 @@
                 <label for="telefone">Telemóvel</label>
                 <input type="tel" id="telefone" name="telefone"
                        placeholder="Ex: 9911234" required
+                       pattern="[0-9 +\(\)\-]{7,15}" maxlength="15"
                        autocomplete="tel" inputmode="tel">
             </div>
 
             <button type="submit" class="btn btn-primary btn-full">Entrar</button>
         </form>
 
+        <div style="margin-top:8px;text-align:center">
+            <div style="display:flex;align-items:center;gap:10px;margin:16px 0 14px">
+                <div style="flex:1;height:1px;background:var(--border)"></div>
+                <span style="font-size:0.72rem;color:var(--text2);font-weight:600">ou</span>
+                <div style="flex:1;height:1px;background:var(--border)"></div>
+            </div>
+            <button id="btn-walkin-scan" class="btn btn-outline-small"
+                    style="padding:12px 20px;font-size:0.9rem;width:100%">
+                Walk-in — escanear QR do {{ vocab.profissional | lower }}
+            </button>
+        </div>
+
         <p class="login-link">
-            És barbeiro? <a href="{{ url_for('login') }}">Login da equipa</a>
+            És {{ vocab.profissional | lower }}? <a href="{{ url_for('login') }}">Login da equipa</a>
         </p>
     </div>
+
+    <!-- Modal Scanner Walk-in -->
+    <div id="wi-modal" style="display:none;position:fixed;inset:0;z-index:9999;
+         background:rgba(0,0,0,0.95);flex-direction:column;align-items:center;justify-content:center;padding:16px">
+
+        <!-- Ecrã 1: câmara -->
+        <div id="wi-ecrã-scan" style="width:100%;max-width:380px;text-align:center">
+            <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px">
+                Aponta para o QR da mesa do {{ vocab.profissional | lower }}
+            </div>
+            <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:1;max-height:300px">
+                <video id="wi-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+                    <div style="width:180px;height:180px;border:3px solid #f5c842;border-radius:12px;
+                                box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
+                </div>
+            </div>
+            <div id="wi-scan-msg" style="margin-top:12px;font-size:0.85rem;color:#f5c842;min-height:18px"></div>
+            <button id="wi-fechar-scan" style="margin-top:14px;background:none;border:1px solid rgba(255,255,255,0.3);
+                    color:#fff;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer">Cancelar</button>
+        </div>
+
+        <!-- Ecrã 2: formulário walk-in -->
+        <div id="wi-ecrã-form" style="display:none;width:100%;max-width:380px">
+            <div style="background:var(--surface2);border-radius:16px;padding:20px">
+                <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px" id="wi-barbeiro-nome"></div>
+                <div style="font-size:0.78rem;color:var(--text2);margin-bottom:18px" id="wi-barbearia-nome"></div>
+                <div class="field" style="margin-bottom:12px">
+                    <label>O teu nome</label>
+                    <input type="text" id="wi-nome" placeholder="Ex: João Silva" autocomplete="name" autocapitalize="words">
+                </div>
+                <div class="field" style="margin-bottom:18px">
+                    <label>{{ vocab.servico }}</label>
+                    <select id="wi-servico" style="background:var(--surface3);border:1px solid var(--border);
+                            border-radius:8px;padding:10px;color:var(--text);font-size:0.9rem;width:100%">
+                        <option value="">Escolhe um {{ vocab.servico | lower }}…</option>
+                    </select>
+                </div>
+                <div id="wi-form-msg" style="font-size:0.82rem;color:var(--red);margin-bottom:10px;display:none"></div>
+                <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="margin-bottom:10px">
+                    Começar agora
+                </button>
+                <button id="wi-fechar-form" style="width:100%;background:none;border:1px solid var(--border);
+                        color:var(--text2);padding:10px;border-radius:10px;font-size:0.88rem;cursor:pointer">Cancelar</button>
+            </div>
+        </div>
+
+        <!-- Ecrã 3: serviço em curso -->
+        <div id="wi-ecrã-ativo" style="display:none;width:100%;max-width:380px;text-align:center">
+            <div style="background:var(--surface2);border-radius:16px;padding:28px 20px">
+                <div style="font-size:2rem;margin-bottom:12px;opacity:.5">{{ vocab.mesa_icon }}</div>
+                <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:6px">{{ vocab.servico }} em curso</div>
+                <div style="font-size:0.85rem;color:var(--text2);margin-bottom:6px" id="wi-ativo-info"></div>
+                <div style="font-size:0.78rem;color:var(--text2);margin-bottom:24px">
+                    Quando acabar, escaneia novamente o QR do {{ vocab.profissional | lower }} para terminar.
+                </div>
+                <button id="wi-btn-terminar-ativo" class="btn btn-full"
+                        style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:var(--red);padding:14px">
+                    Escanear QR para terminar
+                </button>
+                <div id="wi-ativo-msg" style="margin-top:12px;font-size:0.82rem;color:#f5c842;min-height:18px"></div>
+                <button id="wi-fechar-ativo" style="margin-top:12px;width:100%;background:none;border:1px solid var(--border);
+                        color:var(--text2);padding:10px;border-radius:10px;font-size:0.88rem;cursor:pointer">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+<script src="{{ url_for('static', filename='jsqr.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+const _PROF      = {{ vocab.profissional | lower | tojson }};
+const _MESA_ICON = {{ vocab.mesa_icon | tojson }};
+const _SERVC     = {{ vocab.servico | lower | tojson }};
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+
+// ── Walk-in via QR ────────────────────────────────────────────
+(function() {
+    const LS_KEY = "wi_cliente_sessao";   // igual a cliente_home.html (sessão partilhada entre páginas)
+
+    const modal       = document.getElementById("wi-modal");
+    const ecrãScan    = document.getElementById("wi-ecrã-scan");
+    const ecrãForm    = document.getElementById("wi-ecrã-form");
+    const ecrãAtivo   = document.getElementById("wi-ecrã-ativo");
+    const video       = document.getElementById("wi-video");
+    const scanMsg     = document.getElementById("wi-scan-msg");
+    const formMsg     = document.getElementById("wi-form-msg");
+    const ativoMsg    = document.getElementById("wi-ativo-msg");
+
+    let _stream = null, _rafId = null;
+    let _mesaToken = null, _agId = null, _processando = false, _modoTerminar = false;
+    const _canvas = document.createElement("canvas");
+    const _ctx    = _canvas.getContext("2d", { willReadFrequently: true });
+
+    // ── Abrir/fechar modal ──
+    function mostrarEcrã(ecrã) {
+        [ecrãScan, ecrãForm, ecrãAtivo].forEach(e => e.style.display = "none");
+        ecrã.style.display = "block";
+        modal.style.display = "flex";
+    }
+    function fecharModal() {
+        pararCamera();
+        modal.style.display = "none";
+        _modoTerminar = false;
+    }
+
+    document.getElementById("wi-fechar-scan").addEventListener("click", fecharModal);
+    document.getElementById("wi-fechar-form").addEventListener("click", fecharModal);
+    document.getElementById("wi-fechar-ativo").addEventListener("click", fecharModal);
+
+    // ── Câmara ──
+    function pararCamera() {
+        if (_rafId)  { cancelAnimationFrame(_rafId); _rafId = null; }
+        if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+        video.srcObject = null;
+        _processando = false;
+    }
+
+    async function abrirCamera() {
+        pararCamera();
+        scanMsg.textContent = "";
+        try {
+            _stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment", width: { ideal: 1280 } }
+            });
+            video.srcObject = _stream;
+            await video.play();
+            _rafId = requestAnimationFrame(scanLoop);
+        } catch(e) {
+            scanMsg.textContent = "Câmara indisponível: " + e.message;
+        }
+    }
+
+    function scanLoop() {
+        if (!_stream || _processando) { _rafId = requestAnimationFrame(scanLoop); return; }
+        if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+            _canvas.width = video.videoWidth; _canvas.height = video.videoHeight;
+            _ctx.drawImage(video, 0, 0);
+            const imageData = _ctx.getImageData(0, 0, _canvas.width, _canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code) {
+                const match = code.data.match(/\/mesa\/([A-Za-z0-9_-]+)/);
+                if (match) {
+                    _processando = true;
+                    _mesaToken   = match[1];
+                    pararCamera();
+                    _modoTerminar ? terminarServico() : carregarInfo();
+                    return;
+                } else {
+                    scanMsg.textContent = "QR não reconhecido. Aponta para o QR da mesa do " + _PROF + ".";
+                    setTimeout(() => { if (!_processando) scanMsg.textContent = ""; }, 2500);
+                }
+            }
+        }
+        _rafId = requestAnimationFrame(scanLoop);
+    }
+
+    // ── Info do barbeiro ──
+    async function carregarInfo() {
+        scanMsg.textContent = "QR lido! A carregar…";
+        try {
+            const r = await fetch("/mesa/" + _mesaToken + "/info");
+            const d = await r.json();
+            if (!d.ok) { scanMsg.textContent = "" + d.error; _processando = false; return; }
+
+            document.getElementById("wi-barbeiro-nome").textContent = _MESA_ICON + " " + d.barbeiro;
+            document.getElementById("wi-barbearia-nome").textContent = d.barbearia;
+            const sel = document.getElementById("wi-servico");
+            sel.innerHTML = '<option value="">Escolhe um ' + _SERVC + '…</option>';
+            d.servicos.forEach(s => {
+                const o = document.createElement("option");
+                o.value = s.id;
+                o.textContent = s.nome + (s.preco ? " — " + s.preco + " {{ moeda_simbolo }}" : "");
+                sel.appendChild(o);
+            });
+            document.getElementById("wi-nome").value = "";
+            formMsg.style.display = "none";
+            mostrarEcrã(ecrãForm);
+        } catch(e) {
+            scanMsg.textContent = "Erro de ligação.";
+            _processando = false;
+        }
+    }
+
+    // ── Submeter walk-in ──
+    document.getElementById("wi-btn-comecar").addEventListener("click", async function() {
+        const nome = document.getElementById("wi-nome").value.trim();
+        const sid  = parseInt(document.getElementById("wi-servico").value || "0");
+        if (!nome || nome.length < 2) { mostrarErro("Escreve o teu nome (mín. 2 letras)."); return; }
+        if (!sid) { mostrarErro("Escolhe um " + _SERVC + "."); return; }
+        this.disabled = true; this.textContent = "A iniciar…";
+        formMsg.style.display = "none";
+        try {
+            const resp = await fetch("/mesa/" + _mesaToken + "/walkin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nome, servico_id: sid })
+            });
+            const r = await resp.json();
+            if (r.ok) {
+                _agId = r.ag_id;
+                localStorage.setItem(LS_KEY, JSON.stringify({
+                    agId: _agId, mesaToken: _mesaToken,
+                    nome: r.cliente, servico: r.servico_nome
+                }));
+                mostrarAtivo(r.cliente, r.servico_nome);
+            } else {
+                mostrarErro(r.error || "Erro ao iniciar.");
+            }
+        } catch(e) { mostrarErro("Erro de ligação."); }
+        this.disabled = false; this.textContent = "Começar agora";
+    });
+
+    function mostrarErro(txt) {
+        formMsg.textContent = txt;
+        formMsg.style.display = "block";
+    }
+
+    // ── Ecrã ativo ──
+    function mostrarAtivo(nome, servico) {
+        document.getElementById("wi-ativo-info").textContent = nome + " · " + servico;
+        ativoMsg.textContent = "";
+        mostrarEcrã(ecrãAtivo);
+    }
+
+    // ── Terminar serviço ──
+    document.getElementById("wi-btn-terminar-ativo").addEventListener("click", function() {
+        _modoTerminar = true;
+        mostrarEcrã(ecrãScan);
+        abrirCamera();
+    });
+
+    async function terminarServico() {
+        ativoMsg.textContent = "QR lido! A terminar…";
+        mostrarEcrã(ecrãAtivo);
+        try {
+            const _valorInp = document.getElementById("wi-ativo-valor");
+            const _valor = Math.max(0, parseInt(_valorInp ? _valorInp.value || "0" : "0", 10) || 0);
+            const resp = await fetch("/mesa/" + _mesaToken + "/terminar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ag_id: _agId, valor: _valor })
+            });
+            const r = await resp.json();
+            if (r.ok) {
+                localStorage.removeItem(LS_KEY);
+                ativoMsg.textContent = "Serviço concluído. Obrigado.";
+                setTimeout(fecharModal, 2000);
+            } else {
+                ativoMsg.textContent = "" + (r.error || "Erro ao terminar.");
+            }
+        } catch(e) {
+            ativoMsg.textContent = "Erro de ligação.";
+        }
+        _processando = false;
+    }
+
+    // ── Botão principal ──
+    document.getElementById("btn-walkin-scan").addEventListener("click", function() {
+        // Ver se já tem sessão ativa
+        try {
+            const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+            if (s) { _agId = s.agId; _mesaToken = s.mesaToken; mostrarAtivo(s.nome, s.servico); return; }
+        } catch(e) {}
+        _modoTerminar = false;
+        mostrarEcrã(ecrãScan);
+        abrirCamera();
+    });
+})();
+</script>
 </body>
 </html>

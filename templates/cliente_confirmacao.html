@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Marcação confirmada — {{ barbearia.nome }}</title>
@@ -15,17 +16,21 @@
         <span class="logo">
             {% if barbearia.logo %}
             <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
-                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px">
-            {% else %}✂️ {% endif %}{{ barbearia.nome }}
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% endif %}{{ barbearia.nome }}
         </span>
         <div class="user-info">
-            <span class="user-nome">👤 {{ session.get('user_nome', '') }}</span>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+            <span class="user-nome">{{ session.get('user_nome', '') }}</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
         </div>
     </header>
 
     <main class="container" style="text-align:center;padding-top:40px">
-        <div style="font-size:4rem;margin-bottom:16px">✅</div>
+        <div style="font-size:4rem;margin-bottom:16px"></div>
         <h1 style="font-size:1.4rem;font-weight:800;color:var(--green);margin-bottom:8px">Marcação confirmada!</h1>
         <p style="color:var(--text2);font-size:0.9rem;margin-bottom:32px">Até já, {{ session.get('user_nome','') }}!</p>
 
@@ -33,20 +38,20 @@
             <div class="section-title" style="margin-bottom:14px">Detalhes da marcação</div>
 
             <div class="confirm-row">
-                <span class="confirm-label">✂️ Serviço</span>
+                <span class="confirm-label">{{ vocab.servico }}</span>
                 <span class="confirm-val">{{ servico.nome if servico else '—' }}</span>
             </div>
             <div class="confirm-row">
-                <span class="confirm-label">📅 Data</span>
+                <span class="confirm-label">Data</span>
                 <span class="confirm-val">{{ ag.data_hora[8:10] }}/{{ ag.data_hora[5:7] }}/{{ ag.data_hora[:4] }}</span>
             </div>
             <div class="confirm-row">
-                <span class="confirm-label">🕐 Hora</span>
+                <span class="confirm-label">Hora</span>
                 <span class="confirm-val">{{ ag.data_hora[11:16] }}</span>
             </div>
             {% if barbeiro %}
             <div class="confirm-row">
-                <span class="confirm-label">💈 Barbeiro</span>
+                <span class="confirm-label">{{ vocab.profissional }}</span>
                 <span class="confirm-val">{{ barbeiro.nome }}</span>
             </div>
             {% endif %}
@@ -56,13 +61,59 @@
             </div>
             {% if servico and servico.preco %}
             <div class="confirm-row">
-                <span class="confirm-label">💰 Valor</span>
+                <span class="confirm-label">Valor</span>
                 <span class="confirm-val" style="color:var(--accent);font-weight:700">
-                    {{ servico.preco | moeda }} ECV
+                    {{ servico.preco | moeda }} {{ moeda_simbolo }}
                 </span>
             </div>
             {% endif %}
         </div>
+
+        {% if barbeiro and barbeiro.mesa_token %}
+        <div style="background:rgba(99,179,237,0.08);border:1px solid rgba(99,179,237,0.25);
+                    border-radius:12px;padding:16px;margin-bottom:16px;text-align:center">
+            <div style="font-size:.85rem;font-weight:700;margin-bottom:4px">Check-in na mesa do {{ vocab.profissional | lower }}</div>
+            <div style="font-size:.78rem;color:var(--text2);margin-bottom:12px">
+                Ao chegares, escaneia o QR na mesa de <strong>{{ barbeiro.nome }}</strong>
+                para iniciar o teu {{ vocab.servico | lower }}.
+            </div>
+            <div id="qr-barbeiro" style="display:inline-block;background:#fff;padding:8px;border-radius:8px;margin-bottom:10px"></div>
+        </div>
+        <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+        <script nonce="{{ csp_nonce }}">
+        (function() {
+            const mesaUrl = window.location.origin + "/mesa/" + {{ barbeiro.mesa_token | tojson }} + "/entrar";
+            try {
+                const qr = qrcode(0, "M");
+                qr.addData(mesaUrl);
+                qr.make();
+                document.getElementById("qr-barbeiro").innerHTML = qr.createImgTag(3, 3);
+            } catch(e) {
+                document.getElementById("qr-barbeiro").innerHTML =
+                    '<a href="' + mesaUrl + '" style="font-size:0.75rem;color:#555;word-break:break-all">' + mesaUrl + '</a>';
+            }
+        })();
+        </script>
+        {% endif %}
+
+        {% if ag.token_avaliar and ag.status not in ('agendado', 'walk-in', 'em_andamento') %}
+        <div style="background:rgba(245,200,66,0.09);border:2px solid rgba(245,200,66,0.35);
+                    border-radius:14px;padding:18px 16px;margin-bottom:16px;text-align:center">
+            <div style="font-size:2rem;margin-bottom:6px">★</div>
+            <div style="font-size:1rem;font-weight:700;color:#f5c842;margin-bottom:4px">
+                Gostaste do {{ vocab.servico | lower }}?
+            </div>
+            <div style="font-size:0.8rem;color:var(--text2);margin-bottom:12px">
+                A tua avaliação ajuda o {{ vocab.profissional | lower }} a melhorar!
+            </div>
+            <a href="{{ url_for('avaliar_link', token=ag.token_avaliar) }}"
+               style="display:inline-block;background:#f5c842;color:#1a1a1a;
+                      font-weight:700;font-size:0.95rem;padding:11px 28px;
+                      border-radius:10px;text-decoration:none;letter-spacing:0.02em">
+                ★ Avaliar agora
+            </a>
+        </div>
+        {% endif %}
 
         <a href="{{ url_for('cliente_home', slug=barbearia.slug) }}"
            class="btn btn-primary btn-full">Ver as minhas marcações</a>
@@ -72,5 +123,10 @@
             + Nova marcação
         </a>
     </main>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll(".js-logo-img").forEach(function(img) {
+    img.addEventListener("error", function() { img.style.display = "none"; });
+});
+</script>
 </body>
 </html>

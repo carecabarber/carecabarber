@@ -11,7 +11,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field-row">
         <div class="field">
-            <label>Nome do novo barbeiro</label>
+            <label>Nome do novo {{ vocab.profissional | lower }}</label>
             <input type="text" name="nome" placeholder="Ex: Carlos"
                    required autocapitalize="words" autocomplete="off">
         </div>
@@ -22,7 +22,7 @@
 </form>
 
 <!-- Lista de barbeiros -->
-<h2 class="section-title">Barbeiros ({{ barbeiros|length }})</h2>
+<h2 class="section-title">{{ vocab.profissionais }} ({{ barbeiros|length }})</h2>
 
 {% if barbeiros %}
 <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:28px">
@@ -31,40 +31,61 @@
 
         <!-- Cabeçalho do card -->
         <div class="barb-card-topo">
-            <div class="barb-avatar">{{ b.nome[0]|upper }}</div>
-            <div class="barb-info">
-                <div class="barb-nome">{{ b.nome }}
-                    {% if b.role == 'chefe' %}<span class="badge badge-active" style="font-size:0.6rem">Chefe</span>{% endif %}
+            <div class="barb-card-topo-info">
+                <div class="barb-avatar" style="overflow:hidden;padding:0;display:flex;align-items:center;justify-content:center">
+                    <img src="{{ url_for('foto_barbeiro', barbeiro_id=b.id) }}"
+                         alt="{{ b.nome[0]|upper }}"
+                         style="width:100%;height:100%;object-fit:cover"
+                         class="js-barb-avatar"
+                         data-inicial="{{ b.nome[0]|upper }}">
                 </div>
-                <div class="barb-meta">
-                    {% if b.username %}
-                    👤 <strong>{{ b.username }}</strong>
-                    {% else %}
-                    <span style="color:var(--red)">⚠ Sem acesso definido</span>
-                    {% endif %}
-                    · <span style="{{ 'color:var(--green)' if b.ativo else 'color:var(--red)' }}">
-                        {{ 'Ativo' if b.ativo else 'Inativo' }}
-                    </span>
+                <div class="barb-info">
+                    <div class="barb-nome">{{ b.nome }}
+                        {% if b.role == 'chefe' %}<span class="badge badge-active" style="font-size:0.6rem">Chefe</span>{% endif %}
+                    </div>
+                    <div class="barb-meta">
+                        {% if b.username %}
+                        <strong>{{ b.username }}</strong>
+                        {% else %}
+                        <span style="color:var(--red)">⚠ Sem acesso definido</span>
+                        {% endif %}
+                        · <span style="{{ 'color:var(--green)' if b.ativo else 'color:var(--red)' }}">
+                            {{ 'Ativo' if b.ativo else 'Inativo' }}
+                        </span>
+                    </div>
                 </div>
             </div>
             <div class="barb-acoes">
-                <button class="btn btn-outline-small" onclick="togglePanel('edit-{{ b.id }}')">✏️ Editar</button>
-                <button class="btn btn-outline-small {{ '' if b.username else 'btn-sem-acesso' }}"
-                        onclick="togglePanel('acesso-{{ b.id }}')">
-                    🔑 {{ 'Acesso' if b.username else '⚠ Sem acesso' }}
+                <button class="btn btn-outline-small js-toggle-panel" data-panel="edit-{{ b.id }}">Editar</button>
+                <button class="btn btn-outline-small js-toggle-panel {{ '' if b.username else 'btn-sem-acesso' }}"
+                        data-panel="acesso-{{ b.id }}">
+                    {{ 'Acesso' if b.username else '⚠ Sem acesso' }}
                 </button>
+                <button class="btn btn-outline-small js-toggle-panel" data-panel="foto-{{ b.id }}">Foto</button>
+                {% if b.mesa_token %}
+                <button class="btn btn-outline-small js-toggle-panel" data-panel="qr-{{ b.id }}">QR Mesa</button>
+                {% endif %}
                 <form action="{{ url_for('toggle_barbeiro', id=b.id) }}" method="post" style="margin:0">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn {{ 'btn-cancel' if b.ativo else 'btn-iniciar' }}" style="padding:7px 10px">
                         {{ '⏸' if b.ativo else '▶' }}
                     </button>
                 </form>
+                {% if b.id != session.get('user_id') %}
+                <form action="{{ url_for('apagar_barbeiro', id=b.id) }}" method="post" style="margin:0"
+                      data-confirm="Apagar {{ b.nome | e }}? Esta ação não pode ser desfeita.">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger" style="padding:7px 10px" title="Apagar {{ b.nome | e }}">
+                        🗑
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
 
         <!-- Painel: Editar nome -->
         <div id="edit-{{ b.id }}" class="barb-panel" style="display:none">
-            <div class="barb-panel-titulo">✏️ Editar nome</div>
+            <div class="barb-panel-titulo">Editar nome</div>
             <form action="{{ url_for('editar_barbeiro', id=b.id) }}" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="field-row">
@@ -80,9 +101,9 @@
 
         <!-- Painel: Acesso (utilizador + senha juntos) -->
         <div id="acesso-{{ b.id }}" class="barb-panel" style="display:none">
-            <div class="barb-panel-titulo">🔑 Acesso — <span style="color:var(--accent)">{{ b.nome }}</span></div>
+            <div class="barb-panel-titulo">Acesso — <span style="color:var(--accent)">{{ b.nome }}</span></div>
             {% if not b.username %}
-            <div class="login-erro" style="margin-bottom:12px;font-size:0.78rem">⚠ Este barbeiro ainda não tem acesso definido.</div>
+            <div class="login-erro" style="margin-bottom:12px;font-size:0.78rem">⚠ Este {{ vocab.profissional | lower }} ainda não tem acesso definido.</div>
             {% endif %}
             <form action="{{ url_for('set_credenciais', id=b.id) }}" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -100,10 +121,74 @@
                     </div>
                 </div>
                 <p style="font-size:0.72rem;color:var(--text2);margin-top:4px">
-                    Após entrar, o barbeiro pode alterar a sua senha no perfil.
+                    Após entrar, o {{ vocab.profissional | lower }} pode alterar a sua senha no perfil.
                 </p>
                 <button type="submit" class="btn btn-primary btn-full" style="margin-top:10px">Guardar acesso</button>
             </form>
+        </div>
+
+        <!-- Painel: QR da mesa -->
+        {% if b.mesa_token %}
+        <div id="qr-{{ b.id }}" class="barb-panel" style="display:none">
+            <div class="barb-panel-titulo">QR da mesa — <span style="color:var(--accent)">{{ b.nome }}</span></div>
+            <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px">
+                Imprime e coloca na estação de {{ b.nome }}. Qualquer telemóvel que escanear abre a mesa do {{ vocab.profissional | lower }}.
+            </p>
+            <div style="text-align:center">
+                <div id="qr-box-{{ b.id }}"
+                     data-mesa-token="{{ b.mesa_token | e }}"
+                     style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:10px"></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:4px">
+                <a href="{{ url_for('mesa_entrar', token=b.mesa_token) }}" target="_blank"
+                   class="btn btn-outline-small" style="flex:1;text-align:center;padding:9px">
+                    Vista cliente
+                </a>
+                <a href="{{ url_for('mesa', token=b.mesa_token) }}" target="_blank"
+                   class="btn btn-outline-small" style="flex:1;text-align:center;padding:9px">
+                    Gestão
+                </a>
+                <button class="btn btn-outline-small js-imprimir-qr" style="flex:1;padding:9px"
+                        data-target="qr-box-{{ b.id }}" data-nome="{{ b.nome | e }}">
+                    Imprimir
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Painel: Foto de perfil -->
+        <div id="foto-{{ b.id }}" class="barb-panel" style="display:none">
+            <div class="barb-panel-titulo">Foto — <span style="color:var(--accent)">{{ b.nome }}</span></div>
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+                <img id="barb-avatar-{{ b.id }}"
+                     src="{{ url_for('foto_barbeiro', barbeiro_id=b.id) }}"
+                     alt="{{ b.nome[0]|upper }}"
+                     style="width:64px;height:64px;border-radius:50%;object-fit:cover;
+                            border:2px solid var(--border);flex-shrink:0">
+                <div style="flex:1">
+                    <div id="foto-msg-{{ b.id }}" style="font-size:0.8rem;display:none;margin-bottom:6px"></div>
+                    <div style="display:flex;flex-direction:column;gap:8px">
+                        <button type="button"
+                                class="btn btn-outline-small js-foto-camera"
+                                data-id="{{ b.id }}" data-nome="{{ b.nome | e }}">
+                            Câmara
+                        </button>
+                        <label class="btn btn-outline-small"
+                               style="cursor:pointer;text-align:center;margin:0">
+                            Galeria
+                            <input type="file" accept="image/jpeg,image/png,image/webp"
+                                   class="js-foto-file" data-id="{{ b.id }}"
+                                   style="display:none">
+                        </label>
+                        <button type="button"
+                                class="btn btn-outline-small js-foto-apagar"
+                                data-id="{{ b.id }}"
+                                style="color:var(--red,#ef4444)">
+                            Remover foto
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
     </div>
@@ -111,7 +196,7 @@
 </div>
 {% else %}
 <div class="empty-state" style="margin-bottom:28px">
-    <p>Nenhum barbeiro registado ainda.</p>
+    <p>Nenhum {{ vocab.profissional | lower }} registado ainda.</p>
 </div>
 {% endif %}
 
@@ -122,7 +207,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field-row">
         <div class="field">
-            <label>Barbeiro</label>
+            <label>{{ vocab.profissional }}</label>
             <select name="barbeiro_id" required>
                 <option value="">— Selecionar —</option>
                 {% for b in todos_barbeiros %}
@@ -182,9 +267,10 @@
                 {% if aus.hora_inicio and aus.hora_fim %} · {{ aus.hora_inicio }}–{{ aus.hora_fim }}{% endif %}
             </div>
         </div>
-        <form action="{{ url_for('apagar_ausencia', id=aus.id) }}" method="post">
+        <form action="{{ url_for('apagar_ausencia', id=aus.id) }}" method="post"
+              data-confirm="Remover esta ausência?">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-cancel" style="padding:7px 10px">🗑</button>
+            <button type="submit" class="btn btn-cancel" style="padding:7px 10px"></button>
         </form>
     </li>
     {% endfor %}
@@ -193,7 +279,7 @@
 <p style="color:var(--text2);font-size:0.85rem;padding:12px 0">Nenhuma ausência registada.</p>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Validação: data_fim >= data_inicio
 document.querySelector('input[name="data_fim"]')?.addEventListener('change', function() {
     const di = document.querySelector('input[name="data_inicio"]')?.value;
@@ -215,6 +301,366 @@ function togglePanel(id) {
     el.closest(".barb-card").querySelectorAll(".barb-panel").forEach(p => p.style.display = "none");
     if (!visible) el.style.display = "block";
 }
+// addEventListener (substitui onclick= bloqueado pelo CSP)
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.js-toggle-panel[data-panel]');
+    if (btn) togglePanel(btn.dataset.panel);
+});
+
+// ── Validação inline nos formulários ────────────────────────
+function _erroInline(inp, msg) {
+    let div = inp.parentElement.querySelector(".inline-erro");
+    if (!div) {
+        div = document.createElement("div");
+        div.className = "inline-erro";
+        div.style.cssText = "color:var(--red);font-size:0.74rem;margin-top:3px";
+        inp.parentElement.appendChild(div);
+    }
+    div.textContent = msg || "";
+    inp.style.borderColor = msg ? "var(--red)" : "";
+}
+
+// Validação do nome do novo barbeiro
+(function() {
+    const f = document.querySelector('form[action="{{ url_for("barbeiros") }}"]');
+    const inp = f?.querySelector('input[name="nome"]');
+    if (!inp) return;
+    inp.addEventListener("input", () => {
+        const v = inp.value.trim();
+        _erroInline(inp, v.length < 2 && v.length > 0 ? "Nome demasiado curto." : "");
+    });
+    f.addEventListener("submit", e => {
+        if (inp.value.trim().length < 2) { _erroInline(inp, "Introduz um nome válido."); e.preventDefault(); }
+    });
+})();
+
+// Validação dos painéis de acesso (username + senha)
+document.querySelectorAll('form[action*="set_credenciais"]').forEach(f => {
+    const uInp = f.querySelector('input[name="username"]');
+    const pInp = f.querySelector('input[name="senha"]');
+    const _USER_RE = /^[a-zA-Z0-9_.\-]{3,50}$/;
+
+    uInp?.addEventListener("input", () => {
+        const v = uInp.value.trim();
+        if (!v) { _erroInline(uInp, ""); return; }
+        _erroInline(uInp, !_USER_RE.test(v) ? "Só letras, números, _ e . (mín. 3 caracteres)." : "");
+    });
+    pInp?.addEventListener("input", () => {
+        const v = pInp.value;
+        if (!v) { _erroInline(pInp, ""); return; }
+        _erroInline(pInp, v.length < 6 ? "Mínimo 6 caracteres." : "");
+    });
+    f.addEventListener("submit", e => {
+        let ok = true;
+        if (!_USER_RE.test(uInp?.value.trim() || "")) {
+            _erroInline(uInp, "Username inválido."); ok = false;
+        }
+        if ((pInp?.value.length || 0) < 6) {
+            _erroInline(pInp, "Mínimo 6 caracteres."); ok = false;
+        }
+        if (!ok) e.preventDefault();
+    });
+});
+
+// ── QR codes da mesa — gerar ao abrir painel ────────────────
+</script>
+<script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+const _qrGerados = new Set();
+
+function _gerarQrSeNecessario(panelId) {
+    const box = document.getElementById("qr-box-" + panelId.replace("qr-", ""));
+    if (!box || _qrGerados.has(box.id)) return;
+    const token = box.dataset.mesaToken;
+    if (!token) return;
+    try {
+        const url = window.location.origin + "/mesa/" + token + "/entrar";
+        const qr  = qrcode(0, "M");
+        qr.addData(url);
+        qr.make();
+        box.innerHTML = qr.createImgTag(4, 4);
+        _qrGerados.add(box.id);
+    } catch(e) {}
+}
+
+// Interceptar o togglePanel para gerar QR quando painel QR abre
+const _origToggle = window.togglePanel;
+window.togglePanel = function(id) {
+    _origToggle(id);
+    if (id.startsWith("qr-")) _gerarQrSeNecessario(id);
+};
+
+// Imprimir QR individual
+document.addEventListener("click", function(e) {
+    const btn = e.target.closest(".js-imprimir-qr[data-target]");
+    if (!btn) return;
+    const box  = document.getElementById(btn.dataset.target);
+    // Escapar backticks para evitar quebra de template string
+    const nome = (btn.dataset.nome || _PROF).replace(/`/g, "'");
+    if (!box) return;
+    const mesaUrl = window.location.origin + "/mesa/" + (box.dataset.mesaToken || "") + "/entrar";
+    const w = window.open("", "_blank", "width=400,height=500");
+    if (!w) { alert("Popup bloqueado. Autoriza popups para imprimir o QR."); return; }
+    w.document.write(`<!DOCTYPE html><html><head><title>QR — ${nome}</title>
+        <style>body{font-family:sans-serif;text-align:center;padding:30px}
+        h2{font-size:1rem;margin-bottom:16px}p{font-size:0.75rem;color:#666;word-break:break-all}</style>
+        </head><body>
+        <h2>Mesa de ${nome}</h2>
+        ${box.innerHTML}
+        <p style="margin-top:12px">${mesaUrl}</p>
+        <script>window.onload=function(){window.print();window.close();}<\/script>
+        </body></html>`);
+    w.document.close();
+});
+
+// ── Mostrar erro de URL se existir (?erro=...)
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    const erro = params.get("erro");
+    const msgs = {
+        "username_invalido": "Username inválido — usa apenas letras, números, _ e .",
+        "senha_curta":       "Senha demasiado curta — mínimo 6 caracteres.",
+        "username_duplicado": "Este username já está em uso. Escolhe outro.",
+    };
+    if (erro && msgs[erro]) {
+        setTimeout(() => {
+            if (typeof mostrarToast === "function") mostrarToast("" + msgs[erro], "erro");
+        }, 300);
+        // Limpar o ?erro= da URL sem recarregar
+        history.replaceState({}, "", window.location.pathname);
+    }
+})();
+</script>
+
+<!-- ── Modal câmara (partilhado por todos os barbeiros) ─────── -->
+<div id="barb-camera-modal"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+            z-index:9999;align-items:center;justify-content:center">
+    <div style="background:var(--card);border-radius:16px;padding:20px;
+                max-width:400px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.6)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:14px;
+                    display:flex;justify-content:space-between;align-items:center">
+            <span id="barb-camera-titulo">Tirar foto</span>
+            <button id="barb-btn-camera-fechar" type="button"
+                    style="background:none;border:none;color:var(--text2);
+                           font-size:1.3rem;cursor:pointer">✕</button>
+        </div>
+        <video id="barb-camera-video" autoplay playsinline muted
+               style="width:100%;border-radius:10px;background:#000;
+                      max-height:280px;object-fit:cover"></video>
+        <canvas id="barb-camera-canvas" style="display:none"></canvas>
+        <div id="barb-camera-preview-wrap" style="display:none;margin-top:10px">
+            <img id="barb-camera-preview" alt="Pré-visualização"
+                 style="width:100%;border-radius:10px;max-height:280px;object-fit:cover">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button id="barb-btn-capturar" type="button" class="btn btn-primary" style="flex:1">
+                Capturar
+            </button>
+            <button id="barb-btn-usar" type="button" class="btn btn-primary"
+                    style="flex:1;display:none;background:var(--green,#22c55e)">
+                Usar esta foto
+            </button>
+            <button id="barb-btn-repetir" type="button" class="btn btn-outline-small"
+                    style="flex:1;display:none">
+                Repetir
+            </button>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+const _PROF = {{ vocab.profissional | tojson }};
+(function() {
+    let _activeBarbId  = null;   // ID do barbeiro activo no modal câmara
+    let _stream        = null;
+    let _capturedBlob  = null;
+
+    const modal     = document.getElementById("barb-camera-modal");
+    const titulo    = document.getElementById("barb-camera-titulo");
+    const video     = document.getElementById("barb-camera-video");
+    const canvas    = document.getElementById("barb-camera-canvas");
+    const preview   = document.getElementById("barb-camera-preview");
+    const prevWrap  = document.getElementById("barb-camera-preview-wrap");
+    const btnFechar = document.getElementById("barb-btn-camera-fechar");
+    const btnCapt   = document.getElementById("barb-btn-capturar");
+    const btnUsar   = document.getElementById("barb-btn-usar");
+    const btnRepetir= document.getElementById("barb-btn-repetir");
+
+    // ── Helpers ─────────────────────────────────────────────────
+
+    function showMsg(id, txt, tipo) {
+        const el = document.getElementById("foto-msg-" + id);
+        if (!el) return;
+        el.textContent = txt;
+        el.style.color = tipo === "ok" ? "var(--green,#22c55e)" : "var(--red,#ef4444)";
+        el.style.display = "block";
+        setTimeout(() => { el.style.display = "none"; }, 4000);
+    }
+
+    function refreshAvatar(id, ts) {
+        const img = document.getElementById("barb-avatar-" + id);
+        // avatar no topo do card (pode existir mais que um)
+        const topImg = document.querySelector(
+            '[data-panel="foto-' + id + '"]'
+        )?.closest(".barb-card")?.querySelector(".barb-avatar img");
+        const url = "/foto/" + id + "?t=" + (ts || Date.now());
+        if (img)    img.src = url;
+        if (topImg) topImg.src = url;
+    }
+
+    function uploadBlob(id, blob, mime) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const b64 = e.target.result.split(",")[1];
+            fetch("/barbeiros/" + id + "/foto", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({imagem: b64, mime: mime})
+            }).then(r => r.json()).then(r => {
+                fecharCamera();
+                if (r.ok) {
+                    refreshAvatar(id);
+                    showMsg(id, "Foto atualizada!", "ok");
+                } else {
+                    showMsg(id, "" + (r.erro || "Erro."), "erro");
+                }
+            }).catch(() => { fecharCamera(); showMsg(id, "Erro de rede.", "erro"); });
+        };
+        reader.readAsDataURL(blob);
+    }
+
+    function uploadFile(id, file) {
+        const form = new FormData();
+        form.append("foto", file);
+        fetch("/barbeiros/" + id + "/foto", {method: "POST", body: form})
+            .then(r => r.json()).then(r => {
+                if (r.ok) {
+                    refreshAvatar(id);
+                    showMsg(id, "Foto atualizada!", "ok");
+                } else {
+                    showMsg(id, "" + (r.erro || "Erro."), "erro");
+                }
+            }).catch(() => showMsg(id, "Erro de rede.", "erro"));
+    }
+
+    // ── Câmara ──────────────────────────────────────────────────
+
+    function abrirCamera(id, nome) {
+        _activeBarbId  = id;
+        _capturedBlob  = null;
+        titulo.textContent = "" + nome;
+        modal.style.display = "flex";
+        btnCapt.style.display = "";
+        btnUsar.style.display = "none";
+        btnRepetir.style.display = "none";
+        prevWrap.style.display = "none";
+        video.style.display = "";
+
+        navigator.mediaDevices.getUserMedia({video: {facingMode: "user"}, audio: false})
+            .then(function(s) {
+                _stream = s;
+                video.srcObject = s;
+            })
+            .catch(function(err) {
+                fecharCamera();
+                showMsg(id, "Câmara indisponível: " + err.message, "erro");
+            });
+    }
+
+    function fecharCamera() {
+        if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+        video.srcObject = null;
+        modal.style.display = "none";
+        _activeBarbId = null;
+        _capturedBlob = null;
+    }
+
+    btnFechar.addEventListener("click", fecharCamera);
+
+    btnCapt.addEventListener("click", function() {
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        canvas.toBlob(function(blob) {
+            if (!blob) { showMsg(_activeBarbId, "Falha ao capturar.", "erro"); return; }
+            _capturedBlob = blob;
+            preview.src = URL.createObjectURL(blob);
+            prevWrap.style.display = "";
+            video.style.display = "none";
+            btnCapt.style.display = "none";
+            btnUsar.style.display = "";
+            btnRepetir.style.display = "";
+        }, "image/jpeg", 0.88);
+    });
+
+    btnRepetir.addEventListener("click", function() {
+        _capturedBlob = null;
+        prevWrap.style.display = "none";
+        video.style.display = "";
+        btnCapt.style.display = "";
+        btnUsar.style.display = "none";
+        btnRepetir.style.display = "none";
+    });
+
+    btnUsar.addEventListener("click", function() {
+        if (!_capturedBlob || !_activeBarbId) return;
+        uploadBlob(_activeBarbId, _capturedBlob, "image/jpeg");
+    });
+
+    // ── Delegação de eventos ─────────────────────────────────────
+
+    document.addEventListener("click", function(e) {
+        // Botão câmara
+        const btnCam = e.target.closest(".js-foto-camera[data-id]");
+        if (btnCam) {
+            abrirCamera(btnCam.dataset.id, btnCam.dataset.nome || "Barbeiro");
+            return;
+        }
+        // Botão remover foto
+        const btnAp = e.target.closest(".js-foto-apagar[data-id]");
+        if (btnAp) {
+            const id = btnAp.dataset.id;
+            (_confirm || function(m){ return Promise.resolve(window.confirm(m)); })(
+                "Remover a foto de " + (document.getElementById("barb-avatar-" + id)?.alt || _PROF) + "?"
+            ).then(function(ok) {
+                if (!ok) return;
+                fetch("/barbeiros/" + id + "/foto/apagar", {method: "POST"})
+                    .then(r => r.json()).then(r => {
+                        if (r.ok) {
+                            refreshAvatar(id, Date.now());
+                            showMsg(id, "Foto removida.", "ok");
+                        } else {
+                            showMsg(id, "" + (r.erro || "Erro."), "erro");
+                        }
+                    }).catch(() => showMsg(id, "Erro de rede.", "erro"));
+            });
+        }
+    });
+
+    // Upload de ficheiro (galeria)
+    document.addEventListener("change", function(e) {
+        const inp = e.target.closest(".js-foto-file[data-id]");
+        if (!inp) return;
+        const file = inp.files[0];
+        if (!file) return;
+        uploadFile(inp.dataset.id, file);
+        inp.value = "";
+    });
+})();
+</script>
+
+<script nonce="{{ csp_nonce }}">
+// Avatar fallback — mostrar inicial se foto não carregar
+document.querySelectorAll('.js-barb-avatar').forEach(function(img) {
+    img.addEventListener('error', function() {
+        var inicial = this.dataset.inicial || '?';
+        var span = document.createElement('span');
+        span.textContent = inicial;
+        span.style.cssText = 'font-size:1.1rem;font-weight:700;color:var(--text2)';
+        this.parentNode.replaceChild(span, this);
+    });
+});
 </script>
 
 {% endblock %}

@@ -3,16 +3,16 @@
 
 <div class="page-header">
     <a href="{{ url_for('configuracoes') }}" class="btn-back">← Voltar</a>
-    <h1>Tipos de corte</h1>
+    <h1>Tipos de {{ vocab.servico | lower }}</h1>
 </div>
 
 <!-- Adicionar novo serviço -->
 <form action="{{ url_for('servicos') }}" method="post" class="form-card" style="margin-bottom:24px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h2 class="section-title" style="margin-bottom:0">Novo tipo de corte</h2>
+    <h2 class="section-title" style="margin-bottom:0">Novo tipo de {{ vocab.servico | lower }}</h2>
     <div class="field-row">
         <div class="field" style="flex:2">
-            <label>Nome do corte</label>
+            <label>Nome do {{ vocab.servico | lower }}</label>
             <input type="text" name="nome" placeholder="Ex: Corte Degradê"
                    required autocapitalize="words" autocomplete="off">
         </div>
@@ -22,7 +22,7 @@
                    min="5" max="180" required inputmode="numeric">
         </div>
         <div class="field">
-            <label>Preço (ECV)</label>
+            <label>Preço ({{ moeda_simbolo }})</label>
             <input type="number" name="preco" placeholder="0"
                    min="0" inputmode="numeric">
         </div>
@@ -31,7 +31,7 @@
 </form>
 
 <!-- Lista de serviços -->
-<h2 class="section-title">Todos os cortes ({{ servicos|length }})</h2>
+<h2 class="section-title">{{ vocab.servicos }} ({{ servicos|length }})</h2>
 
 {% if servicos %}
 <div style="display:flex;flex-direction:column;gap:10px">
@@ -46,24 +46,23 @@
             <div class="item-body">
                 <div class="item-cliente">{{ s.nome }}</div>
                 <div class="item-servico">
-                    {% if s.preco %}<span style="color:var(--accent);font-weight:700">{{ s.preco | moeda }} ECV</span> · {% endif %}
+                    {% if s.preco %}<span style="color:var(--accent);font-weight:700">{{ s.preco | moeda }} {{ moeda_simbolo }}</span> · {% endif %}
                     {% if not s.ativo %}<span style="color:var(--red)">Inativo</span>{% else %}Ativo{% endif %}
                 </div>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
-                <button class="btn btn-outline-small" onclick="toggleEdit({{ s.id }})">✏️ Editar</button>
+                <button class="btn btn-outline-small js-toggle-edit" data-id="{{ s.id }}">Editar</button>
                 <form action="{{ url_for('apagar_servico', id=s.id) }}" method="post" style="margin:0"
-                      data-nome="{{ s.nome | e }}"
-                      onsubmit="return confirm('Apagar \'' + this.dataset.nome + '\'?')">
+                      class="js-confirm-form" data-nome="{{ s.nome | e }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-cancel" style="padding:7px 10px">🗑</button>
+                    <button type="submit" class="btn btn-cancel" style="padding:7px 10px"></button>
                 </form>
             </div>
         </div>
 
         <!-- Formulário de edição (oculto) -->
         <div id="edit-{{ s.id }}" class="barb-panel" style="display:none">
-            <div class="barb-panel-titulo">✏️ Editar corte</div>
+            <div class="barb-panel-titulo">Editar {{ vocab.servico | lower }}</div>
             <form action="{{ url_for('editar_servico', id=s.id) }}" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="field-row">
@@ -78,15 +77,15 @@
                                min="5" max="180" required inputmode="numeric">
                     </div>
                     <div class="field">
-                        <label>Preço (ECV)</label>
+                        <label>Preço ({{ moeda_simbolo }})</label>
                         <input type="number" name="preco" value="{{ s.preco or 0 }}"
                                min="0" inputmode="numeric">
                     </div>
                 </div>
                 <div style="display:flex;gap:8px;margin-top:10px">
                     <button type="submit" class="btn btn-primary" style="flex:1">Guardar</button>
-                    <button type="button" class="btn btn-cancel"
-                            onclick="toggleEdit({{ s.id }})" style="flex:1">Cancelar</button>
+                    <button type="button" class="btn btn-cancel js-toggle-edit"
+                            data-id="{{ s.id }}" style="flex:1">Cancelar</button>
                 </div>
             </form>
         </div>
@@ -95,15 +94,31 @@
     {% endfor %}
 </div>
 {% else %}
-<div class="empty-state"><p>Nenhum tipo de corte registado.</p></div>
+<div class="empty-state"><p>Nenhum tipo de {{ vocab.servico | lower }} registado.</p></div>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function toggleEdit(id) {
     const el = document.getElementById("edit-" + id);
     if (!el) return;
     el.style.display = el.style.display === "none" ? "block" : "none";
 }
+document.addEventListener('DOMContentLoaded', function() {
+    // Botões editar/cancelar serviço
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.js-toggle-edit[data-id]');
+        if (btn) toggleEdit(btn.dataset.id);
+    });
+    // Confirmação de apagar serviço (async — compatível com iOS PWA)
+    document.querySelectorAll('.js-confirm-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            (_confirm || function(m){ return Promise.resolve(window.confirm(m)); })(
+                "Apagar '" + (form.dataset.nome || '') + "'?"
+            ).then(function(ok) { if (ok) form.submit(); });
+        });
+    });
+});
 </script>
 
 {% endblock %}

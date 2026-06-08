@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#080808">
+    <meta name="theme-color" content="#0a0a0a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="{{ barbearia.nome }}">
     <title>{{ barbearia.nome }} — As minhas marcações</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
@@ -16,12 +18,16 @@
         <span class="logo">
             {% if barbearia.logo %}
             <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
-                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px">
-            {% else %}✂️ {% endif %}{{ barbearia.nome }}
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 class="js-logo-img">
+            {% endif %}{{ barbearia.nome }}
         </span>
         <div class="user-info">
-            <span class="user-nome">👤 {{ session.get('user_nome', '') }}</span>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+            <span class="user-nome">{{ session.get('user_nome', '') }}</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
         </div>
     </header>
 
@@ -29,12 +35,24 @@
         <div class="page-header">
             <h1>As minhas marcações</h1>
         </div>
+        {% with msgs = get_flashed_messages(with_categories=true) %}
+        {% for cat, m in msgs %}
+        <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);
+                    border-radius:10px;padding:12px 16px;margin-bottom:14px;
+                    font-size:0.88rem;color:var(--red)">{{ m }}</div>
+        {% endfor %}
+        {% endwith %}
 
-        <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
-           class="btn btn-primary btn-full"
-           style="margin-bottom:20px;display:flex;justify-content:center">
-            📅 Nova marcação
-        </a>
+        <div style="display:flex;gap:10px;margin-bottom:20px">
+            <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
+               class="btn btn-primary btn-full" style="flex:1;justify-content:center;display:flex">
+                Nova marcação
+            </a>
+            <button id="btn-walkin-scan" class="btn btn-outline-small"
+                    style="flex:1;padding:12px 10px;font-size:0.85rem">
+                Walk-in
+            </button>
+        </div>
 
         {% set proximas = (agendamentos | selectattr('status', 'equalto', 'agendado') | list) + (agendamentos | selectattr('status', 'equalto', 'em_andamento') | list) %}
         {% set outras   = agendamentos | rejectattr('status', 'equalto', 'agendado') | rejectattr('status', 'equalto', 'em_andamento') | list %}
@@ -43,7 +61,7 @@
         <h2 class="section-title">Próximas</h2>
         <ul class="lista-agendamentos" style="margin-bottom:20px">
             {% for a in proximas %}
-            <li class="item-agendamento status-{{ a.status }}">
+            <li class="item-agendamento status-{{ a.status }}" style="flex-wrap:wrap">
                 <div class="item-hora">
                     <div>{{ a.hora }}</div>
                     <div class="item-data-small">{{ a.data }}</div>
@@ -51,7 +69,7 @@
                 <div class="item-body">
                     <div class="item-cliente">{{ a.servico_nome }}</div>
                     <div class="item-servico">
-                        {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}Qualquer barbeiro{% endif %}
+                        {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}Qualquer {{ vocab.profissional | lower }}{% endif %}
                         · {{ a.duracao_estimada }} min est.
                     </div>
                     {% if a.minutos_ate is defined and a.minutos_ate >= 0 and a.minutos_ate <= 30 %}
@@ -59,16 +77,65 @@
                     {% endif %}
                 </div>
                 <div class="item-acoes">
+                    {% if a.status == 'em_andamento' %}
+                    <!-- Terminar via QR — termina logo ao escanear (usa valor do campo abaixo) -->
+                    <button class="btn btn-qr-scan btn-terminar-qr"
+                            data-ag-id="{{ a.id }}" data-acao="terminar"
+                            title="Escanear QR para terminar">
+                        
+                    </button>
+                    <!-- Terminar direto (usa valor do campo abaixo) -->
+                    <button class="btn btn-terminar-qr js-terminar-direto"
+                            data-ag-id="{{ a.id }}"
+                            data-preco="{{ a.preco or 0 }}"
+                            data-url="{{ url_for('cliente_terminar_servico', slug=barbearia.slug, id=a.id) }}"
+                            style="padding:6px 10px;font-size:0.8rem">
+                        Terminar
+                    </button>
+                    {% else %}
+                    <!-- Iniciar via QR -->
+                    <button class="btn btn-qr-scan"
+                            data-ag-id="{{ a.id }}" data-acao="iniciar"
+                            title="Escanear QR para iniciar">
+                        
+                    </button>
+                    <!-- Iniciar direto (sem QR) -->
+                    <form action="{{ url_for('cliente_iniciar_servico', slug=barbearia.slug, id=a.id) }}"
+                          method="post" style="display:inline"
+                          data-confirm="Iniciar serviço de {{ a.servico_nome | e }} agora?">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-primary"
+                                style="font-size:0.78rem;padding:6px 10px">
+                            Iniciar
+                        </button>
+                    </form>
                     <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
-                       class="btn btn-reagendar">📅</a>
+                       class="btn btn-reagendar"></a>
                     <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
                           method="post"
-                          data-nome="{{ a.servico_nome | e }}"
-                          onsubmit="return confirm('Cancelar marcação de ' + this.dataset.nome + '?')">
+                          data-confirm="Cancelar marcação de {{ a.servico_nome | e }}?">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-cancel">✕</button>
                     </form>
+                    {% endif %}
                 </div>
+                {% if a.status == 'em_andamento' %}
+                <!-- Valor em destaque — visível antes do QR; editável se necessário -->
+                <div style="flex-basis:100%;padding:10px 14px 10px;
+                            border-top:1px solid var(--border);
+                            display:flex;align-items:center;gap:12px">
+                    <span style="font-size:0.85rem;color:var(--text2);font-weight:600;white-space:nowrap">
+                        Valor cobrado
+                    </span>
+                    <input type="number" class="valor-card-input" data-ag-id="{{ a.id }}"
+                           value="{{ a.preco or '' }}" min="0" max="999999" placeholder="0"
+                           style="flex:1;max-width:120px;font-size:1.2rem;font-weight:800;
+                                  text-align:center;padding:7px 10px;border-radius:8px;
+                                  border:2px solid var(--accent);background:var(--surface3);
+                                  color:var(--text)">
+                    <span style="font-size:0.85rem;color:var(--text2)">{{ moeda_simbolo }}</span>
+                </div>
+                {% endif %}
             </li>
             {% endfor %}
         </ul>
@@ -110,8 +177,68 @@
         {% endif %}
     </main>
 
+    <!-- Modal: Terminar serviço directo (com valor) -->
+    <div id="terminar-direto-modal" style="display:none;position:fixed;inset:0;z-index:10000;
+         background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px">
+        <div style="background:var(--surface2);border-radius:16px;padding:24px 20px;
+                    width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+            <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Terminar serviço</div>
+            <div style="font-size:0.82rem;color:var(--text2);margin-bottom:18px">
+                Indica o valor cobrado ao cliente.
+            </div>
+            <div class="field" style="margin-bottom:20px">
+                <label>Valor cobrado ({{ moeda_simbolo }})</label>
+                <input type="number" id="terminar-direto-valor" min="0" max="999999"
+                       placeholder="0" style="font-size:1.1rem;text-align:center">
+            </div>
+            <form id="terminar-direto-form" method="post" style="margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="valor" id="terminar-direto-form-valor" value="0">
+                <button type="submit" class="btn btn-primary btn-full" style="margin-bottom:10px">
+                    Confirmar e terminar
+                </button>
+            </form>
+            <button id="terminar-direto-cancelar" style="width:100%;background:none;
+                    border:1px solid var(--border);color:var(--text2);padding:10px;
+                    border-radius:10px;font-size:0.88rem;cursor:pointer">
+                Cancelar
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal Scanner QR -->
+    <div id="qr-modal" style="display:none;position:fixed;inset:0;z-index:9999;
+         background:rgba(0,0,0,0.92);flex-direction:column;align-items:center;justify-content:center">
+        <!-- Ecrã de scan -->
+        <div id="qr-scan-ecrã" style="width:100%;max-width:380px;padding:0 16px;text-align:center">
+            <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px" id="qr-modal-titulo">
+                Aponta para o QR da mesa do " + _PROF + "
+            </div>
+            <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;
+                        aspect-ratio:1;max-height:320px">
+                <video id="qr-video" autoplay playsinline muted
+                       style="width:100%;height:100%;object-fit:cover"></video>
+                <!-- Mira central -->
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+                    <div style="width:200px;height:200px;border:3px solid #f5c842;border-radius:12px;
+                                box-shadow:0 0 0 9999px rgba(0,0,0,0.4)"></div>
+                </div>
+            </div>
+            <div id="qr-msg" style="margin-top:14px;font-size:0.85rem;color:#f5c842;min-height:20px"></div>
+            <button id="qr-fechar" style="margin-top:16px;background:none;border:1px solid rgba(255,255,255,0.3);
+                    color:#fff;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer">
+                Cancelar
+            </button>
+        </div>
+        <!-- (qr-valor-ecrã removido — terminar ocorre logo após scan) -->
+    </div>
+
     <script src="{{ url_for('static', filename='app.js') }}"></script>
-    <script>
+    <script src="{{ url_for('static', filename='jsqr.js') }}"></script>
+    <script nonce="{{ csp_nonce }}">
+    const _PROF      = {{ vocab.profissional | lower | tojson }};
+    const _SERVC     = {{ vocab.servico | lower | tojson }};
+    const _MESA_ICON = {{ vocab.mesa_icon | tojson }};
     (function() {
         const token = document.querySelector('meta[name="csrf-token"]')?.content;
         if (!token) return;
@@ -124,10 +251,400 @@
         });
     })();
 
+    // ── Scanner QR para iniciar/terminar serviço ─────────────
+    (function() {
+        const modal     = document.getElementById("qr-modal");
+        const scanEcrã  = document.getElementById("qr-scan-ecrã");
+        const video     = document.getElementById("qr-video");
+        const msg       = document.getElementById("qr-msg");
+        const titulo    = document.getElementById("qr-modal-titulo");
+        const btnFechar = document.getElementById("qr-fechar");
+        let _stream = null, _rafId = null;
+        let _agId = null, _acao = null, _processando = false;
+        const _qrCanvas = document.createElement("canvas");
+        const _qrCtx    = _qrCanvas.getContext("2d", { willReadFrequently: true });
+
+        function pararScanner() {
+            if (_rafId)  { cancelAnimationFrame(_rafId); _rafId = null; }
+            if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+            video.srcObject = null;
+            modal.style.display = "none";
+            _processando = false;
+        }
+
+        btnFechar.addEventListener("click", pararScanner);
+
+        async function iniciarScanner(agId, acao) {
+            _agId = agId; _acao = acao; _processando = false;
+            titulo.textContent = acao === "iniciar"
+                ? "Aponta para o QR da mesa do " + _PROF + " para INICIAR"
+                : "Aponta para o QR da mesa do " + _PROF + " para TERMINAR";
+            msg.textContent = "";
+            scanEcrã.style.display = "block";
+            modal.style.display = "flex";
+            try {
+                _stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 } }
+                });
+                video.srcObject = _stream;
+                await video.play();
+                _rafId = requestAnimationFrame(scanFrame);
+            } catch(e) {
+                if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+                msg.textContent = "Câmara indisponível: " + e.message;
+            }
+        }
+
+        function scanFrame() {
+            if (!_stream || _processando) { _rafId = requestAnimationFrame(scanFrame); return; }
+            if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+                _qrCanvas.width = video.videoWidth; _qrCanvas.height = video.videoHeight;
+                _qrCtx.drawImage(video, 0, 0);
+                const imageData = _qrCtx.getImageData(0, 0, _qrCanvas.width, _qrCanvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                if (code) {
+                    const match = code.data.match(/\/mesa\/([A-Za-z0-9_-]+)/);
+                    if (match) {
+                        _processando = true;
+                        msg.textContent = _acao === "terminar"
+                            ? "QR lido! A terminar…"
+                            : "QR lido! A processar…";
+                        // Ler valor do campo visível no cartão (para terminar)
+                        let valor = 0;
+                        if (_acao === "terminar") {
+                            const cardInput = document.querySelector('.valor-card-input[data-ag-id="' + _agId + '"]');
+                            valor = cardInput ? Math.max(0, parseInt(cardInput.value || "0") || 0) : 0;
+                        }
+                        chamarAPI(match[1], valor).catch(() => {
+                            msg.textContent = "Erro inesperado. Tenta novamente.";
+                            _processando = false;
+                        });
+                        return;
+                    } else {
+                        msg.textContent = "QR não reconhecido. Aponta para o QR da mesa do " + _PROF + ".";
+                        setTimeout(() => { if (!_processando) msg.textContent = ""; }, 2500);
+                    }
+                }
+            }
+            _rafId = requestAnimationFrame(scanFrame);
+        }
+
+        async function chamarAPI(mesaToken, valor) {
+            const endpoint = "/mesa/" + mesaToken + "/" + _acao;
+            const body = { ag_id: _agId };
+            if (_acao === "terminar") body.valor = valor;
+            try {
+                const resp = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const r = await resp.json();
+                if (r.ok) {
+                    msg.textContent = _acao === "terminar" ? "Serviço concluído!" : "▶ Serviço iniciado!";
+                    setTimeout(() => { pararScanner(); location.reload(); }, 1000);
+                } else {
+                    const erroTxt = r.error || "Erro ao processar.";
+                    const dica = erroTxt.includes("não pertence") ? " Escaneia o QR da mesa do teu " + _PROF + "." : "";
+                    msg.textContent = "" + erroTxt + dica;
+                    // Resetar _processando sempre (incluindo "terminar") para o scanner não ficar morto
+                    setTimeout(() => { _processando = false; _rafId = requestAnimationFrame(scanFrame); }, 2500);
+                }
+            } catch(e) {
+                msg.textContent = "Erro de ligação.";
+                // Resetar _processando sempre para o scanner poder reler após erro de rede
+                setTimeout(() => { _processando = false; _rafId = requestAnimationFrame(scanFrame); }, 2000);
+            }
+        }
+
+        document.addEventListener("click", function(e) {
+            const btn = e.target.closest(".btn-qr-scan[data-ag-id]");
+            if (!btn) return;
+            iniciarScanner(parseInt(btn.dataset.agId), btn.dataset.acao);
+        });
+    })();
+
+    // ── Terminar direto (modal com valor) ────────────────────
+    (function() {
+        const modal      = document.getElementById("terminar-direto-modal");
+        const form       = document.getElementById("terminar-direto-form");
+        const valorInput = document.getElementById("terminar-direto-valor");
+        const hiddenValor= document.getElementById("terminar-direto-form-valor");
+        document.getElementById("terminar-direto-cancelar").addEventListener("click", function() {
+            modal.style.display = "none";
+        });
+        document.addEventListener("click", function(e) {
+            const btn = e.target.closest(".js-terminar-direto[data-url]");
+            if (!btn) return;
+            form.action = btn.dataset.url;
+            // Ler valor do campo visível no cartão
+            const agId = btn.dataset.agId;
+            const cardInput = agId ? document.querySelector('.valor-card-input[data-ag-id="' + agId + '"]') : null;
+            const cardVal = cardInput ? cardInput.value : null;
+            valorInput.value = (cardVal !== null && cardVal !== "")
+                ? cardVal
+                : (btn.dataset.preco && btn.dataset.preco !== "0" ? btn.dataset.preco : "");
+            modal.style.display = "flex";
+            setTimeout(() => valorInput.focus(), 100);
+        });
+        form.addEventListener("submit", function() {
+            hiddenValor.value = Math.max(0, parseInt(valorInput.value || "0") || 0);
+        });
+    })();
+
+    // ── Som de notificação quando o corte começa ─────────────
+    function tocarSomNotificacao() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            // Dois bips curtos: elegante e discreto
+            [0, 0.32].forEach(offset => {
+                const osc  = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type      = "sine";
+                osc.frequency.value = 880;
+                gain.gain.setValueAtTime(0.3, ctx.currentTime + offset);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.25);
+                osc.start(ctx.currentTime + offset);
+                osc.stop(ctx.currentTime + offset + 0.26);
+            });
+        } catch(e) {}
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
-        pedirPermissaoNotificacao();
-        iniciarPollingStatusCliente();
+        if (typeof pedirPermissaoNotificacao === 'function') pedirPermissaoNotificacao();
+
+        // Extender notificar global para também tocar som nesta página
+        if (typeof notificar === 'function') {
+            const _notifOrig = window.notificar;
+            window.notificar = function(titulo, corpo) {
+                // Som apenas quando é notificação de atendimento iniciado
+                if (titulo && titulo.toLowerCase().includes(_SERVC)) tocarSomNotificacao();
+                return _notifOrig.call(this, titulo, corpo);
+            };
+        }
+
+        if (typeof iniciarPollingStatusCliente === 'function') iniciarPollingStatusCliente();
+        // Confirmação form (substitui onsubmit= inline bloqueado pelo CSP)
+        document.addEventListener('submit', function(e) {
+            const form = e.target.closest('form[data-confirm]');
+            if (form && !confirm(form.dataset.confirm)) e.preventDefault();
+        });
+        // Logo img onerror (substitui onerror= inline bloqueado pelo CSP)
+        document.querySelectorAll('.js-logo-img').forEach(function(img) {
+            img.addEventListener('error', function() { img.style.display = 'none'; });
+        });
     });
+    </script>
+
+    <!-- Modal Walk-in QR -->
+    <div id="wi-modal" style="display:none;position:fixed;inset:0;z-index:9999;
+         background:rgba(0,0,0,0.95);flex-direction:column;align-items:center;justify-content:center;padding:16px">
+        <div id="wi-ecrã-scan" style="width:100%;max-width:380px;text-align:center">
+            <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px">
+                Aponta para o QR da mesa do " + _PROF + "
+            </div>
+            <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:1;max-height:300px">
+                <video id="wi-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+                    <div style="width:180px;height:180px;border:3px solid #f5c842;border-radius:12px;
+                                box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
+                </div>
+            </div>
+            <div id="wi-scan-msg" style="margin-top:12px;font-size:0.85rem;color:#f5c842;min-height:18px"></div>
+            <button id="wi-fechar-scan" style="margin-top:14px;background:none;border:1px solid rgba(255,255,255,0.3);
+                    color:#fff;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer">Cancelar</button>
+        </div>
+        <div id="wi-ecrã-form" style="display:none;width:100%;max-width:380px">
+            <div style="background:var(--surface2);border-radius:16px;padding:20px">
+                <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px" id="wi-barbeiro-nome"></div>
+                <div style="font-size:0.78rem;color:var(--text2);margin-bottom:18px" id="wi-barbearia-nome"></div>
+                <div class="field" style="margin-bottom:12px">
+                    <label>O teu nome</label>
+                    <input type="text" id="wi-nome" placeholder="Ex: João Silva" autocomplete="name" autocapitalize="words">
+                </div>
+                <div class="field" style="margin-bottom:18px">
+                    <label>{{ vocab.servico }}</label>
+                    <select id="wi-servico" style="background:var(--surface3);border:1px solid var(--border);
+                            border-radius:8px;padding:10px;color:var(--text);font-size:0.9rem;width:100%">
+                        <option value="">Escolhe um {{ vocab.servico | lower }}…</option>
+                    </select>
+                </div>
+                <div id="wi-form-msg" style="font-size:0.82rem;color:var(--red);margin-bottom:10px;display:none"></div>
+                <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="margin-bottom:10px">Começar agora</button>
+                <button id="wi-fechar-form" style="width:100%;background:none;border:1px solid var(--border);
+                        color:var(--text2);padding:10px;border-radius:10px;font-size:0.88rem;cursor:pointer">Cancelar</button>
+            </div>
+        </div>
+        <div id="wi-ecrã-ativo" style="display:none;width:100%;max-width:380px;text-align:center">
+            <div style="background:var(--surface2);border-radius:16px;padding:28px 20px">
+                <div style="font-size:2rem;margin-bottom:12px;opacity:.5">{{ vocab.mesa_icon }}</div>
+                <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:6px">{{ vocab.servico }} em curso</div>
+                <div style="font-size:0.85rem;color:var(--text2);margin-bottom:6px" id="wi-ativo-info"></div>
+                <div style="font-size:0.78rem;color:var(--text2);margin-bottom:16px">
+                    Quando acabar, indica o valor e escaneia o QR para terminar.
+                </div>
+                <div class="field" style="margin-bottom:16px;text-align:left">
+                    <label>Valor cobrado ({{ moeda_simbolo }})</label>
+                    <input type="number" id="wi-ativo-valor" min="0" max="999999"
+                           placeholder="0" autocomplete="off"
+                           style="font-size:1rem;text-align:center">
+                </div>
+                <button id="wi-btn-terminar-ativo" class="btn btn-full"
+                        style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:var(--red);padding:14px">
+                    Escanear QR para terminar
+                </button>
+                <div id="wi-ativo-msg" style="margin-top:12px;font-size:0.82rem;color:#f5c842;min-height:18px"></div>
+                <button id="wi-fechar-ativo" style="margin-top:12px;width:100%;background:none;border:1px solid var(--border);
+                        color:var(--text2);padding:10px;border-radius:10px;font-size:0.88rem;cursor:pointer">Fechar</button>
+            </div>
+        </div>
+    </div>
+    <script nonce="{{ csp_nonce }}">
+    // ── Walk-in via QR ────────────────────────────────────────
+    (function() {
+        const LS_KEY    = "wi_cliente_sessao";
+        const modal     = document.getElementById("wi-modal");
+        const ecrãScan  = document.getElementById("wi-ecrã-scan");
+        const ecrãForm  = document.getElementById("wi-ecrã-form");
+        const ecrãAtivo = document.getElementById("wi-ecrã-ativo");
+        const video     = document.getElementById("wi-video");
+        const scanMsg   = document.getElementById("wi-scan-msg");
+        const formMsg   = document.getElementById("wi-form-msg");
+        const ativoMsg  = document.getElementById("wi-ativo-msg");
+        let _stream = null, _rafId = null;
+        let _mesaToken = null, _agId = null, _processando = false, _modoTerminar = false;
+        const _wiCanvas = document.createElement("canvas");
+        const _wiCtx    = _wiCanvas.getContext("2d", { willReadFrequently: true });
+
+        function mostrarEcrã(e) {
+            [ecrãScan, ecrãForm, ecrãAtivo].forEach(x => x.style.display = "none");
+            e.style.display = "block";
+            modal.style.display = "flex";
+        }
+        function fecharModal() { pararCamera(); modal.style.display = "none"; _modoTerminar = false; }
+        document.getElementById("wi-fechar-scan").addEventListener("click", fecharModal);
+        document.getElementById("wi-fechar-form").addEventListener("click", fecharModal);
+        document.getElementById("wi-fechar-ativo").addEventListener("click", fecharModal);
+
+        function pararCamera() {
+            if (_rafId)  { cancelAnimationFrame(_rafId); _rafId = null; }
+            if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+            video.srcObject = null; _processando = false;
+        }
+        async function abrirCamera() {
+            pararCamera(); scanMsg.textContent = "";
+            try {
+                _stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = _stream; await video.play();
+                _rafId = requestAnimationFrame(scanLoop);
+            } catch(e) { scanMsg.textContent = "Câmara indisponível: " + e.message; }
+        }
+        function scanLoop() {
+            if (!_stream || _processando) { _rafId = requestAnimationFrame(scanLoop); return; }
+            if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+                _wiCanvas.width = video.videoWidth; _wiCanvas.height = video.videoHeight;
+                _wiCtx.drawImage(video, 0, 0);
+                const imageData = _wiCtx.getImageData(0, 0, _wiCanvas.width, _wiCanvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                if (code) {
+                    const m = code.data.match(/\/mesa\/([A-Za-z0-9_-]+)/);
+                    if (m) {
+                        _processando = true; _mesaToken = m[1]; pararCamera();
+                        _modoTerminar ? terminarServico() : carregarInfo();
+                        return;
+                    } else {
+                        scanMsg.textContent = "QR não reconhecido. Aponta para o QR da mesa do " + _PROF + ".";
+                        setTimeout(() => { if (!_processando) scanMsg.textContent = ""; }, 2500);
+                    }
+                }
+            }
+            _rafId = requestAnimationFrame(scanLoop);
+        }
+        async function carregarInfo() {
+            scanMsg.textContent = "QR lido! A carregar…";
+            try {
+                const d = await (await fetch("/mesa/" + _mesaToken + "/info")).json();
+                if (!d.ok) { scanMsg.textContent = "" + d.error; _processando = false; return; }
+                document.getElementById("wi-barbeiro-nome").textContent = _MESA_ICON + " " + d.barbeiro;
+                document.getElementById("wi-barbearia-nome").textContent = d.barbearia;
+                const sel = document.getElementById("wi-servico");
+                sel.innerHTML = '<option value="">Escolhe um ' + _SERVC + '…</option>';
+                d.servicos.forEach(s => { const o = document.createElement("option"); o.value = s.id;
+                    o.textContent = s.nome + (s.preco ? " — " + s.preco + " {{ moeda_simbolo }}" : "");
+                    o.dataset.preco = s.preco || 0; sel.appendChild(o); });
+                document.getElementById("wi-nome").value = ""; formMsg.style.display = "none";
+                mostrarEcrã(ecrãForm);
+            } catch(e) { scanMsg.textContent = "Erro de ligação."; _processando = false; }
+        }
+        document.getElementById("wi-btn-comecar").addEventListener("click", async function() {
+            const nome = document.getElementById("wi-nome").value.trim();
+            const sid  = parseInt(document.getElementById("wi-servico").value || "0");
+            if (!nome || nome.length < 2) { formMsg.textContent = "Escreve o teu nome."; formMsg.style.display = "block"; return; }
+            if (!sid) { formMsg.textContent = "Escolhe um " + _SERVC + "."; formMsg.style.display = "block"; return; }
+            this.disabled = true; this.textContent = "A iniciar…";
+            try {
+                const r = await (await fetch("/mesa/" + _mesaToken + "/walkin", {
+                    method: "POST", headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({ nome, servico_id: sid })
+                })).json();
+                if (r.ok) {
+                    _agId = r.ag_id;
+                    const selEl = document.getElementById("wi-servico");
+                    const selOpt = selEl ? selEl.options[selEl.selectedIndex] : null;
+                    const preco = selOpt ? parseFloat(selOpt.dataset.preco || "0") || 0 : 0;
+                    localStorage.setItem(LS_KEY, JSON.stringify({ agId: _agId, mesaToken: _mesaToken, nome: r.cliente, servico: r.servico_nome, preco: preco }));
+                    mostrarAtivo(r.cliente, r.servico_nome, preco);
+                } else { formMsg.textContent = r.error || "Erro."; formMsg.style.display = "block"; }
+            } catch(e) { formMsg.textContent = "Erro de ligação."; formMsg.style.display = "block"; }
+            this.disabled = false; this.textContent = "Começar agora";
+        });
+        function mostrarAtivo(nome, servico, preco) {
+            document.getElementById("wi-ativo-info").textContent = nome + " · " + servico;
+            const valorInp = document.getElementById("wi-ativo-valor");
+            if (valorInp) valorInp.value = preco > 0 ? preco : "";
+            ativoMsg.textContent = ""; mostrarEcrã(ecrãAtivo);
+        }
+        document.getElementById("wi-btn-terminar-ativo").addEventListener("click", function() {
+            _modoTerminar = true; mostrarEcrã(ecrãScan); abrirCamera();
+        });
+        async function terminarServico() {
+            const valorInp = document.getElementById("wi-ativo-valor");
+            const valor = valorInp ? Math.max(0, parseInt(valorInp.value || "0") || 0) : 0;
+            ativoMsg.textContent = "QR lido! A terminar…"; mostrarEcrã(ecrãAtivo);
+            try {
+                const r = await (await fetch("/mesa/" + _mesaToken + "/terminar", {
+                    method: "POST", headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({ ag_id: _agId, valor })
+                })).json();
+                if (r.ok) {
+                    localStorage.removeItem(LS_KEY);
+                    ativoMsg.textContent = "Concluído! Obrigado.";
+                    setTimeout(fecharModal, 2000);
+                } else {
+                    // Se serviço já não está em andamento, limpar sessão
+                    if (r.error && (r.error.includes("não encontrado") || r.error.includes("em andamento"))) {
+                        localStorage.removeItem(LS_KEY);
+                    }
+                    ativoMsg.textContent = "" + (r.error || "Erro ao terminar.");
+                }
+            } catch(e) { ativoMsg.textContent = "Erro de ligação."; }
+            _processando = false;
+        }
+        document.getElementById("btn-walkin-scan").addEventListener("click", function() {
+            try {
+                const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+                // Se sessão activa no localStorage, mostrar ecrã de serviço em curso.
+                // Se o serviço já não existir, terminarServico() retorna erro e limpa a sessão.
+                if (s && s.agId && s.mesaToken) {
+                    _agId = s.agId; _mesaToken = s.mesaToken;
+                    mostrarAtivo(s.nome, s.servico, s.preco || 0); return;
+                }
+            } catch(e) {}
+            _modoTerminar = false; mostrarEcrã(ecrãScan); abrirCamera();
+        });
+    })();
     </script>
 </body>
 </html>

@@ -1,180 +1,534 @@
 {% extends "base.html" %}
 {% block content %}
 
-{# ── Macro de item de agendamento ─────────────────────────── #}
-{% macro render_item(a, mostrar_data) %}
-<li class="item-agendamento status-{{ a.status }}">
-    <div class="item-hora">
-        <div>{{ a.hora }}</div>
-        {% if mostrar_data %}<div class="item-data-small">{{ a.data }}</div>{% endif %}
+{# ══ Macro de item ══════════════════════════════════════════════ #}
+{% macro render_item(a) %}
+<li class="h-item status-{{ a.status }}" data-cliente="{{ a.cliente | lower | e }}">
+
+    {# Hora + data pequena #}
+    <div class="h-hora">
+        <span>{{ a.hora }}</span>
     </div>
-    <div class="item-body">
-        <div class="item-cliente">{{ a.cliente }}
-            {% if a.tipo == 'walk-in' %}<span class="badge badge-walkin" style="margin-left:6px">walk-in</span>{% endif %}
+
+    {# Corpo #}
+    <div class="h-body">
+        <div class="h-cliente">
+            {{ a.cliente }}
+            {% if a.tipo == 'walk-in' %}<span class="h-tag">walk-in</span>{% endif %}
         </div>
-        <div class="item-servico">
+        <div class="h-meta">
             {{ a.servico_nome }}
-            {% if a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
+            {% if a.barbeiro_nome and a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
         </div>
-        <div class="item-servico">{{ a.valor | moeda }} ECV · {{ a.duracao_estimada }} min est.</div>
-        {% if a.status == 'concluido' and a.duracao_real is not none %}
-        <div class="item-duracao">
-            Real: <strong>{{ a.duracao_real }} min</strong>
-            {% if a.duracao_real > a.duracao_estimada %}
-            <span class="delta neg">+{{ a.duracao_real - a.duracao_estimada }} min</span>
-            {% elif a.duracao_real < a.duracao_estimada %}
-            <span class="delta pos">-{{ a.duracao_estimada - a.duracao_real }} min</span>
-            {% endif %}
+        {% if a.avaliacao %}
+        <div class="h-stars">
+            {% for i in range(a.avaliacao) %}★{% endfor %}<span style="opacity:.25">{% for i in range(5 - a.avaliacao) %}★{% endfor %}</span>
         </div>
         {% endif %}
+        {% if a.notas %}
+        <div class="h-notas">{{ a.notas }}</div>
+        {% endif %}
     </div>
-    <div class="item-acoes">
+
+    {# Direita: valor + badge #}
+    <div class="h-right">
+        {% if a.valor %}
+        <div class="h-valor">{{ a.valor | moeda }} <span class="h-moeda">{{ moeda_simbolo }}</span></div>
+        {% endif %}
         {% if a.status == 'concluido' %}
-        <span class="badge badge-done">✓</span>
+        <span class="h-badge h-badge-ok">Concluído</span>
         {% elif a.status == 'cancelado' %}
-        <span class="badge badge-cancel">✕</span>
-        {% elif a.status == 'em_andamento' %}
-        <span class="badge badge-active">Ativo</span>
+        <span class="h-badge h-badge-cancel">Cancelado</span>
         {% elif a.status == 'nao_compareceu' %}
-        <span class="badge badge-noshow">NC</span>
-        {% else %}
-        <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">📅</a>
-        <form action="{{ url_for('cancelar', id=a.id) }}" method="post"
-              data-nome="{{ a.cliente | e }}"
-              onsubmit="return confirm('Cancelar marcação de ' + this.dataset.nome + '?')">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-cancel" title="Cancelar">✕</button>
-        </form>
+        <span class="h-badge h-badge-nc">Não compareceu</span>
+        {% elif a.status == 'em_andamento' %}
+        <span class="h-badge h-badge-active">Em curso</span>
+        {% elif a.status == 'agendado' %}
+        <span class="h-badge h-badge-ag">Agendado</span>
         {% endif %}
     </div>
+
 </li>
 {% endmacro %}
 
-{# ══════════════════════════════════════════════════════════ #}
+{# ══════════════════════════════════════════════════════════════ #}
 
-<div class="page-header" style="margin-bottom:0">
+<style>
+    /* ── Cabeçalho ───────────────────────────── */
+    .h-header {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+    .h-header h1 { margin: 0; }
+    .h-header-count {
+        font-size: 0.75rem;
+        color: var(--muted);
+        font-weight: 500;
+    }
+
+    /* ── Barra de controlo (search + filtros) ─ */
+    .h-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+    .h-search {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 9px 14px;
+        color: var(--text);
+        font-size: 0.9rem;
+        outline: none;
+    }
+    .h-search:focus { border-color: var(--accent); }
+
+    .h-filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+    }
+    .h-chip {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 5px 12px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text2);
+        text-decoration: none;
+        white-space: nowrap;
+        transition: background .12s, color .12s, border-color .12s;
+    }
+    .h-chip:hover { background: var(--surface2); color: var(--text); }
+    .h-chip.active {
+        background: var(--accent);
+        color: #0a0a0a;
+        border-color: var(--accent);
+        font-weight: 700;
+    }
+    .h-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; flex-shrink:0; }
+
+    /* Seletor de data */
+    .h-date-input {
+        font-size: 0.78rem;
+        padding: 5px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--text);
+        outline: none;
+        cursor: pointer;
+    }
+    .h-date-input:focus { border-color: var(--accent); }
+    .h-date-clear {
+        font-size: 0.72rem;
+        color: var(--muted);
+        text-decoration: none;
+        padding: 5px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: transparent;
+        white-space: nowrap;
+    }
+    .h-date-clear:hover { color: var(--text); }
+
+    /* Dropdown barbeiro */
+    .h-select {
+        font-size: 0.78rem;
+        padding: 5px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--text);
+        outline: none;
+        cursor: pointer;
+        max-width: 160px;
+    }
+    .h-select:focus { border-color: var(--accent); }
+
+    /* ── Resumo ──────────────────────────────── */
+    .h-resumo {
+        display: flex;
+        gap: 20px;
+        padding: 12px 16px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin-bottom: 16px;
+    }
+    .h-resumo-item { display: flex; flex-direction: column; }
+    .h-resumo-val {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: var(--text);
+        line-height: 1.2;
+    }
+    .h-resumo-label {
+        font-size: 0.68rem;
+        color: var(--muted);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    .h-resumo-sep { width: 1px; background: var(--border); align-self: stretch; }
+
+    /* ── Grupo de dia ────────────────────────── */
+    .h-grupo { margin-bottom: 20px; }
+    .h-grupo-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        padding: 0 2px;
+    }
+    .h-grupo-data {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--muted);
+    }
+    .h-grupo-stats {
+        font-size: 0.7rem;
+        color: var(--muted);
+    }
+    .h-grupo-stats .h-grupo-val { color: var(--accent); font-weight: 700; }
+
+    /* ── Lista ───────────────────────────────── */
+    .h-lista {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .h-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        transition: border-color .12s;
+    }
+    .h-item:hover { border-color: var(--border2, #333); }
+    .h-item.status-cancelado { opacity: .55; }
+    .h-item.status-nao_compareceu { opacity: .55; }
+
+    .h-hora {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--text2);
+        min-width: 38px;
+        flex-shrink: 0;
+        text-align: center;
+    }
+
+    .h-body { flex: 1; min-width: 0; }
+    .h-cliente {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .h-tag {
+        font-size: 0.62rem;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(232,196,106,.15);
+        color: var(--accent);
+        border: 1px solid rgba(232,196,106,.25);
+        flex-shrink: 0;
+    }
+    .h-meta {
+        font-size: 0.73rem;
+        color: var(--muted);
+        margin-top: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .h-stars {
+        font-size: 0.72rem;
+        color: #f5c842;
+        margin-top: 2px;
+    }
+    .h-notas {
+        font-size: 0.7rem;
+        color: var(--text2);
+        margin-top: 3px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .h-right {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+    }
+    .h-valor {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--accent);
+    }
+    .h-moeda { font-size: 0.68rem; font-weight: 500; opacity: .7; }
+
+    .h-badge {
+        font-size: 0.62rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 6px;
+        white-space: nowrap;
+    }
+    .h-badge-ok     { background: rgba(46,204,113,.12); color: #2ecc71; border: 1px solid rgba(46,204,113,.25); }
+    .h-badge-cancel { background: rgba(231,76,60,.1);   color: #e74c3c; border: 1px solid rgba(231,76,60,.2); }
+    .h-badge-nc     { background: rgba(243,156,18,.1);  color: #f39c12; border: 1px solid rgba(243,156,18,.2); }
+    .h-badge-active { background: rgba(46,204,113,.12); color: #2ecc71; border: 1px solid rgba(46,204,113,.25); }
+    .h-badge-ag     { background: rgba(255,255,255,.06); color: var(--text2); border: 1px solid var(--border); }
+
+    /* ── Paginação ───────────────────────────── */
+    .h-paginacao {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 24px 0 8px;
+    }
+    .h-paginacao-info {
+        font-size: 0.78rem;
+        color: var(--muted);
+        min-width: 60px;
+        text-align: center;
+    }
+
+    /* ── Empty state ─────────────────────────── */
+    .h-empty {
+        text-align: center;
+        padding: 48px 0;
+        color: var(--muted);
+        font-size: 0.88rem;
+    }
+    .h-empty-title {
+        font-size: 1.4rem;
+        font-weight: 800;
+        color: var(--text2);
+        margin-bottom: 6px;
+    }
+
+    /* ── Search vazio ────────────────────────── */
+    #h-search-vazio {
+        display: none;
+        text-align: center;
+        color: var(--text2);
+        font-size: 0.82rem;
+        padding: 20px 0;
+    }
+</style>
+
+{# ── Cabeçalho ───────────────────────────────────────────────── #}
+<div class="h-header">
     <h1>Histórico</h1>
+    {% if total_registos is not none %}
+    <span class="h-header-count">{{ total_registos }} registo{{ 's' if total_registos != 1 }}</span>
+    {% endif %}
 </div>
 
-{# ── Filtro barbeiros (só chefe) ──────────────────────────── #}
-{% if barbeiros %}
-<div class="filtro-bar" style="margin-top:12px;margin-bottom:0">
-    <a href="{{ url_for('historico', data=data_sel) }}"
-       class="filtro-btn {% if not barbeiro_id_sel %}active{% endif %}">Todos</a>
-    {% for b in barbeiros %}
-    <a href="{{ url_for('historico', barbeiro_id=b.id, data=data_sel) }}"
-       class="filtro-btn {% if barbeiro_id_sel == b.id %}active{% endif %}">{{ b.nome }}</a>
-    {% endfor %}
+{# ── Barra de controlo ───────────────────────────────────────── #}
+<div class="h-controls">
+
+    {# Pesquisa #}
+    <input type="search" class="h-search" id="h-search"
+           placeholder="Pesquisar cliente…"
+           autocomplete="off" autocapitalize="none">
+
+    {# Filtros de período #}
+    <div class="h-filter-row">
+        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo='', data='', status='') }}"
+           class="h-chip {% if not periodo and not data_sel %}active{% endif %}">Tudo</a>
+        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo='hoje', data='', status='') }}"
+           class="h-chip {% if periodo=='hoje' %}active{% endif %}">Hoje</a>
+        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo='semana', data='', status='') }}"
+           class="h-chip {% if periodo=='semana' %}active{% endif %}">Esta semana</a>
+        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo='mes', data='', status='') }}"
+           class="h-chip {% if periodo=='mes' %}active{% endif %}">Este mês</a>
+
+        {% if barbeiros %}
+        <div class="h-sep"></div>
+        <select class="h-select" id="h-barb-sel" onchange="
+            const url = new URL(window.location);
+            url.searchParams.set('barbeiro_id', this.value);
+            url.searchParams.delete('pagina');
+            window.location = url.toString();">
+            <option value="">Todos</option>
+            {% for b in barbeiros %}
+            <option value="{{ b.id }}" {% if barbeiro_id_sel == b.id %}selected{% endif %}>{{ b.nome }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+
+        <div class="h-sep"></div>
+        {# Selecionar dia específico #}
+        <input type="date" class="h-date-input" id="h-date-pick"
+               value="{{ data_sel }}"
+               title="Filtrar por dia específico"
+               onchange="
+                   const url = new URL(window.location);
+                   url.searchParams.set('data', this.value);
+                   url.searchParams.delete('periodo');
+                   url.searchParams.delete('pagina');
+                   window.location = url.toString();">
+        {% if data_sel %}
+        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo='', data='', status='') }}"
+           class="h-date-clear">Limpar</a>
+        {% endif %}
+    </div>
+
+</div>
+
+{# ── Resumo (só quando há dados) ─────────────────────────────── #}
+{% if agendamentos and (total_cortes or total_valor) %}
+<div class="h-resumo">
+    <div class="h-resumo-item">
+        <span class="h-resumo-val">{{ total_cortes }}</span>
+        <span class="h-resumo-label">Concluídos</span>
+    </div>
+    {% if total_valor %}
+    <div class="h-resumo-sep"></div>
+    <div class="h-resumo-item">
+        <span class="h-resumo-val">{{ total_valor | moeda }} <small style="font-size:.7rem;font-weight:500;opacity:.6">{{ moeda_simbolo }}</small></span>
+        <span class="h-resumo-label">Faturado</span>
+    </div>
+    {% endif %}
+    {% if datas %}
+    <div class="h-resumo-sep"></div>
+    <div class="h-resumo-item">
+        <span class="h-resumo-val">{{ datas | length }}</span>
+        <span class="h-resumo-label">Dias c/ mov.</span>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
-{# ── Seletor de dias ───────────────────────────────────────── #}
-<div class="hist-dias-wrap">
-    <div class="hist-dias" id="hist-dias">
+{# ── Lista ───────────────────────────────────────────────────── #}
+<div id="h-search-vazio">Nenhum cliente encontrado.</div>
 
-        {# Chip "Geral" #}
-        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', data='') }}"
-           class="hist-dia-chip {% if not data_sel %}active{% endif %}">
-            <span class="hdc-label">Geral</span>
-            <span class="hdc-total">{{ datas | sum(attribute='total') }}</span>
-        </a>
-
-        {% for d in datas %}
-        {% set partes = d.data.split('-') %}
-        <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', data=d.data) }}"
-           class="hist-dia-chip {% if data_sel == d.data %}active{% endif %}">
-            <span class="hdc-label">{{ partes[2] }}/{{ partes[1] }}</span>
-            <span class="hdc-total">{{ d.total }}</span>
-        </a>
-        {% endfor %}
-
-        {% if not datas %}
-        <span style="color:var(--text2);font-size:0.82rem;padding:8px 4px">Sem registos</span>
-        {% endif %}
-    </div>
-</div>
-
-{# ── Conteúdo ─────────────────────────────────────────────── #}
 {% if agendamentos %}
 
     {% if data_sel %}
-    {# ────── Vista de um único dia ────── #}
-    {% set partes = data_sel.split('-') %}
-    <div class="hist-resumo-dia">
-        <span class="hist-data-titulo">{{ partes[2] }}/{{ partes[1] }}/{{ partes[0] }}</span>
-        <span class="hist-resumo-pill">{{ total_cortes }} corte{% if total_cortes != 1 %}s{% endif %}</span>
-        {% if total_valor %}<span class="hist-resumo-pill accent">{{ total_valor | moeda }} ECV</span>{% endif %}
+    {# ── Vista dia único ── #}
+    {% set p = data_sel.split('-') %}
+    <div class="h-grupo-header" style="margin-bottom:10px">
+        <span class="h-grupo-data">{{ p[2] }}/{{ p[1] }}/{{ p[0] }}</span>
+        <span class="h-grupo-stats">
+            {{ total_cortes }} concluído{{ 's' if total_cortes != 1 }}
+            {% if total_valor %} · <span class="h-grupo-val">{{ total_valor | moeda }} {{ moeda_simbolo }}</span>{% endif %}
+        </span>
     </div>
-
-    <ul class="lista-agendamentos" style="margin-top:4px">
-        {% for a in agendamentos %}
-        {{ render_item(a, false) }}
-        {% endfor %}
+    <ul class="h-lista">
+        {% for a in agendamentos %}{{ render_item(a) }}{% endfor %}
     </ul>
 
     {% else %}
-    {# ────── Vista geral ────── #}
-    <div class="resumo-bar" style="margin-top:16px;margin-bottom:16px">
-        <div class="resumo-item">
-            <span class="resumo-val">{{ total_cortes }}</span>
-            <span class="resumo-label">Concluídos</span>
-        </div>
-        <div class="resumo-sep"></div>
-        <div class="resumo-item">
-            <span class="resumo-val">{{ total_valor | moeda }} <small>ECV</small></span>
-            <span class="resumo-label">Total faturado</span>
-        </div>
-        <div class="resumo-sep"></div>
-        <div class="resumo-item">
-            <span class="resumo-val">{{ datas | length }}</span>
-            <span class="resumo-label">Dias c/ mov.</span>
-        </div>
-    </div>
-
-    {# Agrupar por dia #}
-    {% set ns = namespace(dia_atual='') %}
+    {# ── Vista geral — agrupada por dia ── #}
+    {% set ns = namespace(dia='') %}
+    {% set open = namespace(v=false) %}
     {% for a in agendamentos %}
-        {% if a.data != ns.dia_atual %}
-            {% set ns.dia_atual = a.data %}
+        {% if a.data != ns.dia %}
+            {% if open.v %}</ul></div>{% endif %}
+            {% set ns.dia = a.data %}
+            {% set open.v = true %}
             {# Calcular totais do dia #}
             {% set ags_dia = agendamentos | selectattr('data','equalto',a.data) | list %}
-            {% set val_dia = namespace(v=0) %}
-            {% set n_dia   = namespace(n=0) %}
-            {% for x in ags_dia %}
-                {% if x.status == 'concluido' %}
-                    {% set val_dia.v = val_dia.v + x.valor %}
-                    {% set n_dia.n   = n_dia.n + 1 %}
-                {% endif %}
-            {% endfor %}
-            {# Fechar lista anterior se existir #}
-            {% if not loop.first %}</ul>{% endif %}
-            {# Header do grupo #}
+            {% set vd = namespace(v=0, n=0) %}
+            {% for x in ags_dia %}{% if x.status=='concluido' %}{% set vd.v = vd.v + (x.valor or 0) %}{% set vd.n = vd.n + 1 %}{% endif %}{% endfor %}
             {% set p = a.data.split('-') %}
-            <div class="hist-group-header">
-                <span class="hist-group-data">{{ p[2] }}/{{ p[1] }}/{{ p[0] }}</span>
-                <span class="hist-group-stats">
-                    {{ n_dia.n }} corte{% if n_dia.n != 1 %}s{% endif %}
-                    {% if val_dia.v %} · {{ val_dia.v | moeda }} ECV{% endif %}
+            <div class="h-grupo">
+            <div class="h-grupo-header">
+                <span class="h-grupo-data">{{ p[2] }}/{{ p[1] }}/{{ p[0] }}</span>
+                <span class="h-grupo-stats">
+                    {{ vd.n }} concluído{{ 's' if vd.n != 1 }}
+                    {% if vd.v %} · <span class="h-grupo-val">{{ vd.v | moeda }} {{ moeda_simbolo }}</span>{% endif %}
                 </span>
             </div>
-            <ul class="lista-agendamentos" style="margin-bottom:4px">
+            <ul class="h-lista">
         {% endif %}
-        {{ render_item(a, false) }}
-        {% if loop.last %}</ul>{% endif %}
+        {{ render_item(a) }}
+        {% if loop.last %}</ul></div>{% endif %}
     {% endfor %}
 
     {% endif %}
 
 {% else %}
-<div class="empty-state" style="margin-top:32px">
-    <p>Nenhum registo {% if data_sel %}neste dia{% else %}ainda{% endif %}.</p>
+<div class="h-empty">
+    <div class="h-empty-title">—</div>
+    <div>Nenhum registo {% if data_sel %}neste dia{% elif periodo %}neste período{% else %}ainda{% endif %}.</div>
 </div>
 {% endif %}
 
-<script>
+{# ── Paginação ───────────────────────────────────────────────── #}
+{% if not data_sel and total_paginas and total_paginas > 1 %}
+<div class="h-paginacao">
+    {% if pagina > 1 %}
+    <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo=periodo, data='', pagina=pagina-1, status=status_filtro) }}"
+       class="btn btn-outline-small" style="padding:6px 14px">← Anterior</a>
+    {% else %}
+    <span class="btn btn-outline-small" style="padding:6px 14px;opacity:.3;pointer-events:none">← Anterior</span>
+    {% endif %}
+    <span class="h-paginacao-info">{{ pagina }} / {{ total_paginas }}</span>
+    {% if pagina < total_paginas %}
+    <a href="{{ url_for('historico', barbeiro_id=barbeiro_id_sel or '', periodo=periodo, data='', pagina=pagina+1, status=status_filtro) }}"
+       class="btn btn-outline-small" style="padding:6px 14px">Seguinte →</a>
+    {% else %}
+    <span class="btn btn-outline-small" style="padding:6px 14px;opacity:.3;pointer-events:none">Seguinte →</span>
+    {% endif %}
+</div>
+{% endif %}
+
+<script nonce="{{ csp_nonce }}">
 document.addEventListener("DOMContentLoaded", () => {
-    const active = document.querySelector(".hist-dia-chip.active");
-    if (active) active.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const inp = document.getElementById("h-search");
+    if (!inp) return;
+    let _t = null;
+    inp.addEventListener("input", () => {
+        clearTimeout(_t);
+        _t = setTimeout(() => {
+            const q = inp.value.trim().toLowerCase();
+            const items = document.querySelectorAll(".h-item[data-cliente]");
+            let vis = 0;
+            items.forEach(li => {
+                const match = !q || (li.dataset.cliente || "").includes(q);
+                li.style.display = match ? "" : "none";
+                if (match) vis++;
+            });
+            // Esconder grupos sem itens visíveis
+            document.querySelectorAll(".h-grupo").forEach(g => {
+                const ul = g.querySelector(".h-lista");
+                if (!ul) return;
+                const temVis = Array.from(ul.querySelectorAll(".h-item")).some(li => li.style.display !== "none");
+                g.style.display = temVis ? "" : "none";
+            });
+            document.getElementById("h-search-vazio").style.display = q && vis === 0 ? "block" : "none";
+        }, 280);
+    });
 });
 </script>
 

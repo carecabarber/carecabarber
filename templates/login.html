@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Barbearia — Login</title>
@@ -12,16 +13,24 @@
 </head>
 <body>
     <div class="login-wrap">
-        <div class="login-logo">✂️</div>
-        <h1 class="login-titulo">Barbearia</h1>
+        <div class="login-logo">
+            <img src="{{ url_for('static', filename='logo.svg') }}"
+                 alt="CarecaBarber" width="320" height="134"
+                 style="display:block;margin:0 auto 4px;max-width:88vw">
+        </div>
         <p style="color:var(--text2);font-size:0.8rem;margin-bottom:28px;text-align:center;font-weight:500">
             Acesso exclusivo para a equipa
         </p>
 
         <form action="{{ url_for('login') }}" method="post" class="form-card">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% with msgs = get_flashed_messages(with_categories=true) %}
+              {% for cat, msg in msgs %}
+                <div class="login-erro">{{ msg }}</div>
+              {% endfor %}
+            {% endwith %}
             {% if erro %}
-            <div class="login-erro">⚠️ {{ erro }}</div>
+            <div class="login-erro">{{ erro }}</div>
             {% endif %}
 
             <div class="field">
@@ -42,9 +51,124 @@
             </button>
         </form>
 
+        {# BIOMETRIA DESATIVADA TEMPORARIAMENTE #}
+        {% if false %}
+        <!-- Separador biometria -->
+        <div id="bio-section" style="display:none;width:100%;max-width:360px;margin-top:4px">
+            <div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px">
+                <div style="flex:1;height:1px;background:var(--border)"></div>
+                <span style="font-size:0.72rem;color:var(--text2);font-weight:600">ou</span>
+                <div style="flex:1;height:1px;background:var(--border)"></div>
+            </div>
+
+            <div id="bio-erro" class="login-erro" style="display:none;margin-bottom:10px"></div>
+
+            <button type="button" id="btn-bio" class="btn btn-bio btn-full">
+                Entrar com biometria
+            </button>
+        </div>
+
         <p class="login-link" style="color:var(--muted)">
             Clientes: usa o link QR da tua barbearia.
         </p>
+        {% endif %}
     </div>
+
+{% if false %}{# Script de biometria desativado junto com o botão — mover para fora do if false quando reativar #}
+<script nonce="{{ csp_nonce }}">
+// Mostrar botão de biometria apenas se o browser suportar WebAuthn
+if (window.PublicKeyCredential) {
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then(ok => {
+            if (ok) document.getElementById("bio-section").style.display = "block";
+        })
+        .catch(() => {});
+}
+document.getElementById("btn-bio")?.addEventListener("click", loginBiometrico);
+
+function b64uToBuffer(b64u) {
+    const b64 = b64u.replace(/-/g,'+').replace(/_/g,'/').padEnd(
+        b64u.length + (4 - b64u.length % 4) % 4, '=');
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return buf.buffer;
+}
+function bufToB64u(buf) {
+    const bytes = new Uint8Array(buf);
+    let str = '';
+    bytes.forEach(b => str += String.fromCharCode(b));
+    return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function loginBiometrico() {
+    const btn  = document.getElementById("btn-bio");
+    const erroDiv = document.getElementById("bio-erro");
+    erroDiv.style.display = "none";
+    btn.disabled = true;
+    btn.textContent = "A verificar…";
+
+    try {
+        // 1. Obter desafio do servidor
+        const beginResp = await fetch("/webauthn/auth/begin", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({})
+        });
+        if (!beginResp.ok) throw new Error("Servidor indisponível (" + beginResp.status + ").");
+        const options = await beginResp.json();
+        if (options.error) throw new Error(options.error);
+
+        // 2. Converter challenge e credential IDs para ArrayBuffer
+        options.challenge = b64uToBuffer(options.challenge);
+        if (options.allowCredentials) {
+            options.allowCredentials = options.allowCredentials.map(c => ({
+                ...c, id: b64uToBuffer(c.id)
+            }));
+        }
+
+        // 3. Invocar autenticador do dispositivo (Touch ID / Face ID / Windows Hello)
+        const cred = await navigator.credentials.get({ publicKey: options });
+
+        // 4. Enviar resultado para verificação no servidor
+        const payload = {
+            id: cred.id,
+            rawId: bufToB64u(cred.rawId),
+            response: {
+                authenticatorData: bufToB64u(cred.response.authenticatorData),
+                clientDataJSON:    bufToB64u(cred.response.clientDataJSON),
+                signature:         bufToB64u(cred.response.signature),
+                userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null
+            },
+            type: cred.type,
+            authenticatorAttachment: cred.authenticatorAttachment || null
+        };
+
+        const completeResp = await fetch("/webauthn/auth/complete", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        if (!completeResp.ok) throw new Error("Erro do servidor (" + completeResp.status + ").");
+        const result = await completeResp.json();
+        if (result.ok) {
+            window.location.href = result.redirect;
+        } else {
+            throw new Error(result.error || "Falha na autenticação biométrica.");
+        }
+
+    } catch (err) {
+        if (err.name === "NotAllowedError") {
+            erroDiv.textContent = "Autenticação cancelada ou não autorizada.";
+        } else {
+            erroDiv.textContent = "" + (err.message || "Erro desconhecido.");
+        }
+        erroDiv.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Entrar com biometria";
+    }
+}
+</script>
+{% endif %}{# fim bloco biometria desativado #}
 </body>
 </html>

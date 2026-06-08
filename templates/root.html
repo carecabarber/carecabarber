@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#080808">
-    <title>Root — Gestão de Barbearias</title>
+    <title>Root — Gestão de Estabelecimentos</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <style>
@@ -48,26 +48,151 @@
         .alert-err { background:#2e0a0a; color:var(--red,#e74c3c);   padding:12px 16px; border-radius:8px; margin-bottom:16px; }
         .criar-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         @media(max-width:520px){ .criar-grid { grid-template-columns:1fr; } }
+
+        .plano-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+        }
+        .plano-ok    { background: rgba(46,204,113,.12); color: #2ecc71; border: 1px solid rgba(46,204,113,.25); }
+        .plano-warn  { background: rgba(243,156,18,.12);  color: #f39c12; border: 1px solid rgba(243,156,18,.25); }
+        .plano-exp   { background: rgba(231,76,60,.12);   color: #e74c3c; border: 1px solid rgba(231,76,60,.25); }
+        .plano-sem   { background: rgba(255,255,255,.06); color: #888;    border: 1px solid rgba(255,255,255,.08); }
+        .plano-trial { background: rgba(46,204,113,.08);  color: #2ecc71; border: 1px solid rgba(46,204,113,.2); }
+        .tipo-badge {
+            display: inline-block;
+            font-size: 0.68rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(255,255,255,.06);
+            color: var(--text2);
+            letter-spacing: .03em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .outro-campos {
+            display: none;
+            margin-top: 14px;
+            padding: 14px;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 10px;
+            background: rgba(255,255,255,.03);
+        }
+        .outro-campos.visivel { display: block; }
+        .outro-campos .field { margin-bottom: 10px; }
+        .outro-campos .field:last-child { margin-bottom: 0; }
+        .outro-campos label {
+            font-size: 0.75rem;
+            color: var(--muted);
+            display: block;
+            margin-bottom: 4px;
+        }
+        /* Popout de histórico */
+        .hist-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .hist-overlay.open { display: flex; }
+        .hist-modal {
+            background: var(--card, #1a1a1a);
+            border: 1px solid var(--border, #2a2a2a);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 460px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .hist-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border, #2a2a2a);
+            flex-shrink: 0;
+        }
+        .hist-modal-title {
+            font-size: 0.95rem;
+            font-weight: 800;
+        }
+        .hist-modal-close {
+            background: rgba(255,255,255,.07);
+            border: none;
+            border-radius: 8px;
+            color: var(--text, #f0f0f0);
+            font-size: 1rem;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .hist-modal-close:hover { background: rgba(255,255,255,.12); }
+        .hist-modal-body {
+            overflow-y: auto;
+            padding: 16px 20px;
+            flex: 1;
+        }
+        .hist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 12px;
+            background: rgba(255,255,255,.03);
+            border-radius: 8px;
+            gap: 12px;
+            font-size: 0.78rem;
+        }
+        .hist-item + .hist-item { margin-top: 6px; }
+        .hist-item-nome { font-weight: 600; color: var(--text, #f0f0f0); }
+        .hist-item-ate  { color: var(--muted, #666); font-size: 0.72rem; margin-top: 2px; }
+        .hist-item-right { text-align: right; white-space: nowrap; flex-shrink: 0; }
+        .hist-item-preco { color: var(--accent, #e8c46a); font-weight: 700; }
+        .hist-item-data  { color: var(--muted, #666); font-size: 0.68rem; margin-top: 2px; }
+        .outro-campos small {
+            display: block;
+            font-size: 0.68rem;
+            color: var(--muted);
+            margin-top: 8px;
+            opacity: .7;
+        }
     </style>
 </head>
 <body>
     <header class="topbar">
-        <span class="logo">✂️ Root</span>
+        <span class="logo">Root</span>
         <div class="user-info">
-            <span class="user-nome">🔑 Root</span>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+            <span class="user-nome">Root</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
         </div>
     </header>
 
     <main class="container">
         <div class="page-header">
-            <h1>Gestão de Barbearias</h1>
+            <h1>Gestão de Estabelecimentos</h1>
         </div>
 
         <!-- ── Alterar senha do Root ── -->
         <details class="form-card" style="margin-bottom:20px;cursor:pointer">
             <summary style="font-size:0.9rem;font-weight:700;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px">
-                🔑 Alterar senha do Root
+                Alterar senha do Root
             </summary>
             <form action="{{ url_for('root_alterar_senha') }}" method="post" style="margin-top:16px">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -90,57 +215,125 @@
         </details>
 
         {% if erro %}
-        <div class="alert-err">⚠️ {{ erro }}</div>
+        <div class="alert-err">{{ erro }}</div>
         {% endif %}
         {% if ok %}
-        <div class="alert-ok">✅ {{ ok }}</div>
+        <div class="alert-ok">{{ ok }}</div>
         {% endif %}
 
-        <!-- ── Criar nova barbearia ── -->
+        <!-- ── Criar novo estabelecimento ── -->
         <div class="form-card" style="margin-bottom:28px">
             <h2 style="font-size:0.95rem;font-weight:700;color:var(--muted);margin-bottom:18px;text-transform:uppercase;letter-spacing:.05em">
-                ➕ Nova Barbearia
+                Novo Estabelecimento
             </h2>
             <form action="{{ url_for('root_criar_barbearia') }}" method="post" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="criar-grid">
+
+                <!-- Tipo de negócio -->
+                <div class="field" style="grid-column:1/-1">
+                    <label for="tipo-criar">Tipo de negócio</label>
+                    <select id="tipo-criar" name="tipo">
+                        {% for t_key, t_val in VOCAB_TIPOS.items() %}
+                        <option value="{{ t_key }}">{{ t_val.tipo_label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Campos personalizados — só visíveis quando tipo = "outro" -->
+                <div id="outro-campos-criar" class="outro-campos">
+                    <div style="font-size:0.78rem;font-weight:700;color:var(--accent);margin-bottom:12px">
+                        Personalizar interface
+                    </div>
                     <div class="field">
-                        <label>Nome da Barbearia</label>
+                        <label>Como se chama o negócio?</label>
+                        <input type="text" name="outro_tipo_label" placeholder="Ex: Academia de Dança, Clínica Veterinária…" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label>Como se chama o profissional? <span style="opacity:.5">(singular)</span></label>
+                        <input type="text" name="outro_profissional" placeholder="Ex: Instrutor, Veterinário, Treinador…" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label>Como se chama o serviço? <span style="opacity:.5">(singular)</span></label>
+                        <input type="text" name="outro_servico" placeholder="Ex: Aula, Consulta, Tratamento…" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label>Como se chama o agendamento? <span style="opacity:.5">(singular)</span></label>
+                        <input type="text" name="outro_agendamento" placeholder="Ex: Reserva, Sessão, Marcação…" autocomplete="off">
+                    </div>
+                    <small>Os plurais são gerados automaticamente. Podes alterar mais tarde no painel de edição.</small>
+                </div>
+
+                <div class="criar-grid" style="margin-top:16px">
+                    <div class="field">
+                        <label>Nome do estabelecimento</label>
                         <input type="text" name="nome" placeholder="Ex: Barbearia Central" required>
                     </div>
                     <div class="field">
-                        <label>Nome do Chefe</label>
+                        <label>Nome do responsável</label>
                         <input type="text" name="chefe_nome" placeholder="Ex: João Silva" required>
                     </div>
                     <div class="field">
-                        <label>Username do Chefe</label>
+                        <label>Username</label>
                         <input type="text" name="username" placeholder="Ex: joao" required autocomplete="off">
                     </div>
                     <div class="field">
-                        <label>Senha do Chefe</label>
+                        <label>Senha</label>
                         <input type="password" name="senha" placeholder="Mínimo 6 caracteres" required autocomplete="new-password">
                     </div>
                     <div class="field">
-                        <label>Logo da Barbearia <small style="color:var(--muted)">(opcional — jpg, png, webp)</small></label>
+                        <label>Logo <small style="color:var(--muted)">(opcional — jpg, png, webp)</small></label>
                         <input type="file" name="logo" accept="image/jpeg,image/png,image/webp,image/gif">
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary" style="margin-top:4px">
-                    Criar Barbearia
+                <button type="submit" class="btn btn-primary" style="margin-top:12px">
+                    Criar Estabelecimento
                 </button>
             </form>
         </div>
 
-        <!-- ── Lista de barbearias ── -->
+        <!-- ── Acções globais ── -->
+        <div style="margin-bottom:20px">
+            <a href="{{ url_for('root_precos') }}" class="btn btn-sm">Preços dos Planos</a>
+        </div>
+
+        <!-- ── Lista de estabelecimentos ── -->
         <h2 style="font-size:0.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">
-            Barbearias ({{ barbearias|length }})
+            Estabelecimentos ({{ barbearias|length }})
         </h2>
 
         {% if barbearias %}
         <div class="root-grid">
             {% for b in barbearias %}
+            {% set b_tipo = b.get('tipo') or 'barbearia' %}
+            {% set b_vocab = VOCAB_TIPOS.get(b_tipo, VOCAB_TIPOS['barbearia']) %}
+            {% set b_vc = b.vocab_custom | from_json %}
+            {% set b_tipo_label = b_vc.get('tipo_label', b_vocab.tipo_label) if b_tipo == 'outro' else b_vocab.tipo_label %}
+            {% set p = planos.get(b.id) %}
             <div class="barb-card{% if not b.ativa %} inativa{% endif %}">
-                <div class="barb-card-nome">✂️ {{ b.nome }}</div>
+                <div class="barb-card-nome">{{ b.nome }}</div>
+                <div class="tipo-badge">{{ b_tipo_label }}</div>
+
+                <!-- Plano — badge de estado + botão para página dedicada -->
+                {% if p %}
+                  {% set is_trial = p.codigo_plano == plano_exp[0] %}
+                  {% if is_trial and p.ativo %}
+                    <div class="plano-badge plano-trial">Experiência</div>
+                  {% elif p.sem_limite %}
+                    <div class="plano-badge plano-sem">∞ Sem limite</div>
+                  {% elif p.ativo and p.dias_restantes >= 0 %}
+                    {% if p.dias_restantes <= 5 %}
+                    <div class="plano-badge plano-warn">⚠ {{ p.dias_restantes }}d restantes</div>
+                    {% else %}
+                    <div class="plano-badge plano-ok">✓ {{ p.dias_restantes }}d · {{ p.expira_em }}</div>
+                    {% endif %}
+                  {% elif is_trial %}
+                    <div class="plano-badge plano-exp">Experiência expirada</div>
+                  {% else %}
+                    <div class="plano-badge plano-exp">✕ Expirado</div>
+                  {% endif %}
+                {% else %}
+                  <div class="plano-badge plano-exp">✕ Sem plano</div>
+                {% endif %}
                 {% if b.logo %}
                 <div style="margin-bottom:12px">
                     <img src="{{ url_for('static', filename='logos/' + b.logo) }}"
@@ -150,70 +343,239 @@
                 <div class="barb-card-meta">
                     ID {{ b.id }} &nbsp;·&nbsp;
                     {% if b.ativa %}
-                    <span style="color:var(--green,#2ecc71)">● Ativa</span>
+                    <span style="color:var(--green,#2ecc71)">● Ativo</span>
                     {% else %}
-                    <span style="color:var(--muted)">● Inativa</span>
+                    <span style="color:var(--muted)">● Inativo</span>
                     {% endif %}
                 </div>
 
                 <a class="barb-link"
                    href="{{ url_for('cliente_entrada', slug=b.slug) }}"
                    target="_blank">
-                    🔗 /cliente/{{ b.slug }}
+                    /cliente/{{ b.slug }}
                 </a>
 
-                <div class="barb-actions">
-                    <!-- Entrar como chefe -->
+                <div class="barb-actions" style="flex-direction:column;gap:8px">
+                    <!-- Linha 1: acções principais -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
                     {% if b.ativa %}
-                    <a href="{{ url_for('root_gerir_barbearia', id=b.id) }}"
-                       class="btn btn-sm btn-primary" style="text-decoration:none">
-                        🔑 Gerir
-                    </a>
-                    {% endif %}
-                    <!-- Editar nome -->
-                    <form action="{{ url_for('root_editar_barbearia', id=b.id) }}" method="post" class="form-inline">
+                    <form action="{{ url_for('root_gerir_barbearia', id=b.id) }}" method="post" style="display:inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="text" name="nome" value="{{ b.nome }}">
-                        <button type="submit" class="btn btn-sm">✏️</button>
+                        <button type="submit" class="btn btn-sm btn-primary">Gerir</button>
                     </form>
+                    {% endif %}
+                    <a href="{{ url_for('root_planos_barbearia', id=b.id) }}" class="btn btn-sm">Planos</a>
+                    {% set hist = historico.get(b.id, []) %}
+                    {% if hist %}
+                    <button type="button" class="btn btn-sm js-hist-btn" data-id="{{ b.id }}">Histórico</button>
+                    {% endif %}
                     <!-- Toggle ativo/inativo -->
                     <form action="{{ url_for('root_toggle_barbearia', id=b.id) }}" method="post">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm {% if b.ativa %}btn-danger{% endif %}">
-                            {% if b.ativa %}🔴{% else %}🟢{% endif %}
+                            {% if b.ativa %}Desativar{% else %}Ativar{% endif %}
                         </button>
                     </form>
+                    </div><!-- fim linha 1 -->
+
+                    <!-- Linha 2: acções secundárias (editar + logo) -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
+                    <!-- Editar nome + tipo -->
+                    <details>
+                        <summary class="btn btn-sm" style="cursor:pointer;list-style:none">Editar</summary>
+                        <form action="{{ url_for('root_editar_barbearia', id=b.id) }}" method="post"
+                              style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="text" name="nome" value="{{ b.nome }}"
+                                   style="font-size:0.85rem;padding:6px 10px">
+                            <select name="tipo" class="js-tipo-edit"
+                                    data-target="outro-edit-{{ b.id }}"
+                                    style="font-size:0.82rem;padding:6px 10px">
+                                {% for t_key, t_val in VOCAB_TIPOS.items() %}
+                                <option value="{{ t_key }}"
+                                        {% if b_tipo == t_key %}selected{% endif %}>
+                                    {{ t_val.tipo_label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <!-- Campos personalizados do tipo 'outro' (edit) -->
+                            <div id="outro-edit-{{ b.id }}"
+                                 class="outro-campos{% if b_tipo == 'outro' %} visivel{% endif %}">
+                                <div style="font-size:0.72rem;font-weight:700;color:var(--accent);margin-bottom:8px">
+                                    Personalizar interface
+                                </div>
+                                <div class="field">
+                                    <label>Nome do negócio</label>
+                                    <input type="text" name="outro_tipo_label"
+                                           value="{{ b_vc.get('tipo_label', '') }}"
+                                           placeholder="Ex: Academia de Dança" autocomplete="off"
+                                           style="font-size:0.82rem;padding:6px 10px">
+                                </div>
+                                <div class="field">
+                                    <label>Profissional (singular)</label>
+                                    <input type="text" name="outro_profissional"
+                                           value="{{ b_vc.get('profissional', '') }}"
+                                           placeholder="Ex: Instrutor" autocomplete="off"
+                                           style="font-size:0.82rem;padding:6px 10px">
+                                </div>
+                                <div class="field">
+                                    <label>Serviço (singular)</label>
+                                    <input type="text" name="outro_servico"
+                                           value="{{ b_vc.get('servico', '') }}"
+                                           placeholder="Ex: Aula" autocomplete="off"
+                                           style="font-size:0.82rem;padding:6px 10px">
+                                </div>
+                                <div class="field">
+                                    <label>Agendamento (singular)</label>
+                                    <input type="text" name="outro_agendamento"
+                                           value="{{ b_vc.get('agendamento', '') }}"
+                                           placeholder="Ex: Reserva" autocomplete="off"
+                                           style="font-size:0.82rem;padding:6px 10px">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+                        </form>
+                    </details>
                     <!-- Logo upload -->
                     <form action="{{ url_for('root_logo_barbearia', id=b.id) }}" method="post"
-                          enctype="multipart/form-data" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+                          enctype="multipart/form-data" class="js-logo-form">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="file" name="logo" accept="image/jpeg,image/png,image/webp"
-                               style="font-size:0.7rem;flex:1;min-width:0">
-                        <button type="submit" class="btn btn-sm" title="Atualizar logo">🖼️</button>
+                        <label class="btn btn-sm js-logo-label" style="cursor:pointer;margin:0" title="Carregar logo">
+                            Logo
+                            <input type="file" name="logo" accept="image/jpeg,image/png,image/webp"
+                                   style="display:none" class="js-logo-input">
+                        </label>
                     </form>
-                </div>
-            </div>
+                    </div><!-- fim linha 2 -->
+                </div><!-- fim barb-actions -->
+            </div><!-- fim barb-card -->
             {% endfor %}
         </div>
         {% else %}
         <div style="text-align:center;color:var(--muted);padding:60px 0;font-size:0.95rem">
-            Nenhuma barbearia ainda. Cria a primeira acima! ✂️
+            Nenhum estabelecimento ainda. Cria o primeiro acima!
         </div>
         {% endif %}
     </main>
 
-    <script>
+    <!-- Popouts de histórico (um por barbearia) -->
+    {% for b in barbearias %}
+    {% set hist = historico.get(b.id, []) %}
+    {% if hist %}
+    <div class="hist-overlay" id="hist-overlay-{{ b.id }}">
+        <div class="hist-modal">
+            <div class="hist-modal-header">
+                <div>
+                    <div class="hist-modal-title">Histórico de Pagamentos</div>
+                    <div style="font-size:0.75rem;color:var(--muted);margin-top:2px">{{ b.nome }}</div>
+                </div>
+                <button type="button" class="hist-modal-close js-hist-close" data-id="{{ b.id }}">✕</button>
+            </div>
+            <div class="hist-modal-body">
+                {% for pg in hist %}
+                <div class="hist-item">
+                    <div>
+                        <div class="hist-item-nome">{{ pg.nome_plano }}</div>
+                        <div class="hist-item-ate">{{ 'sem prazo' if pg.expira_em == '9999-12-31' else 'válido até ' + pg.expira_em }}</div>
+                    </div>
+                    <div class="hist-item-right">
+                        {% if pg.preco %}<div class="hist-item-preco">{{ pg.preco }} CVE</div>{% endif %}
+                        <div class="hist-item-data">{{ pg.registado_em[:10] }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <script nonce="{{ csp_nonce }}">
     (function() {
+        // ── CSRF: garantir token em todos os forms ───────────────
         const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) return;
-        document.querySelectorAll('form').forEach(function(f) {
-            if (!f.querySelector('[name="csrf_token"]')) {
-                const inp = document.createElement('input');
-                inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
-                f.prepend(inp);
+        if (token) {
+            document.querySelectorAll('form').forEach(function(f) {
+                if (!f.querySelector('[name="csrf_token"]')) {
+                    const inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
+                    f.prepend(inp);
+                }
+            });
+        }
+
+        // ── Show/hide campos "Outro" no formulário de criação ────
+        const tipoSelect = document.getElementById('tipo-criar');
+        const outroDiv   = document.getElementById('outro-campos-criar');
+        function atualizarCriar() {
+            if (!tipoSelect || !outroDiv) return;
+            const isOutro = tipoSelect.value === 'outro';
+            outroDiv.classList.toggle('visivel', isOutro);
+            // Required dinâmico: só obrigatório se visível
+            outroDiv.querySelectorAll('input').forEach(function(inp) {
+                inp.required = isOutro;
+            });
+        }
+        if (tipoSelect) {
+            tipoSelect.addEventListener('change', atualizarCriar);
+            atualizarCriar(); // estado inicial
+        }
+
+        // ── Show/hide campos "Outro" nos formulários de edição ───
+        document.querySelectorAll('.js-tipo-edit').forEach(function(sel) {
+            const targetId = sel.dataset.target;
+            const targetDiv = document.getElementById(targetId);
+            function atualizarEdit() {
+                if (!targetDiv) return;
+                targetDiv.classList.toggle('visivel', sel.value === 'outro');
+            }
+            sel.addEventListener('change', atualizarEdit);
+            atualizarEdit(); // estado inicial (reflete seleção atual)
+        });
+
+        // ── Popouts de histórico ─────────────────────────────────
+        function abrirHist(id) {
+            const overlay = document.getElementById('hist-overlay-' + id);
+            if (overlay) { overlay.classList.add('open'); document.body.style.overflow = 'hidden'; }
+        }
+        function fecharHist(id) {
+            const overlay = document.getElementById('hist-overlay-' + id);
+            if (overlay) { overlay.classList.remove('open'); document.body.style.overflow = ''; }
+        }
+        document.querySelectorAll('.js-hist-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() { abrirHist(btn.dataset.id); });
+        });
+        document.querySelectorAll('.js-hist-close').forEach(function(btn) {
+            btn.addEventListener('click', function() { fecharHist(btn.dataset.id); });
+        });
+        // Fechar ao clicar fora do modal
+        document.querySelectorAll('.hist-overlay').forEach(function(overlay) {
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay) {
+                    overlay.classList.remove('open');
+                    document.body.style.overflow = '';
+                }
+            });
+        });
+        // Fechar com Escape
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.hist-overlay.open').forEach(function(o) {
+                    o.classList.remove('open');
+                });
+                document.body.style.overflow = '';
             }
         });
     })();
+    </script>
+    <script nonce="{{ csp_nonce }}">
+    // Logo upload — submeter form ao selecionar ficheiro
+    document.addEventListener('change', function(e) {
+        const inp = e.target.closest('.js-logo-input');
+        if (inp && inp.files && inp.files.length > 0) {
+            inp.closest('.js-logo-form').submit();
+        }
+    });
     </script>
 </body>
 </html>

@@ -8,6 +8,13 @@
 
 <p class="hint">Cliente que chegou agora. A hora fica registada automaticamente.</p>
 
+{% if fora_horario %}
+<div style="background:rgba(243,156,18,0.12);border:1px solid rgba(243,156,18,0.4);border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:0.83rem">
+    <span style="font-size:1.2rem"></span>
+    <span>Fora do horário de funcionamento{% if hora_fecho %} (fecho às {{ hora_fecho }}){% endif %} — podes registar na mesma.</span>
+</div>
+{% endif %}
+
 <form action="{{ url_for('walkin') }}" method="post" class="form-card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -29,15 +36,18 @@
         <select id="servico_id" name="servico_id" required>
             {% for s in servicos %}
             <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}" data-preco="{{ s.preco or 0 }}">
-                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} ECV{% endif %}
+                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
             </option>
             {% endfor %}
         </select>
     </div>
 
     {% if session.get('role') == 'chefe' and barbeiros %}
+    {% if barbeiros | length == 1 %}
+    <input type="hidden" id="barbeiro_id" name="barbeiro_id" value="{{ barbeiros[0].id }}">
+    {% else %}
     <div class="field">
-        <label for="barbeiro_id">Barbeiro</label>
+        <label for="barbeiro_id">{{ vocab.profissional }}</label>
         <select id="barbeiro_id" name="barbeiro_id">
             <option value="">— Qualquer —</option>
             {% for b in barbeiros %}
@@ -46,15 +56,23 @@
         </select>
     </div>
     {% endif %}
+    {% endif %}
 
     <div class="duracao-preview">
         ⏱ Estimado: <strong id="dur-label">{{ servicos[0].duracao_min if servicos else 0 }} min</strong>
     </div>
 
+    <div class="field">
+        <label for="notas">Notas <span style="color:var(--text2);font-size:0.75rem">(opcional)</span></label>
+        <textarea id="notas" name="notas" rows="2" placeholder="Ex: cliente habitual, preferências…"
+                  maxlength="300"
+                  style="resize:vertical;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;color:var(--text);font-size:0.9rem;width:100%;box-sizing:border-box;font-family:inherit"></textarea>
+    </div>
+
     <button type="submit" class="btn btn-primary btn-full">Registar</button>
 </form>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const duracoes = { {% for s in servicos %}{{ s.id }}: {{ s.duracao_min }},{% endfor %} };
 const sel = document.getElementById("servico_id");
 const durLabel = document.getElementById("dur-label");

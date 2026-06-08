@@ -2,48 +2,129 @@
 <html lang="pt">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0f0f0f">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+    <!-- PWA core -->
+    <meta name="theme-color" content="#0a0a0a">
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- iOS — instalação como app nativa -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Barbearia</title>
+    <meta name="apple-mobile-web-app-title" content="CarecaBarber">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
+    <!-- iOS splash screens (portrait) -->
+    <link rel="apple-touch-startup-image"
+          href="{{ url_for('static', filename='icon-512.png') }}"
+          media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)">
+    <link rel="apple-touch-startup-image"
+          href="{{ url_for('static', filename='icon-512.png') }}"
+          media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)">
+    <link rel="apple-touch-startup-image"
+          href="{{ url_for('static', filename='icon-512.png') }}"
+          media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)">
+
+    <!-- Android Chrome — cor da barra de endereço -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="CarecaBarber">
+
+    <!-- Favicons -->
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png" sizes="32x32">
+
+    <title>CarecaBarber</title>
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ av }}">
+    <script nonce="{{ csp_nonce }}">const _SERVER_NOW = {{ agora_iso | tojson }};</script>
 </head>
-<body>
+<body class="has-bottom-nav">
     {% if session.get('root_gerir') %}
     <div style="background:#7c3aed;color:#fff;text-align:center;padding:7px 16px;font-size:0.8rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:12px;position:sticky;top:0;z-index:9999">
-        🔑 Root — a gerir barbearia ID {{ session.get('barbearia_id') }}
-        <a href="{{ url_for('root_sair_barbearia') }}"
-           style="background:rgba(255,255,255,0.2);color:#fff;padding:3px 10px;border-radius:20px;text-decoration:none;font-size:0.75rem">
-            ← Voltar ao Root
-        </a>
+        Root — a gerir barbearia ID {{ session.get('barbearia_id') }}
+        <form action="{{ url_for('root_sair_barbearia') }}" method="post" style="display:inline;margin:0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" style="background:rgba(255,255,255,0.2);color:#fff;padding:3px 10px;border-radius:20px;border:none;cursor:pointer;font-size:0.75rem">
+                ← Voltar ao Root
+            </button>
+        </form>
     </div>
     {% endif %}
     <header class="topbar">
-        <span class="logo">✂️ Barbearia</span>
+        <span class="logo">
+            <img src="{{ url_for('static', filename='logo.svg') }}" alt="CarecaBarber" height="38" style="display:block;vertical-align:middle">
+        </span>
         <div class="user-info">
-            <span class="user-nome">{% if session.get('root_gerir') %}🔑{% elif session.get('role')=='chefe' %}👑{% else %}💈{% endif %} {{ session.get('user_nome','') }}</span>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Sair</a>
+            {%- if plano_info and not plano_info.sem_limite -%}
+              {%- if plano_info.dias_restantes is not none and plano_info.dias_restantes >= 0 -%}
+                {%- if plano_info.dias_restantes <= 5 -%}
+                <span class="plano-topbar plano-topbar-warn" title="Plano expira em {{ plano_info.expira_em }}">
+                    ⚠ {{ plano_info.dias_restantes }}d
+                </span>
+                {%- else -%}
+                <span class="plano-topbar plano-topbar-ok" title="Plano válido até {{ plano_info.expira_em }}">
+                    ✓ {{ plano_info.dias_restantes }}d
+                </span>
+                {%- endif -%}
+              {%- endif -%}
+            {%- endif -%}
+            <span class="user-nome" style="display:flex;align-items:center;gap:7px">
+            {%- if session.get('root_gerir') -%}
+            {%- elif session.get('user_id') -%}
+                <img src="{{ url_for('foto_barbeiro', barbeiro_id=session.get('user_id')) }}"
+                     alt="{{ session.get('user_nome','') }}" width="26" height="26"
+                     style="border-radius:50%;object-fit:cover;border:1.5px solid var(--border)"
+                     class="js-avatar-topbar">
+            {%- else -%}
+                <span style="opacity:.5">◈</span>
+            {%- endif -%}
+            {{ session.get('user_nome','') }}</span>
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin:0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-logout">Sair</button>
+            </form>
         </div>
     </header>
 
     <main class="container">{% block content %}{% endblock %}</main>
 
+    <!-- Modal confirm genérico (substitui window.confirm() — bloqueado em iOS PWA standalone) -->
+    <div class="modal-overlay" id="confirmOverlay" style="z-index:600">
+        <div class="modal-box" id="confirmBox" style="padding:24px 20px 28px">
+            <div class="modal-titulo" id="confirmMensagem" style="font-size:1rem;margin-bottom:20px;text-align:center"></div>
+            <div class="modal-acoes">
+                <button class="btn btn-cancel" id="confirmNao">Não</button>
+                <button class="btn btn-terminar-modal" id="confirmSim">Sim</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal terminar -->
-    <div class="modal-overlay" id="modalOverlay" onclick="fecharModal()">
-        <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-box" id="modalBox">
             <div class="modal-titulo">Terminar atendimento</div>
             <div class="modal-cliente" id="modalCliente"></div>
             <div class="modal-servico" id="modalServico"></div>
             <div class="modal-duracao" id="modalDuracao"></div>
             <div class="field" style="margin-top:16px">
-                <label for="modalValor">Valor cobrado (ECV)</label>
+                <label for="modalValor">Valor cobrado ({{ moeda_simbolo }})</label>
                 <input type="number" id="modalValor" placeholder="Ex: 700" min="0" inputmode="numeric" autocomplete="off">
             </div>
+            <!-- Avaliação do cliente -->
+            <div class="avaliacao-box">
+                <div class="avaliacao-titulo">Como foi o serviço?</div>
+                <div class="avaliacao-sub">Toca numa estrela para avaliar (opcional)</div>
+                <div class="star-rating" id="modalStars">
+                    <button type="button" class="star" data-v="1" title="1 estrela">★</button>
+                    <button type="button" class="star" data-v="2" title="2 estrelas">★</button>
+                    <button type="button" class="star" data-v="3" title="3 estrelas">★</button>
+                    <button type="button" class="star" data-v="4" title="4 estrelas">★</button>
+                    <button type="button" class="star" data-v="5" title="5 estrelas">★</button>
+                </div>
+                <input type="hidden" id="modalAvaliacao" value="">
+            </div>
             <div class="modal-acoes">
-                <button class="btn btn-cancel" onclick="fecharModal()">Cancelar</button>
-                <button class="btn btn-terminar-modal" onclick="confirmarTerminar()">✓ Confirmar</button>
+                <button class="btn btn-cancel" id="btnModalCancelar">Cancelar</button>
+                <button class="btn btn-terminar-modal" id="btnModalConfirmar">✓ Confirmar</button>
             </div>
         </div>
     </div>
@@ -51,37 +132,116 @@
     <!-- FAB -->
     <div class="fab-group">
         <div class="fab-menu" id="fabMenu">
-            <a href="{{ url_for('novo') }}"   class="fab-item">📅 Agendamento</a>
-            <a href="{{ url_for('walkin') }}"  class="fab-item fab-walkin">⚡ Walk-in</a>
+            <a href="{{ url_for('novo') }}"   class="fab-item">{{ vocab.agendamento }}</a>
+            <a href="{{ url_for('walkin') }}"  class="fab-item fab-walkin">Walk-in</a>
         </div>
-        <button class="fab" id="fabBtn" onclick="toggleFab()">+</button>
+        <button class="fab" id="fabBtn">+</button>
     </div>
 
     <!-- Navegação inferior -->
     <nav class="bottom-nav">
         <a href="{{ url_for('index') }}" class="bnav-item {% if request.endpoint=='index' %}active{% endif %}">
-            <span class="bnav-icon">🏠</span><span class="bnav-label">Hoje</span>
+            <span class="bnav-icon">📅</span>
+            <span class="bnav-label">Hoje</span>
+        </a>
+        <a href="{{ url_for('minhas_marcacoes') }}" class="bnav-item {% if request.endpoint=='minhas_marcacoes' %}active{% endif %}">
+            <span class="bnav-icon">✂️</span>
+            <span class="bnav-label">Marcações</span>
         </a>
         <a href="{{ url_for('historico') }}" class="bnav-item {% if request.endpoint=='historico' %}active{% endif %}">
-            <span class="bnav-icon">📅</span><span class="bnav-label">Histórico</span>
+            <span class="bnav-icon">🕐</span>
+            <span class="bnav-label">Histórico</span>
         </a>
         <a href="{{ url_for('estatisticas') }}" class="bnav-item {% if request.endpoint=='estatisticas' %}active{% endif %}">
-            <span class="bnav-icon">📊</span><span class="bnav-label">Stats</span>
+            <span class="bnav-icon">📊</span>
+            <span class="bnav-label">Stats</span>
         </a>
         {% if session.get('role')=='chefe' %}
         <a href="{{ url_for('configuracoes') }}" class="bnav-item {% if request.endpoint in ['configuracoes','barbeiros','servicos'] %}active{% endif %}">
-            <span class="bnav-icon">⚙️</span><span class="bnav-label">Gerir</span>
+            <span class="bnav-icon">⚙️</span>
+            <span class="bnav-label">Gerir</span>
         </a>
         {% endif %}
         <a href="{{ url_for('perfil') }}" class="bnav-item {% if request.endpoint=='perfil' %}active{% endif %}">
-            <span class="bnav-icon">👤</span><span class="bnav-label">Perfil</span>
+            <span class="bnav-icon">👤</span>
+            <span class="bnav-label">Perfil</span>
         </a>
     </nav>
 
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
-    <script>
-    // Injeta CSRF em todos os forms da página automaticamente
+    {% if _wn_ok %}
+    <!-- Banner de activação biométrica — aparece após login se ainda não configurado neste dispositivo -->
+    <div id="bio-onboard" class="bio-onboard" style="display:none" role="dialog" aria-modal="true">
+        <div class="bio-onboard-inner">
+            <div class="bio-onboard-topo">
+                <span class="bio-onboard-icon"></span>
+                <div class="bio-onboard-texto">
+                    <strong>Ativar login biométrico</strong>
+                    <span>Entra mais rápido com impressão digital ou Face ID neste dispositivo.</span>
+                </div>
+            </div>
+            <div id="bio-onboard-erro" class="bio-onboard-erro" style="display:none"></div>
+            <div class="bio-onboard-btns">
+                <button class="btn btn-primary" id="bio-onboard-sim">
+                    Ativar agora
+                </button>
+                <button class="btn-link-muted" id="bio-onboard-nao">
+                    Agora não
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Detecção automática de fuso horário do dispositivo -->
+    <script nonce="{{ csp_nonce }}">
     (function() {
+        try {
+            var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (tz) {
+                // Cookie válido 1 ano; SameSite=Lax para segurança
+                document.cookie = "tz=" + encodeURIComponent(tz)
+                    + "; path=/; max-age=31536000; SameSite=Lax";
+            }
+        } catch(e) {}
+    })();
+    </script>
+
+    <!-- ── PWA: Banner de instalação (Android) ──────────────── -->
+    <div id="pwa-install-banner" style="display:none;position:fixed;bottom:calc(72px + env(safe-area-inset-bottom, 0px));left:12px;right:12px;
+         background:#1a1a1a;border:1px solid #333;border-radius:16px;padding:14px 16px;
+         z-index:8000;box-shadow:0 8px 32px rgba(0,0,0,0.6);align-items:center;gap:12px">
+        <img src="{{ url_for('static', filename='icon-192.png') }}"
+             width="40" height="40" alt="" style="border-radius:8px;flex-shrink:0">
+        <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:0.88rem;color:#fff">Instalar CarecaBarber</div>
+            <div style="font-size:0.75rem;color:#999;margin-top:2px">Acesso rápido sem browser</div>
+        </div>
+        <button id="pwa-install-btn"
+                style="background:#e8c46a;color:#0a0a0a;border:none;border-radius:10px;
+                       padding:8px 14px;font-weight:700;font-size:0.8rem;cursor:pointer;flex-shrink:0">
+            Instalar
+        </button>
+        <button id="pwa-install-close"
+                style="background:none;border:none;color:#666;font-size:1.2rem;cursor:pointer;
+                       padding:4px;flex-shrink:0;line-height:1">✕</button>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}?v={{ av }}"></script>
+    <script nonce="{{ csp_nonce }}">
+    // ── Flash messages como toasts ───────────────────────────────
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% if msgs %}
+    document.addEventListener("DOMContentLoaded", () => {
+        {% for cat, msg in msgs %}
+        setTimeout(() => mostrarToast({{ msg | tojson }}, {{ cat | tojson }}), {{ loop.index0 * 600 }});
+        {% endfor %}
+    });
+    {% endif %}
+    {% endwith %}
+    </script>
+    <script nonce="{{ csp_nonce }}">
+    // Injeta CSRF em todos os forms da página automaticamente
+    document.addEventListener("DOMContentLoaded", function() {
         const token = document.querySelector('meta[name="csrf-token"]')?.content;
         if (!token) return;
         document.querySelectorAll('form').forEach(function(f) {
@@ -91,7 +251,394 @@
                 f.prepend(inp);
             }
         });
+    });
+    </script>
+    <script nonce="{{ csp_nonce }}">
+    // ── Listeners globais (substitui onclick= inline bloqueado pelo CSP) ────
+    document.addEventListener('DOMContentLoaded', function() {
+        // Modal overlay — clicar fora fecha
+        const modalOverlay = document.getElementById('modalOverlay');
+        const modalBox     = document.getElementById('modalBox');
+        if (modalOverlay) {
+            modalOverlay.addEventListener('click', fecharModal);
+            if (modalBox) modalBox.addEventListener('click', function(e) { e.stopPropagation(); });
+        }
+        // Botões do modal
+        const btnCancelar  = document.getElementById('btnModalCancelar');
+        const btnConfirmar = document.getElementById('btnModalConfirmar');
+        if (btnCancelar)  btnCancelar.addEventListener('click', fecharModal);
+        if (btnConfirmar) btnConfirmar.addEventListener('click', confirmarTerminar);
+        // Estrelas de avaliação — event delegation no container
+        const stars = document.getElementById('modalStars');
+        if (stars) {
+            stars.addEventListener('click', function(e) {
+                const btn = e.target.closest('.star[data-v]');
+                if (btn) setStar(parseInt(btn.dataset.v, 10));
+            });
+        }
+        // FAB
+        const fabBtn = document.getElementById('fabBtn');
+        if (fabBtn) fabBtn.addEventListener('click', toggleFab);
+
+        // ── Confirm modal genérico — substitui window.confirm() bloqueado em iOS PWA ──
+        const confirmOverlay = document.getElementById('confirmOverlay');
+        const confirmBox     = document.getElementById('confirmBox');
+        const confirmMsgEl   = document.getElementById('confirmMensagem');
+        const confirmSim     = document.getElementById('confirmSim');
+        const confirmNao     = document.getElementById('confirmNao');
+        let _confirmResolve  = null;
+
+        function _abrirConfirm(msg) {
+            return new Promise(function(resolve) {
+                _confirmResolve = resolve;
+                if (confirmMsgEl) confirmMsgEl.textContent = msg;
+                if (confirmOverlay) confirmOverlay.classList.add('open');
+                if (confirmSim) confirmSim.focus();
+            });
+        }
+        // Expor globalmente para uso em outros scripts da página
+        window._confirm = _abrirConfirm;
+        function _fecharConfirm(resultado) {
+            if (confirmOverlay) confirmOverlay.classList.remove('open');
+            if (_confirmResolve) { _confirmResolve(resultado); _confirmResolve = null; }
+        }
+        if (confirmSim) confirmSim.addEventListener('click', function() { _fecharConfirm(true); });
+        if (confirmNao) confirmNao.addEventListener('click', function() { _fecharConfirm(false); });
+        if (confirmOverlay) {
+            confirmOverlay.addEventListener('click', function() { _fecharConfirm(false); });
+            if (confirmBox) confirmBox.addEventListener('click', function(e) { e.stopPropagation(); });
+        }
+
+        // Confirmação global: form[data-confirm="mensagem"] — async, não bloqueia thread
+        document.addEventListener('click', function(e) {
+            const btn  = e.target.closest('button[type="submit"], input[type="submit"]');
+            if (!btn) return;
+            const form = btn.closest('form[data-confirm]');
+            if (!form) return;
+            e.preventDefault();
+            _abrirConfirm(form.dataset.confirm).then(function(ok) {
+                if (ok) {
+                    // Remover data-confirm temporariamente para evitar loop
+                    const msg = form.dataset.confirm;
+                    delete form.dataset.confirm;
+                    btn.click();
+                    form.dataset.confirm = msg;
+                }
+            });
+        });
+    });
+    </script>
+
+    <script nonce="{{ csp_nonce }}">
+    // ══════════════════════════════════════════════════════════════
+    //  PWA — Registo do Service Worker + prompt de instalação
+    // ══════════════════════════════════════════════════════════════
+    (function() {
+        // 1. Registar o Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(function(reg) {
+                        // Verificar updates silenciosamente
+                        reg.addEventListener('updatefound', function() {
+                            const newWorker = reg.installing;
+                            if (!newWorker) return;
+                            newWorker.addEventListener('statechange', function() {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // Novo SW disponível — notificar o utilizador
+                                    mostrarToast('Nova versão disponível — recarrega para atualizar.', 'aviso');
+                                }
+                            });
+                        });
+                    })
+                    .catch(function(err) {
+                        console.warn('[PWA] Service Worker não registado:', err);
+                    });
+            });
+        }
+
+        // 2. Prompt de instalação (Android Chrome / Edge)
+        let _deferredInstallPrompt = null;
+        const _banner = document.getElementById('pwa-install-banner');
+        const _btnInstall = document.getElementById('pwa-install-btn');
+        const _btnClose   = document.getElementById('pwa-install-close');
+
+        window.addEventListener('beforeinstallprompt', function(e) {
+            e.preventDefault();
+            _deferredInstallPrompt = e;
+
+            // Só mostrar se o utilizador ainda não dispensou (7 dias)
+            const dispensado = localStorage.getItem('pwa_install_dispensado');
+            if (dispensado && Date.now() < parseInt(dispensado)) return;
+
+            // Mostrar banner após 3s (dar tempo à página de carregar)
+            setTimeout(function() {
+                if (_banner) _banner.style.display = 'flex';
+            }, 3000);
+        });
+
+        if (_btnInstall) {
+            _btnInstall.addEventListener('click', function() {
+                if (!_deferredInstallPrompt) return;
+                _deferredInstallPrompt.prompt();
+                _deferredInstallPrompt.userChoice.then(function(choice) {
+                    if (choice.outcome === 'accepted') {
+                        mostrarToast('CarecaBarber instalado com sucesso!', 'sucesso');
+                    }
+                    _deferredInstallPrompt = null;
+                    if (_banner) _banner.style.display = 'none';
+                });
+            });
+        }
+
+        if (_btnClose) {
+            _btnClose.addEventListener('click', function() {
+                if (_banner) _banner.style.display = 'none';
+                // Não mostrar de novo durante 7 dias
+                localStorage.setItem('pwa_install_dispensado', String(Date.now() + 7 * 24 * 3600 * 1000));
+            });
+        }
+
+        // 3. Ocultar banner quando a app já está instalada
+        if (window.matchMedia('(display-mode: standalone)').matches ||
+            window.navigator.standalone === true) {
+            // Já está a correr como app instalada
+            if (_banner) _banner.style.display = 'none';
+        }
     })();
     </script>
+
+    {% if _wn_ok %}
+    <script nonce="{{ csp_nonce }}">
+    // ── Activação biométrica após login ──────────────────────────
+    // _BIO_ESTADO  : 'ativo' (nunca mais perguntar) | número (mostrar a partir desta abertura)
+    // _BIO_ABERT   : contador de aberturas da app neste dispositivo
+    const _BIO_ESTADO  = 'bio_estado_{{ _wn_user_id }}';
+    const _BIO_ABERT   = 'bio_abert_{{ _wn_user_id }}';
+    const _BIO_SNOOZE  = 5;   // mostrar de novo após N aberturas
+
+    function b64uToBuf(b64u) {
+        const b64 = b64u.replace(/-/g,'+').replace(/_/g,'/').padEnd(
+            b64u.length + (4 - b64u.length % 4) % 4, '=');
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return arr.buffer;
+    }
+    function bufToB64u(buf) {
+        const bytes = new Uint8Array(buf);
+        let s = '';
+        bytes.forEach(b => s += String.fromCharCode(b));
+        return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    }
+
+    async function bioOnboardInit() {
+        try {
+            // Já ativado permanentemente — nunca mais mostrar
+            if (localStorage.getItem(_BIO_ESTADO) === 'ativo') return;
+
+            // Incrementar contador de aberturas
+            const abert = (parseInt(localStorage.getItem(_BIO_ABERT)) || 0) + 1;
+            localStorage.setItem(_BIO_ABERT, abert);
+
+            // Verificar snooze: se existe um número, só mostrar quando abert >= esse número
+            const estado = localStorage.getItem(_BIO_ESTADO);
+            if (estado && estado !== 'ativo') {
+                const mostrarA = parseInt(estado);
+                if (!isNaN(mostrarA) && abert < mostrarA) return;
+            }
+        } catch(e) { return; }  // localStorage bloqueado (modo privado)
+
+        // Verificar suporte do dispositivo
+        if (!window.PublicKeyCredential) return;
+        try {
+            const ok = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+            if (!ok) return;
+        } catch(e) { return; }
+
+        // Mostrar banner após 1.2s (deixa a página carregar)
+        setTimeout(() => {
+            const el = document.getElementById('bio-onboard');
+            if (el) el.style.display = 'flex';
+        }, 1200);
+    }
+
+    function bioOnboardDispenssar() {
+        try {
+            // Snooze: mostrar de novo daqui a _BIO_SNOOZE aberturas
+            const abert = parseInt(localStorage.getItem(_BIO_ABERT)) || 0;
+            localStorage.setItem(_BIO_ESTADO, String(abert + _BIO_SNOOZE));
+        } catch(e) {}  // localStorage bloqueado — ignora
+        const el = document.getElementById('bio-onboard');
+        if (el) el.style.display = 'none';
+    }
+
+    async function bioOnboardAtivar() {
+        const btn     = document.getElementById('bio-onboard-sim');
+        const erroDiv = document.getElementById('bio-onboard-erro');
+        btn.disabled  = true;
+        btn.textContent = 'A ativar…';
+        erroDiv.style.display = 'none';
+
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+        try {
+            // 1. Obter opções de registo
+            const beginResp = await fetch('/webauthn/register/begin', {
+                headers: { 'X-CSRFToken': csrf }
+            });
+            const options = await beginResp.json();
+            if (options.error) throw new Error(options.error);
+
+            // 2. Converter para ArrayBuffer
+            options.challenge = b64uToBuf(options.challenge);
+            options.user.id   = b64uToBuf(options.user.id);
+            if (options.excludeCredentials) {
+                options.excludeCredentials = options.excludeCredentials.map(c => ({
+                    ...c, id: b64uToBuf(c.id)
+                }));
+            }
+
+            // 3. Ativar autenticador do dispositivo
+            const cred = await navigator.credentials.create({ publicKey: options });
+
+            // 4. Detectar nome do dispositivo automaticamente
+            const ua = navigator.userAgent;
+            const nomeDispositivo = /iPhone/.test(ua) ? 'iPhone'
+                : /iPad/.test(ua)    ? 'iPad'
+                : /Android/.test(ua) ? 'Android'
+                : /Mac/.test(ua)     ? 'Mac'
+                : /Windows/.test(ua) ? 'Windows'
+                : 'Dispositivo';
+
+            // 5. Enviar para o servidor
+            const payload = {
+                id: cred.id,
+                rawId: bufToB64u(cred.rawId),
+                response: {
+                    attestationObject: bufToB64u(cred.response.attestationObject),
+                    clientDataJSON:    bufToB64u(cred.response.clientDataJSON)
+                },
+                type: cred.type,
+                nome_dispositivo: nomeDispositivo
+            };
+
+            const completeResp = await fetch('/webauthn/register/complete', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                body:    JSON.stringify(payload)
+            });
+            const result = await completeResp.json();
+
+            if (result.ok) {
+                try { localStorage.setItem(_BIO_ESTADO, 'ativo'); } catch(e) {}
+                document.getElementById('bio-onboard').style.display = 'none';
+                mostrarToast('Biometria ativada! Próximo login será mais rápido.', 'sucesso');
+            } else {
+                throw new Error(result.error || 'Erro ao ativar biometria.');
+            }
+
+        } catch(err) {
+            if (err.name === 'NotAllowedError') {
+                erroDiv.textContent = 'Cancelado. Podes ativar mais tarde em Perfil → Biometria.';
+            } else if (err.name === 'InvalidStateError') {
+                // Já existe credencial neste dispositivo — marcar como ativo
+                try { localStorage.setItem(_BIO_ESTADO, 'ativo'); } catch(e) {}
+                document.getElementById('bio-onboard').style.display = 'none';
+            } else {
+                erroDiv.textContent = (err.message || 'Erro desconhecido. Tenta mais tarde.');
+                erroDiv.style.display = 'block';
+            }
+            btn.disabled    = false;
+            btn.textContent = 'Ativar agora';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        bioOnboardInit();
+        const btnSim = document.getElementById('bio-onboard-sim');
+        const btnNao = document.getElementById('bio-onboard-nao');
+        if (btnSim) btnSim.addEventListener('click', bioOnboardAtivar);
+        if (btnNao) btnNao.addEventListener('click', bioOnboardDispenssar);
+    });
+    </script>
+    {% endif %}
+
+    {% if session.get('role') in ('barbeiro', 'chefe') %}
+    <script nonce="{{ csp_nonce }}">
+    // ── Web Push: subscrição automática para staff ────────────────
+    (function() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        // Não insistir se já recusou nesta sessão
+        if (sessionStorage.getItem('push_recusado')) return;
+
+        function urlB64ToUint8Array(b64) {
+            const pad = '='.repeat((4 - b64.length % 4) % 4);
+            const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+            const arr = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+            return arr;
+        }
+
+        async function subscrevePush() {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                // Verificar se já está subscrito
+                const existente = await reg.pushManager.getSubscription();
+                if (existente) return;  // já subscrito — nada a fazer
+
+                // Buscar chave VAPID pública
+                const resp = await fetch('/api/push/vapid-public');
+                if (!resp.ok) return;
+                const { publicKey } = await resp.json();
+                if (!publicKey) return;
+
+                // Pedir permissão e subscrever
+                const permissao = await Notification.requestPermission();
+                if (permissao !== 'granted') {
+                    sessionStorage.setItem('push_recusado', '1');
+                    return;
+                }
+                const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlB64ToUint8Array(publicKey)
+                });
+                // Enviar subscrição ao servidor
+                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                    body: JSON.stringify(sub.toJSON())
+                });
+            } catch (e) {
+                // Silencioso — push é opcional
+            }
+        }
+
+        // Subscrever após 5s (deixa a página carregar primeiro)
+        window.addEventListener('load', function() {
+            setTimeout(subscrevePush, 5000);
+        });
+    })();
+    </script>
+    {% endif %}
+
+    <script nonce="{{ csp_nonce }}">
+    // Avatar do topbar — esconde se foto não carregar
+    document.querySelectorAll('.js-avatar-topbar').forEach(function(img) {
+        img.addEventListener('error', function() { this.style.display = 'none'; });
+    });
+    </script>
+
+    <!-- Marca de água — contacto WhatsApp suporte (discreta) -->
+    <a href="https://wa.me/238989122?text=Ol%C3%A1%2C+tenho+um+assunto+sobre+a+aplica%C3%A7%C3%A3o+CarecaBarber."
+       target="_blank" rel="noopener" title="Suporte / Erros — +238 989 12 22"
+       class="wa-suporte"
+       style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:5000;
+              text-decoration:none;pointer-events:auto;line-height:0">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="#25D366" xmlns="http://www.w3.org/2000/svg">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+    </a>
 </body>
 </html>

@@ -1,13 +1,81 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-header"><h1>Estatísticas</h1></div>
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <h1>Estatísticas</h1>
+    <button type="button" id="btn-pdf-toggle"
+            style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;
+                   padding:8px 14px;border-radius:8px;border:1px solid var(--border);
+                   color:var(--text2);background:var(--card);cursor:pointer;
+                   transition:color .15s,border-color .15s">
+        ⬇ PDF
+    </button>
+</div>
+
+<!-- Painel de filtros PDF -->
+<div id="pdf-panel" style="display:none;background:var(--card);border:1px solid var(--border);
+     border-radius:12px;padding:16px 18px;margin-bottom:18px">
+    <div style="font-size:0.75rem;font-weight:700;color:var(--accent);letter-spacing:.05em;margin-bottom:12px">
+        FILTROS DO RELATÓRIO PDF
+    </div>
+    <form id="pdf-form" action="{{ url_for('relatorio_pdf') }}" method="get" target="_blank"
+          style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+        <div style="flex:1;min-width:130px">
+            <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px">De</label>
+            <input type="date" name="data_ini" id="pdf-ini"
+                   style="font-size:0.85rem;padding:7px 10px;width:100%;box-sizing:border-box">
+        </div>
+        <div style="flex:1;min-width:130px">
+            <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px">Até</label>
+            <input type="date" name="data_fim" id="pdf-fim"
+                   style="font-size:0.85rem;padding:7px 10px;width:100%;box-sizing:border-box">
+        </div>
+        <div style="flex:1;min-width:130px">
+            <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px">Ou mês</label>
+            <input type="month" name="mes"
+                   value="{{ agora_mes }}"
+                   style="font-size:0.85rem;padding:7px 10px;width:100%;box-sizing:border-box">
+        </div>
+        {% if session.get('role') == 'chefe' and barbeiros_pdf %}
+        <div style="flex:1;min-width:130px">
+            <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px">{{ vocab.profissional }}</label>
+            <select name="barbeiro_id"
+                    style="font-size:0.85rem;padding:7px 10px;width:100%;box-sizing:border-box">
+                <option value="">— Todos —</option>
+                {% for b in barbeiros_pdf %}
+                <option value="{{ b.id }}">{{ b.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary" style="padding:8px 18px;font-size:0.85rem">
+            ⬇ Gerar PDF
+        </button>
+    </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+document.getElementById('btn-pdf-toggle').addEventListener('click', function() {
+    var p = document.getElementById('pdf-panel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+});
+// Se data_ini muda, limpar o campo mes (e vice-versa)
+var ini = document.getElementById('pdf-ini');
+var fim = document.getElementById('pdf-fim');
+if (ini) ini.addEventListener('change', function() {
+    var m = document.querySelector('[name="mes"]');
+    if (m && ini.value) m.value = '';
+});
+var mesInp = document.querySelector('[name="mes"]');
+if (mesInp) mesInp.addEventListener('change', function() {
+    if (mesInp.value) { if(ini) ini.value=''; if(fim) fim.value=''; }
+});
+</script>
 
 <!-- Resumo hoje / semana / mês -->
 <div class="stats-grid">
     {% for periodo, label in [('hoje','Hoje'), ('semana','Esta semana'), ('mes','Este mês')] %}
     <div class="stat-card">
         <div class="stat-label">{{ label }}</div>
-        <div class="stat-val">{{ stats[periodo].valor | moeda }} <small>ECV</small></div>
+        <div class="stat-val">{{ stats[periodo].valor | moeda }} <small>{{ moeda_simbolo }}</small></div>
         <div class="stat-sub">{{ stats[periodo].clientes }} clientes</div>
     </div>
     {% endfor %}
@@ -19,7 +87,7 @@
     <div style="font-size:2rem;font-weight:800;color:var(--accent);margin-top:6px">
         {{ stats.hora_top[0] }}h
     </div>
-    <div style="font-size:0.8rem;color:var(--text2)">{{ stats.hora_top[1] }} cortes registados</div>
+    <div style="font-size:0.8rem;color:var(--text2)">{{ stats.hora_top[1] }} {{ vocab.servicos | lower }} registados</div>
 </div>
 {% endif %}
 
@@ -54,38 +122,77 @@
 </section>
 {% endif %}
 
+<!-- Alertas de desempenho -->
+{% if alertas_perf %}
+<section style="margin-bottom:20px">
+    <h2 class="section-title">Alertas de tempo</h2>
+    <div style="display:flex;flex-direction:column;gap:10px">
+        {% for a in alertas_perf %}
+        <div class="card" style="border-left:3px solid var(--red);padding:12px 14px;background:rgba(231,76,60,0.06)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                <div>
+                    <div style="font-weight:700;color:var(--text1);margin-bottom:2px">{{ a.nome }}</div>
+                    <div style="font-size:0.78rem;color:var(--text2)">
+                        {{ a.count }} {{ vocab.servico | lower if a.count == 1 else vocab.servicos | lower }} registados
+                        · Estimado: {{ a.estimado }} min · Real médio: {{ a.real }} min
+                    </div>
+                </div>
+                <span class="delta neg" style="white-space:nowrap;font-size:0.85rem;padding:3px 8px;border-radius:20px;background:rgba(231,76,60,0.12)">
+                    +{{ a.delta }} min
+                </span>
+            </div>
+            <div style="font-size:0.75rem;color:var(--text2);margin-top:6px">
+                Considera aumentar a duração estimada para {{ (a.estimado + a.delta | int + 5) // 5 * 5 }} min.
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
 <!-- Desempenho por barbeiro (chefe) -->
 {% if stats.barbeiros_stats %}
 <section>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <h2 class="section-title" style="margin:0">Desempenho da equipa</h2>
         <div class="tab-toggle">
-            <button class="tab-btn tab-btn-active" id="btn-mes" onclick="switchTab('mes')">Este mês</button>
-            <button class="tab-btn" id="btn-sem" onclick="switchTab('sem')">Esta semana</button>
+            <button class="tab-btn tab-btn-active" id="btn-mes">Este mês</button>
+            <button class="tab-btn" id="btn-sem">Esta semana</button>
         </div>
     </div>
     <ul class="lista-agendamentos">
         {% for b in stats.barbeiros_stats %}
-        <li class="item-agendamento" style="cursor:pointer"
-            onclick="window.location='{{ url_for('estatisticas_barbeiro', id=b.id) }}'">
-            <div class="barb-avatar" style="width:36px;height:36px;font-size:1rem;flex-shrink:0">{{ b.nome[0]|upper }}</div>
+        <li class="item-agendamento js-barb-link" style="cursor:pointer"
+            data-href="{{ url_for('estatisticas_barbeiro', id=b.id) }}">
+            <div class="barb-avatar" style="width:36px;height:36px;font-size:1rem;flex-shrink:0;overflow:hidden;padding:0">
+                <img src="{{ url_for('foto_barbeiro', barbeiro_id=b.id) }}"
+                     alt="{{ b.nome[0]|upper }}"
+                     style="width:100%;height:100%;object-fit:cover"
+                     class="js-barb-avatar" data-inicial="{{ b.nome[0]|upper }}">
+            </div>
             <div class="item-body">
                 <div class="item-cliente">{{ b.nome }}</div>
-                <div class="item-servico tab-content-mes">{{ b.clientes }} clientes · {{ b.valor | moeda }} ECV</div>
-                <div class="item-servico tab-content-sem" style="display:none">{{ b.clientes_sem }} clientes · {{ b.valor_sem | moeda }} ECV</div>
+                <div class="item-servico tab-content-mes">{{ b.clientes }} clientes · {{ b.valor | moeda }} {{ moeda_simbolo }}</div>
+                <div class="item-servico tab-content-sem" style="display:none">{{ b.clientes_sem }} clientes · {{ b.valor_sem | moeda }} {{ moeda_simbolo }}</div>
             </div>
             <div style="text-align:right;flex-shrink:0">
                 <div class="tab-content-mes" style="font-size:1rem;font-weight:800;color:var(--accent)">{{ b.valor | moeda }}</div>
                 <div class="tab-content-sem" style="display:none;font-size:1rem;font-weight:800;color:var(--accent)">{{ b.valor_sem | moeda }}</div>
-                <div style="font-size:0.7rem;color:var(--text2)">ECV</div>
+                <div style="font-size:0.7rem;color:var(--text2)">{{ moeda_simbolo }}</div>
+                {% if b.avaliacao_media %}
+                <div style="font-size:0.72rem;color:#f5c842;margin-top:2px" title="{{ b.avaliacao_total }} avaliações">
+                    ★ {{ b.avaliacao_media }}
+                </div>
+                {% else %}
                 <div style="font-size:0.7rem;color:var(--accent);margin-top:2px">→</div>
+                {% endif %}
             </div>
         </li>
         {% endfor %}
     </ul>
 </section>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function switchTab(tab) {
     const isMes = tab === 'mes';
     document.getElementById('btn-mes').classList.toggle('tab-btn-active', isMes);
@@ -93,7 +200,60 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content-mes').forEach(el => el.style.display = isMes ? '' : 'none');
     document.querySelectorAll('.tab-content-sem').forEach(el => el.style.display = isMes ? 'none' : '');
 }
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('btn-mes')?.addEventListener('click', () => switchTab('mes'));
+    document.getElementById('btn-sem')?.addEventListener('click', () => switchTab('sem'));
+    // Linha clicável de barbeiro
+    document.addEventListener('click', function(e) {
+        const li = e.target.closest('.js-barb-link[data-href]');
+        if (li) window.location = li.dataset.href;
+    });
+    // Avatar fallback (CSP)
+    document.querySelectorAll('.js-barb-avatar').forEach(function(img) {
+        img.addEventListener('error', function() {
+            const span = document.createElement('span');
+            span.textContent = img.dataset.inicial || '?';
+            img.replaceWith(span);
+        });
+    });
+});
 </script>
+{% endif %}
+
+{% if tendencia and tendencia | length > 1 %}
+{# ── Gráfico de tendência semanal ─────────────────────────────────────────── #}
+<section style="margin-bottom:24px">
+    <h2 class="section-title">Tendência semanal (últimas {{ tendencia | length }} semanas)</h2>
+    <div class="card" style="padding:16px">
+        {# Calcular o máximo para normalizar barras #}
+        {% set max_c = namespace(v=1) %}
+        {% for w in tendencia %}{% if w.clientes > max_c.v %}{% set max_c.v = w.clientes %}{% endif %}{% endfor %}
+
+        <div style="display:flex;align-items:flex-end;gap:6px;height:100px;padding-bottom:4px">
+            {% for w in tendencia %}
+            {% set pct = ((w.clientes / max_c.v) * 100) | int %}
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0">
+                <span style="font-size:0.65rem;color:var(--text2);font-weight:600">{{ w.clientes }}</span>
+                <div title="{{ w.label }}: {{ w.clientes }} clientes · {{ w.valor | int }} {{ moeda_simbolo }}"
+                     style="width:100%;background:var(--accent);border-radius:4px 4px 0 0;
+                            height:{{ [pct, 4] | max }}%;opacity:{% if loop.last %}1{% else %}0.6{% endif %};
+                            transition:opacity .2s">
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {# Labels das semanas #}
+        <div style="display:flex;gap:6px;padding-top:4px;border-top:1px solid var(--border)">
+            {% for w in tendencia %}
+            <div style="flex:1;text-align:center;font-size:0.6rem;color:var(--text3);min-width:0;
+                        overflow:hidden;font-weight:{% if loop.last %}700{% else %}400{% endif %};
+                        color:{% if loop.last %}var(--text){% else %}var(--text3){% endif %}">
+                {{ w.label }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
 {% endif %}
 
 {% if not stats.top_servicos and not stats.barbeiros_stats %}

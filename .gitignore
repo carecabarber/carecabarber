@@ -4,3 +4,7 @@ __pycache__/
 .secret_key
 barbearia.db
 .env
+.pythonanywhere
+.root_init_password
+backups/
+security.log

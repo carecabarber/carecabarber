@@ -2,13 +2,247 @@
 {% block content %}
 <div class="page-header"><h1>Perfil</h1></div>
 
-<div class="card" style="margin-bottom:20px;display:flex;align-items:center;gap:14px">
-    <div style="font-size:2.5rem">{% if session.get('role')=='chefe' %}👑{% else %}💈{% endif %}</div>
-    <div>
+<div class="card" style="margin-bottom:20px;display:flex;align-items:center;gap:16px">
+    <!-- Avatar / foto de perfil -->
+    <div style="position:relative;flex-shrink:0">
+        <img id="avatar-img"
+             src="{{ url_for('foto_barbeiro', barbeiro_id=barbeiro.id) if barbeiro else '' }}"
+             alt="Foto de perfil"
+             style="width:72px;height:72px;border-radius:50%;object-fit:cover;
+                    border:2px solid var(--border);background:var(--card)">
+        <!-- Botão câmara sobreposto -->
+        <button id="btn-foto-menu" type="button" title="Alterar foto"
+                style="position:absolute;bottom:-4px;right:-4px;width:26px;height:26px;
+                       border-radius:50%;border:2px solid var(--bg,#0a0a0a);
+                       background:var(--primary,#3b82f6);color:#fff;cursor:pointer;
+                       display:flex;align-items:center;justify-content:center;
+                       font-size:0.8rem;padding:0"></button>
+    </div>
+    <div style="flex:1;min-width:0">
         <div style="font-size:1.1rem;font-weight:700">{{ session.get('user_nome') }}</div>
-        <div style="font-size:0.8rem;color:var(--text2)">{{ 'Chefe' if session.get('role')=='chefe' else 'Barbeiro' }}</div>
+        <div style="font-size:0.8rem;color:var(--text2)">{{ 'Chefe' if session.get('role')=='chefe' else vocab.profissional }}</div>
+        <div id="foto-msg" style="font-size:0.78rem;margin-top:4px;display:none"></div>
     </div>
 </div>
+
+<!-- Menu de opções de foto (popup) -->
+<div id="foto-menu" style="display:none;background:var(--card);border:1px solid var(--border);
+     border-radius:12px;padding:8px;margin-bottom:16px;box-shadow:0 4px 20px rgba(0,0,0,.4)">
+    <button type="button" class="js-foto-opt" data-acao="camera"
+            style="width:100%;text-align:left;padding:11px 14px;background:none;border:none;
+                   color:var(--text);cursor:pointer;border-radius:8px;font-size:0.9rem">
+        Tirar foto com a câmara
+    </button>
+    <button type="button" class="js-foto-opt" data-acao="upload"
+            style="width:100%;text-align:left;padding:11px 14px;background:none;border:none;
+                   color:var(--text);cursor:pointer;border-radius:8px;font-size:0.9rem">
+        Carregar imagem da galeria
+    </button>
+    {% if tem_foto %}
+    <button type="button" class="js-foto-opt" data-acao="apagar"
+            style="width:100%;text-align:left;padding:11px 14px;background:none;border:none;
+                   color:var(--red,#ef4444);cursor:pointer;border-radius:8px;font-size:0.9rem">
+        Remover foto
+    </button>
+    {% endif %}
+</div>
+
+<!-- Input oculto para upload de ficheiro -->
+<input type="file" id="foto-file-input" accept="image/jpeg,image/png,image/webp"
+       style="display:none">
+
+<!-- Modal câmara -->
+<div id="camera-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+     z-index:9999;flex-direction:column;align-items:center;justify-content:center">
+    <div style="background:var(--card);border-radius:16px;padding:20px;max-width:400px;width:90%;
+                box-shadow:0 8px 40px rgba(0,0,0,.6)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+            <span>Tirar foto</span>
+            <button id="btn-camera-fechar" type="button"
+                    style="background:none;border:none;color:var(--text2);font-size:1.3rem;cursor:pointer">✕</button>
+        </div>
+        <video id="camera-video" autoplay playsinline muted
+               style="width:100%;border-radius:10px;background:#000;max-height:300px;object-fit:cover"></video>
+        <canvas id="camera-canvas" style="display:none"></canvas>
+        <div id="camera-preview-wrap" style="display:none;margin-top:10px">
+            <img id="camera-preview" alt="Pré-visualização"
+                 style="width:100%;border-radius:10px;max-height:300px;object-fit:cover">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button id="btn-capturar" type="button" class="btn btn-primary" style="flex:1">
+                Capturar
+            </button>
+            <button id="btn-usar-foto" type="button" class="btn btn-primary"
+                    style="flex:1;display:none;background:var(--green,#22c55e)">
+                Usar esta foto
+            </button>
+            <button id="btn-repetir" type="button" class="btn btn-outline-small"
+                    style="flex:1;display:none">
+                Repetir
+            </button>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const avatarImg   = document.getElementById("avatar-img");
+    const btnMenu     = document.getElementById("btn-foto-menu");
+    const fotoMenu    = document.getElementById("foto-menu");
+    const fotoMsg     = document.getElementById("foto-msg");
+    const fileInput   = document.getElementById("foto-file-input");
+    const cameraModal = document.getElementById("camera-modal");
+    const video       = document.getElementById("camera-video");
+    const canvas      = document.getElementById("camera-canvas");
+    const preview     = document.getElementById("camera-preview");
+    const previewWrap = document.getElementById("camera-preview-wrap");
+    let _stream = null;
+    let _capturedBlob = null;
+
+    function showMsg(txt, tipo) {
+        fotoMsg.textContent = txt;
+        fotoMsg.style.color = tipo === "ok" ? "var(--green,#22c55e)" : "var(--red,#ef4444)";
+        fotoMsg.style.display = "block";
+        setTimeout(() => { fotoMsg.style.display = "none"; }, 4000);
+    }
+
+    // Toggle menu
+    btnMenu.addEventListener("click", function(e) {
+        e.stopPropagation();
+        fotoMenu.style.display = fotoMenu.style.display === "none" ? "block" : "none";
+    });
+    document.addEventListener("click", function() {
+        fotoMenu.style.display = "none";
+    });
+
+    // Opções do menu
+    document.querySelectorAll(".js-foto-opt").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            fotoMenu.style.display = "none";
+            const acao = btn.dataset.acao;
+            if (acao === "upload") {
+                fileInput.click();
+            } else if (acao === "camera") {
+                abrirCamera();
+            } else if (acao === "apagar") {
+                (_confirm || function(m){ return Promise.resolve(window.confirm(m)); })(
+                    "Remover a foto de perfil?"
+                ).then(function(ok) {
+                    if (!ok) return;
+                    fetch("/perfil/foto/apagar", {
+                        method: "POST",
+                        headers: {"X-CSRFToken": CSRF, "Content-Type": "application/json"}
+                    }).then(r => r.json()).then(r => {
+                        if (r.ok) {
+                            avatarImg.src = avatarImg.src.split("?")[0] + "?t=" + Date.now();
+                            showMsg("Foto removida.", "ok");
+                            btn.style.display = "none";
+                        } else {
+                            showMsg("" + (r.erro || "Erro."), "erro");
+                        }
+                    }).catch(() => showMsg("Erro de rede.", "erro"));
+                });
+            }
+        });
+    });
+
+    // Upload de ficheiro
+    fileInput.addEventListener("change", function() {
+        const file = fileInput.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append("foto", file);
+        form.append("csrf_token", CSRF);
+        fetch("/perfil/foto", {method: "POST", body: form})
+            .then(r => r.json()).then(r => {
+                if (r.ok) {
+                    avatarImg.src = avatarImg.src.split("?")[0] + "?t=" + Date.now();
+                    showMsg("Foto atualizada!", "ok");
+                } else {
+                    showMsg("" + (r.erro || "Erro."), "erro");
+                }
+            }).catch(() => showMsg("Erro de rede.", "erro"));
+        fileInput.value = "";
+    });
+
+    // ── Câmara ──────────────────────────────────────────────────
+    function abrirCamera() {
+        _capturedBlob = null;
+        cameraModal.style.display = "flex";
+        document.getElementById("btn-capturar").style.display = "";
+        document.getElementById("btn-usar-foto").style.display = "none";
+        document.getElementById("btn-repetir").style.display = "none";
+        previewWrap.style.display = "none";
+        video.style.display = "";
+
+        navigator.mediaDevices.getUserMedia({video: {facingMode: "user"}, audio: false})
+            .then(function(stream) {
+                _stream = stream;
+                video.srcObject = stream;
+            })
+            .catch(function(err) {
+                fecharCamera();
+                showMsg("Câmara não disponível: " + err.message, "erro");
+            });
+    }
+
+    function fecharCamera() {
+        if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+        video.srcObject = null;
+        cameraModal.style.display = "none";
+    }
+
+    document.getElementById("btn-camera-fechar").addEventListener("click", fecharCamera);
+
+    document.getElementById("btn-capturar").addEventListener("click", function() {
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        canvas.getContext("2d").drawImage(video, 0, 0);
+        canvas.toBlob(function(blob) {
+            if (!blob) { showMsg("Falha ao capturar.", "erro"); return; }
+            _capturedBlob = blob;
+            preview.src = URL.createObjectURL(blob);
+            previewWrap.style.display = "";
+            video.style.display = "none";
+            document.getElementById("btn-capturar").style.display = "none";
+            document.getElementById("btn-usar-foto").style.display = "";
+            document.getElementById("btn-repetir").style.display = "";
+        }, "image/jpeg", 0.88);
+    });
+
+    document.getElementById("btn-repetir").addEventListener("click", function() {
+        _capturedBlob = null;
+        previewWrap.style.display = "none";
+        video.style.display = "";
+        document.getElementById("btn-capturar").style.display = "";
+        document.getElementById("btn-usar-foto").style.display = "none";
+        document.getElementById("btn-repetir").style.display = "none";
+    });
+
+    document.getElementById("btn-usar-foto").addEventListener("click", function() {
+        if (!_capturedBlob) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const b64 = e.target.result.split(",")[1];
+            fetch("/perfil/foto", {
+                method: "POST",
+                headers: {"Content-Type": "application/json", "X-CSRFToken": CSRF},
+                body: JSON.stringify({imagem: b64, mime: "image/jpeg"})
+            }).then(r => r.json()).then(r => {
+                fecharCamera();
+                if (r.ok) {
+                    avatarImg.src = "/foto/{{ barbeiro.id if barbeiro else 0 }}?t=" + Date.now();
+                    showMsg("Foto atualizada!", "ok");
+                } else {
+                    showMsg("" + (r.erro || "Erro."), "erro");
+                }
+            }).catch(() => { fecharCamera(); showMsg("Erro de rede.", "erro"); });
+        };
+        reader.readAsDataURL(_capturedBlob);
+    });
+})();
+</script>
 
 <h2 class="section-title">Alterar senha</h2>
 <form action="{{ url_for('perfil') }}" method="post" class="form-card">
@@ -30,4 +264,244 @@
     </div>
     <button type="submit" class="btn btn-primary btn-full">Alterar senha</button>
 </form>
+
+<!-- ── QR da minha mesa ────────────────────────────────── -->
+{% if mesa_token %}
+<h2 class="section-title" style="margin-top:28px">QR da minha mesa</h2>
+<div class="card" style="text-align:center;padding:20px">
+    <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
+        Coloca este QR na tua estação. Clientes e chefe podem iniciar e terminar serviços ao escanear.
+    </p>
+    <div id="qr-mesa-perfil" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:4px">
+        <a href="{{ url_for('mesa_entrar', token=mesa_token) }}" target="_blank"
+           class="btn btn-outline-small" style="padding:9px 18px">
+            Vista cliente
+        </a>
+        <a href="{{ url_for('mesa', token=mesa_token) }}" target="_blank"
+           class="btn btn-outline-small" style="padding:9px 18px">
+            Gestão
+        </a>
+        <button class="btn btn-outline-small" id="btn-imprimir-qr-perfil" style="padding:9px 18px">
+            Imprimir
+        </button>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+<script nonce="{{ csp_nonce }}">
+(function() {
+    const mesaUrl = window.location.origin + "/mesa/" + {{ mesa_token | tojson }} + "/entrar";
+    try {
+        const qr = qrcode(0, "M");
+        qr.addData(mesaUrl);
+        qr.make();
+        document.getElementById("qr-mesa-perfil").innerHTML = qr.createImgTag(4, 4);
+    } catch(e) {}
+
+    document.getElementById("btn-imprimir-qr-perfil").addEventListener("click", function() {
+        const box  = document.getElementById("qr-mesa-perfil");
+        const nome = ({{ (barbeiro.nome if barbeiro else session.get('user_nome', '')) | tojson }}).replace(/`/g, "'");
+        const w = window.open("", "_blank", "width=400,height=500");
+        if (!w) { alert("Popup bloqueado. Autoriza popups para imprimir o QR."); return; }
+        w.document.write(`<!DOCTYPE html><html><head><title>QR — ${nome}</title>
+            <style>body{font-family:sans-serif;text-align:center;padding:30px}
+            h2{font-size:1rem;margin-bottom:16px}p{font-size:0.75rem;color:#666}</style>
+            </head><body>
+            <h2>Mesa de ${nome}</h2>
+            ${box.innerHTML}
+            <p style="margin-top:12px;word-break:break-all">${mesaUrl}</p>
+            <script>window.onload=function(){window.print();window.close();}<\/script>
+            </body></html>`);
+        w.document.close();
+    });
+})();
+</script>
+{% endif %}
+
+{% if false %}{# WebAuthn removido — biometria não disponível no PA sem py_webauthn #}
+<div id="bio-section" style="display:none">
+    <h2 class="section-title" style="margin-top:28px">Autenticação Biométrica</h2>
+
+    <div class="form-card">
+        <p style="font-size:0.82rem;color:var(--text2);margin-bottom:16px">
+            Entra com impressão digital, Face ID ou Windows Hello — sem precisar de senha.
+        </p>
+
+        <div id="bio-msg" style="display:none;margin-bottom:12px"></div>
+
+        <!-- Lista de dispositivos registados -->
+        <div id="bio-lista">
+            {% if credenciais %}
+                {% for c in credenciais %}
+                <div class="bio-device-row" id="bio-dev-{{ c.id }}">
+                    <span class="bio-device-icon"></span>
+                    <div class="bio-device-info">
+                        <strong>{{ c.nome_dispositivo }}</strong>
+                        <small>Registado em {{ c.criado_em[:10] }}</small>
+                    </div>
+                    <button type="button" class="btn-apagar-bio js-apagar-cred"
+                            data-id="{{ c.id }}"
+                            title="Remover dispositivo">✕</button>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p id="bio-vazio" style="font-size:0.82rem;color:var(--text2);margin-bottom:12px">
+                    Ainda não tens dispositivos biométricos registados.
+                </p>
+            {% endif %}
+        </div>
+
+        <!-- Formulário para registar novo dispositivo -->
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">
+            <div class="field" style="margin-bottom:10px">
+                <label for="bio-nome">Nome do dispositivo</label>
+                <input type="text" id="bio-nome" placeholder="ex: iPhone, PC, Tablet"
+                       maxlength="60" autocomplete="off">
+            </div>
+            <button type="button" id="btn-registar-bio" class="btn btn-primary btn-full">
+                Registar este dispositivo
+            </button>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+// Mostrar secção apenas se WebAuthn disponível
+if (window.PublicKeyCredential) {
+    PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then(ok => { if (ok) document.getElementById("bio-section").style.display = "block"; })
+        .catch(() => {});
+}
+
+function b64uToBuffer(b64u) {
+    const b64 = b64u.replace(/-/g,'+').replace(/_/g,'/').padEnd(
+        b64u.length + (4 - b64u.length % 4) % 4, '=');
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return buf.buffer;
+}
+function bufToB64u(buf) {
+    const bytes = new Uint8Array(buf);
+    let str = '';
+    bytes.forEach(b => str += String.fromCharCode(b));
+    return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+function bioMsg(txt, tipo) {
+    const d = document.getElementById("bio-msg");
+    d.className = tipo === "ok" ? "login-ok" : "login-erro";
+    d.textContent = txt;
+    d.style.display = "block";
+    setTimeout(() => { d.style.display = "none"; }, 4000);
+}
+
+async function registarBiometria() {
+    const btn  = document.getElementById("btn-registar-bio");
+    const nome = document.getElementById("bio-nome").value.trim() || "Dispositivo";
+    btn.disabled = true;
+    btn.textContent = "A registar…";
+
+    try {
+        // 1. Obter opções de registo
+        const beginResp = await fetch("/webauthn/register/begin");
+        if (!beginResp.ok) throw new Error("Servidor indisponível (" + beginResp.status + ").");
+        const options = await beginResp.json();
+        if (options.error) throw new Error(options.error);
+
+        // 2. Converter dados
+        options.challenge = b64uToBuffer(options.challenge);
+        options.user.id   = b64uToBuffer(options.user.id);
+        if (options.excludeCredentials) {
+            options.excludeCredentials = options.excludeCredentials.map(c => ({
+                ...c, id: b64uToBuffer(c.id)
+            }));
+        }
+
+        // 3. Criar credencial no dispositivo
+        const cred = await navigator.credentials.create({ publicKey: options });
+
+        // 4. Enviar para servidor
+        const payload = {
+            nome_dispositivo: nome,
+            id: cred.id,
+            rawId: bufToB64u(cred.rawId),
+            response: {
+                attestationObject: bufToB64u(cred.response.attestationObject),
+                clientDataJSON:    bufToB64u(cred.response.clientDataJSON),
+            },
+            type: cred.type,
+            authenticatorAttachment: cred.authenticatorAttachment || null
+        };
+
+        const completeResp = await fetch("/webauthn/register/complete", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        if (!completeResp.ok && completeResp.status !== 409) throw new Error("Erro do servidor (" + completeResp.status + ").");
+        const result = await completeResp.json();
+        if (!result.ok) throw new Error(result.error || "Falha no registo.");
+
+        bioMsg("Dispositivo \"" + result.nome + "\" registado com sucesso!", "ok");
+        document.getElementById("bio-nome").value = "";
+
+        // Adicionar à lista sem recarregar
+        const vazio = document.getElementById("bio-vazio");
+        if (vazio) vazio.remove();
+        const lista = document.getElementById("bio-lista");
+        const hoje  = new Date().toISOString().slice(0,10);
+        lista.insertAdjacentHTML("afterbegin",
+            `<div class="bio-device-row" id="bio-dev-new">
+                <span class="bio-device-icon"></span>
+                <div class="bio-device-info">
+                    <strong>${result.nome}</strong>
+                    <small>Registado em ${hoje}</small>
+                </div>
+                <button type="button" class="btn-apagar-bio" disabled title="Recarrega para gerir">✕</button>
+             </div>`);
+
+    } catch (err) {
+        if (err.name === "NotAllowedError") {
+            bioMsg("Registo cancelado ou não autorizado.", "erro");
+        } else {
+            bioMsg("" + (err.message || "Erro desconhecido."), "erro");
+        }
+    }
+
+    btn.disabled = false;
+    btn.textContent = "Registar este dispositivo";
+}
+
+// addEventListener (substitui onclick= inline bloqueado pelo CSP)
+document.getElementById('btn-registar-bio')?.addEventListener('click', registarBiometria);
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.js-apagar-cred[data-id]');
+    if (btn) apagarCredencial(parseInt(btn.dataset.id), btn);
+});
+
+async function apagarCredencial(id, btnEl) {
+    if (!confirm("Remover este dispositivo biométrico?")) return;
+    btnEl.disabled = true;
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    try {
+        const resp = await fetch(`/webauthn/credencial/apagar/${id}`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": csrf}
+        });
+        const r = await resp.json();
+        if (r.ok) {
+            const row = document.getElementById("bio-dev-" + id);
+            if (row) row.remove();
+            bioMsg("Dispositivo removido.", "ok");
+        } else {
+            throw new Error(r.error || "Erro ao remover.");
+        }
+    } catch (e) {
+        bioMsg("" + e.message, "erro");
+        btnEl.disabled = false;
+    }
+}
+</script>
+{% endif %}
 {% endblock %}

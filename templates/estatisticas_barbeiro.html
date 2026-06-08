@@ -11,7 +11,7 @@
     {% for periodo, label in [('hoje','Hoje'), ('semana','Semana'), ('mes','Mês')] %}
     <div class="stat-card">
         <div class="stat-label">{{ label }}</div>
-        <div class="stat-val" style="font-size:1.2rem">{{ det[periodo].valor | moeda }} <small>ECV</small></div>
+        <div class="stat-val" style="font-size:1.2rem">{{ det[periodo].valor | moeda }} <small>{{ moeda_simbolo }}</small></div>
         <div class="stat-sub">{{ det[periodo].clientes }} clientes</div>
     </div>
     {% endfor %}
@@ -97,7 +97,7 @@
         </div>
         {% endfor %}
         <p style="font-size:0.75rem;color:var(--text2);margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
-            💡 Sugestão: ajuste o tempo estimado destes serviços ou melhore o processo.
+            Sugestão: ajuste o tempo estimado destes serviços ou melhore o processo.
         </p>
     </div>
 </section>
@@ -171,7 +171,7 @@
                 {% endif %}
             </div>
             <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:0.85rem;font-weight:700;color:var(--accent)">{{ r.valor | moeda }} ECV</div>
+                <div style="font-size:0.85rem;font-weight:700;color:var(--accent)">{{ r.valor | moeda }} {{ moeda_simbolo }}</div>
             </div>
         </li>
         {% endfor %}
@@ -180,7 +180,7 @@
 {% endif %}
 
 {% if not det.top_servicos and not det.recentes %}
-<div class="empty-state"><p>Ainda sem dados para este barbeiro.</p></div>
+<div class="empty-state"><p>Ainda sem dados para este {{ vocab.profissional | lower }}.</p></div>
 {% endif %}
 
 {% endblock %}
