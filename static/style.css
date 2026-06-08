@@ -2046,44 +2046,4 @@ input::placeholder { color: var(--text3); }
 .wa-suporte:hover  { opacity: 0.85; transform: translateX(-50%) scale(1.04); }
 .wa-suporte:active { opacity: 1;    transform: translateX(-50%) scale(0.97); }
 
-/* ── Light mode — respeita prefers-color-scheme ──────────────────────────── */
-@media (prefers-color-scheme: light) {
-    :root {
-        --bg:        #f5f3ef;
-        --surface:   #ffffff;
-        --surface2:  #f0ede8;
-        --surface3:  #e8e4dc;
-        --surface4:  #ddd9d0;
-
-        --border:    rgba(0,0,0,0.08);
-        --border-hi: rgba(0,0,0,0.13);
-        --border-xl: rgba(0,0,0,0.20);
-
-        --text:   #1a1814;
-        --text2:  #6b6358;
-        --text3:  #9e9589;
-        --muted:  #6b6358;
-        --card:   #ffffff;
-
-        --sh-xs: 0 1px 3px rgba(0,0,0,0.10);
-        --sh-sm: 0 2px 8px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.08);
-        --sh-md: 0 4px 16px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08);
-        --sh-lg: 0 8px 32px rgba(0,0,0,0.14);
-
-        --accent-text: #fff;
-    }
-
-    /* Bottom nav e header ficam mais claros */
-    .bottom-nav,
-    .app-header { background: rgba(245,243,239,0.95); }
-
-    /* Cards com sombra subtil em vez de border brilhante */
-    .card, .ag-card, .stat-card { box-shadow: var(--sh-sm); }
-
-    /* Input fields */
-    input, select, textarea {
-        background: #ffffff;
-        color: var(--text);
-        border-color: var(--border-hi);
-    }
-}
+/* Light mode desactivado — tema escuro sempre */
