@@ -456,12 +456,21 @@ def _horarios_disponiveis_impl(barbeiro_id, data_str, duracao_min, barbearia_id)
 
         # Carregar ausências do barbeiro para este dia — UMA query em vez de 1 por slot
         ausencias_dia = []
+        pausa_almoco_inicio = None
+        pausa_almoco_fim    = None
         if barbeiro_id:
             aus_rows = conn.execute(
                 "SELECT * FROM ausencias WHERE barbeiro_id=? "
                 "AND data_inicio<=? AND data_fim>=?",
                 (barbeiro_id, data_str, data_str)).fetchall()
             ausencias_dia = [dict(r) for r in aus_rows]
+
+            barb_row = conn.execute(
+                "SELECT pausa_almoco_inicio, pausa_almoco_fim FROM barbeiros WHERE id=?",
+                (barbeiro_id,)).fetchone()
+            if barb_row:
+                pausa_almoco_inicio = barb_row["pausa_almoco_inicio"]
+                pausa_almoco_fim    = barb_row["pausa_almoco_fim"]
 
     if total_dia >= max_dia:
         return []
@@ -524,6 +533,28 @@ def _horarios_disponiveis_impl(barbeiro_id, data_str, duracao_min, barbearia_id)
     fecho    = datetime.strptime(f"{data_str} {horario['hora_fecho']}:00",    FMT)
     agora    = _agora(barbearia_id=barbearia_id)
 
+    # ── Pausa de almoço permanente ───────────────────────────────────────────
+    _pausa_ini_min = None
+    _pausa_fim_min = None
+    if pausa_almoco_inicio and pausa_almoco_fim:
+        try:
+            pi = pausa_almoco_inicio.split(":")
+            pf = pausa_almoco_fim.split(":")
+            _pausa_ini_min = int(pi[0]) * 60 + int(pi[1])
+            _pausa_fim_min = int(pf[0]) * 60 + int(pf[1])
+        except (ValueError, IndexError, AttributeError):
+            pass
+
+    def _slot_em_pausa(hora_str):
+        if _pausa_ini_min is None or _pausa_fim_min is None:
+            return False
+        try:
+            p = hora_str.split(":")
+            h = int(p[0]) * 60 + int(p[1])
+        except (ValueError, IndexError):
+            return False
+        return _pausa_ini_min <= h < _pausa_fim_min
+
     # Gerar todos os slots de 10 em 10 minutos
     candidatos = {}
     slot = abertura
@@ -552,6 +583,8 @@ def _horarios_disponiveis_impl(barbeiro_id, data_str, duracao_min, barbearia_id)
         if data_str == agora.strftime("%Y-%m-%d") and slot_dt < agora - timedelta(minutes=5):
             continue
         if barbeiro_id and _slot_em_ausencia(hora_str):
+            continue
+        if _slot_em_pausa(hora_str):
             continue
         livre = _slot_livre(slot_dt)
         espera = sum(dur + buffer for ini, dur in _appts_sorted if agora <= ini < slot_dt)

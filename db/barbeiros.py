@@ -294,3 +294,14 @@ def repor_senha_barbeiro(id, nova_senha):
         conn.execute("UPDATE barbeiros SET password_hash=? WHERE id=?",
                      (generate_password_hash(nova_senha, method="pbkdf2:sha256:10000"), id))
 
+
+def set_pausa_almoco(barbeiro_id, barbearia_id, inicio, fim):
+    """Define ou remove a pausa de almoço permanente de um profissional.
+    inicio/fim: string "HH:MM" ou None para remover.
+    """
+    with _write() as conn:
+        conn.execute(
+            "UPDATE barbeiros SET pausa_almoco_inicio=?, pausa_almoco_fim=? "
+            "WHERE id=? AND barbearia_id=?",
+            (inicio or None, fim or None, barbeiro_id, barbearia_id))
+

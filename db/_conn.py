@@ -19,7 +19,7 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token"
+_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim"
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
@@ -156,18 +156,28 @@ _CONN_LOCK = threading.RLock()   # RLock: permite re-aquisição pelo mesmo thre
 
 
 def _connect() -> sqlite3.Connection:
-    """Abre conexão SQLite persistente.
+    """Abre conexão SQLite persistente com retry para NFS stale locks.
     locking_mode=EXCLUSIVE: adquire o file lock POSIX uma vez no arranque e mantém-no
     para sempre — elimina fcntl() por transaction, a principal causa de HARAKIRI em NFS.
     DELETE mode: sem WAL file nem .db-shm (ficheiros que também usam POSIX locks em NFS).
-    synchronous=OFF: sem fsync() — escrita em NFS cache; aceitável para dados de barbearia."""
-    c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA busy_timeout=5000")
-    c.execute("PRAGMA journal_mode=DELETE")
-    c.execute("PRAGMA locking_mode=EXCLUSIVE")
-    c.execute("PRAGMA synchronous=OFF")
-    return c
+    synchronous=OFF: sem fsync() — escrita em NFS cache; aceitável para dados de barbearia.
+    Retry: após reload no PythonAnywhere o processo antigo pode segurar o lock NFS uns
+    segundos; tentamos 5 vezes com 5 s de pausa antes de desistir."""
+    _ultimo_erro = None
+    for _tentativa in range(5):
+        try:
+            c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA busy_timeout=30000")
+            c.execute("PRAGMA journal_mode=DELETE")
+            c.execute("PRAGMA locking_mode=EXCLUSIVE")
+            c.execute("PRAGMA synchronous=OFF")
+            return c
+        except sqlite3.OperationalError as _e:
+            _ultimo_erro = _e
+            if _tentativa < 4:
+                time.sleep(5)
+    raise _ultimo_erro  # type: ignore[misc]
 
 
 def get_conn() -> sqlite3.Connection:
@@ -180,10 +190,26 @@ def get_conn() -> sqlite3.Connection:
     return _CONN
 
 
+def _acquire_lock(timeout_por_tentativa: int = 8, tentativas: int = 3, pausa: float = 2.0) -> bool:
+    """Tenta adquirir _CONN_LOCK com retry para absorver picos de NFS lento.
+
+    Estratégia:
+    - 3 tentativas × 8s timeout = 24s de janela total
+    - 2s de pausa entre tentativas para dar ao NFS tempo de recuperar
+    - Devolve True se conseguiu, False se esgotou todas as tentativas
+    """
+    for _t in range(tentativas):
+        if _CONN_LOCK.acquire(timeout=timeout_por_tentativa):
+            return True
+        if _t < tentativas - 1:
+            time.sleep(pausa)
+    return False
+
+
 @contextmanager
 def _write():
-    # acquire com timeout: se NFS bloqueou o lock, falhamos em 8s em vez de 300s (HARAKIRI)
-    if not _CONN_LOCK.acquire(timeout=8):
+    # Retry automático: NFS pode estar lento por <5s; 3 tentativas absorvem isso
+    if not _acquire_lock():
         raise RuntimeError("DB_TIMEOUT")
     conn = get_conn()
     try:
@@ -202,10 +228,8 @@ def _write():
 
 @contextmanager
 def _write_exclusive():
-    """Transação com BEGIN IMMEDIATE — impede race conditions em criação de agendamentos.
-    Não retenta aqui: o timeout da conexão (60s) já aguarda internamente.
-    Retry com backoff deve ser feito FORA do _CONN_LOCK para não bloquear outros pedidos."""
-    if not _CONN_LOCK.acquire(timeout=8):
+    """Transação com BEGIN IMMEDIATE — impede race conditions em criação de agendamentos."""
+    if not _acquire_lock():
         raise RuntimeError("DB_TIMEOUT")
     conn = get_conn()
     try:
@@ -225,9 +249,8 @@ def _write_exclusive():
 
 @contextmanager
 def _read():
-    # _CONN_LOCK aqui protege o objecto de conexão partilhado (thread-safety).
-    # timeout=8s: se lock preso por NFS, falha rápido em vez de HARAKIRI
-    if not _CONN_LOCK.acquire(timeout=8):
+    # Retry automático: absorve picos de NFS lento sem 503 para o utilizador
+    if not _acquire_lock():
         raise RuntimeError("DB_TIMEOUT")
     conn = get_conn()
     try:
@@ -318,7 +341,7 @@ def backup_db(dest_path: str):
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 17   # versão actual do schema
+_SCHEMA_VERSION = 18   # versão actual do schema
 
 def _run_migrations(conn: sqlite3.Connection):
     """Aplica todas as migrações pendentes de forma idempotente."""
@@ -491,6 +514,14 @@ def _run_migrations(conn: sqlite3.Connection):
                     "ON barbeiros(username) WHERE username IS NOT NULL")
             except sqlite3.OperationalError:
                 pass
+
+        elif _v == 18:
+            # barbeiros: pausa de almoço permanente por profissional
+            for col in ("pausa_almoco_inicio", "pausa_almoco_fim"):
+                try:
+                    conn.execute(f"ALTER TABLE barbeiros ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError:
+                    pass   # coluna já existe
 
         conn.commit()
         _done(_v)

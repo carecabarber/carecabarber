@@ -62,6 +62,8 @@
                     {{ 'Acesso' if b.username else '⚠ Sem acesso' }}
                 </button>
                 <button class="btn btn-outline-small js-toggle-panel" data-panel="foto-{{ b.id }}">Foto</button>
+                <button class="btn btn-outline-small js-toggle-panel" data-panel="almoco-{{ b.id }}"
+                        title="Pausa de almoço">🍽</button>
                 {% if b.mesa_token %}
                 <button class="btn btn-outline-small js-toggle-panel" data-panel="qr-{{ b.id }}">QR Mesa</button>
                 {% endif %}
@@ -188,6 +190,36 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Painel: Pausa de almoço -->
+        <div id="almoco-{{ b.id }}" class="barb-panel" style="display:none">
+            <div class="barb-panel-titulo">Pausa de almoço — <span style="color:var(--accent)">{{ b.nome }}</span></div>
+            <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px">
+                Os slots neste intervalo ficam bloqueados todos os dias. Deixa em branco para remover.
+            </p>
+            <div id="almoco-msg-{{ b.id }}" style="font-size:0.82rem;margin-bottom:8px;display:none"></div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Início</label>
+                    <input type="time" id="almoco-ini-{{ b.id }}"
+                           value="{{ b.pausa_almoco_inicio or '' }}"
+                           placeholder="ex: 12:30">
+                </div>
+                <div class="field">
+                    <label>Fim</label>
+                    <input type="time" id="almoco-fim-{{ b.id }}"
+                           value="{{ b.pausa_almoco_fim or '' }}"
+                           placeholder="ex: 14:00">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+                <button type="button" class="btn btn-primary" style="flex:1"
+                        onclick="guardarPausa({{ b.id }})">Guardar</button>
+                <button type="button" class="btn btn-cancel" style="flex:0 0 auto"
+                        onclick="removerPausa({{ b.id }})"
+                        title="Remover pausa">✕ Remover</button>
             </div>
         </div>
 
@@ -661,6 +693,42 @@ document.querySelectorAll('.js-barb-avatar').forEach(function(img) {
         this.parentNode.replaceChild(span, this);
     });
 });
+</script>
+<script nonce="{{ csp_nonce }}">
+// ── Pausa de almoço ──────────────────────────────────────────────────────
+function _pausaMsg(id, txt, ok) {
+    var el = document.getElementById('almoco-msg-' + id);
+    if (!el) return;
+    el.textContent = txt;
+    el.style.color = ok ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)';
+    el.style.display = 'block';
+    setTimeout(function(){ el.style.display = 'none'; }, 3000);
+}
+
+function guardarPausa(id) {
+    var ini = (document.getElementById('almoco-ini-' + id) || {}).value || '';
+    var fim = (document.getElementById('almoco-fim-' + id) || {}).value || '';
+    var fd  = new FormData();
+    fd.append('csrf_token', '{{ csrf_token() }}');
+    fd.append('pausa_inicio', ini);
+    fd.append('pausa_fim',    fim);
+    fetch('/barbeiros/' + id + '/pausa-almoco', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if (d.ok) {
+                _pausaMsg(id, ini && fim ? '✓ Pausa ' + ini + '–' + fim + ' guardada' : '✓ Pausa removida', true);
+            } else {
+                _pausaMsg(id, d.erro || 'Erro', false);
+            }
+        })
+        .catch(function(){ _pausaMsg(id, 'Erro de rede', false); });
+}
+
+function removerPausa(id) {
+    document.getElementById('almoco-ini-' + id).value = '';
+    document.getElementById('almoco-fim-' + id).value = '';
+    guardarPausa(id);
+}
 </script>
 
 {% endblock %}

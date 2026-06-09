@@ -228,6 +228,32 @@ def register(app):
         return redirect(url_for("barbeiros"))
 
 
+    @app.route("/barbeiros/<int:id>/pausa-almoco", methods=["POST"])
+    @chefe_required
+    def set_pausa_almoco(id):
+        barbearia_id = bid()
+        b = db.get_barbeiro(id)
+        if not b or b.get("barbearia_id") != barbearia_id:
+            return jsonify({"ok": False, "erro": "Não encontrado"}), 404
+
+        inicio = (request.form.get("pausa_inicio") or "").strip() or None
+        fim    = (request.form.get("pausa_fim")    or "").strip() or None
+
+        # Validar formato HH:MM
+        if inicio and not _HORA_RE.match(inicio):
+            return jsonify({"ok": False, "erro": "Hora de início inválida"}), 400
+        if fim and not _HORA_RE.match(fim):
+            return jsonify({"ok": False, "erro": "Hora de fim inválida"}), 400
+        if inicio and fim and inicio >= fim:
+            return jsonify({"ok": False, "erro": "A hora de início tem de ser anterior ao fim"}), 400
+
+        db.set_pausa_almoco(id, barbearia_id, inicio, fim)
+        db.invalidar_cache_slots(barbearia_id)
+        return jsonify({"ok": True,
+                        "inicio": inicio,
+                        "fim": fim})
+
+
     @app.route("/perfil", methods=["GET","POST"])
     @staff_required
     def perfil():

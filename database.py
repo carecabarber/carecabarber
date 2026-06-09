@@ -59,6 +59,7 @@ from db.barbeiros import (
     contar_chefes_ativos, apagar_barbeiro,
     get_barbeiro, get_barbeiro_por_mesa_token, get_agendamentos_mesa,
     get_barbeiros_por_ids, editar_barbeiro, repor_senha_barbeiro,
+    set_pausa_almoco,
 )
 
 # ── db/servicos.py ────────────────────────────────────────────────────────────

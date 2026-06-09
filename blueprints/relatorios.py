@@ -111,6 +111,8 @@ def register(app):
         # ── Dados ──────────────────────────────────────────────
         barbearia      = db.get_barbearia(barbearia_id)
         nome_barbearia = barbearia["nome"] if barbearia else "Barbearia"
+        vocab          = get_vocab(barbearia.get("tipo") if barbearia else None,
+                                   barbearia.get("vocab_custom") if barbearia else None)
 
         with db._read() as conn:
             _q_params = [barbearia_id, d_inicio, d_fim]
@@ -197,14 +199,20 @@ def register(app):
 
         moeda = db.get_config("moeda", barbearia_id, "ECV") or "ECV"
 
+        # Termos do vocabulário do tipo de estabelecimento
+        lbl_profissional  = vocab["profissional"]    # Barbeiro / Esteticista / Técnico…
+        lbl_profissionais = vocab["profissionais"]
+        lbl_agendamentos  = vocab["agendamentos"]    # Marcações / Consultas…
+        lbl_agendamento   = vocab["agendamento"]
+
         # Resumo
         elems.append(Paragraph("Resumo do Mês", sec_style))
         t_resumo = Table([
             ["Indicador", "Valor"],
-            ["Total de cortes concluídos", str(total_ags)],
+            [f"Total de {lbl_agendamentos.lower()} concluídos", str(total_ags)],
             ["Receita total", f"{total_val:,.0f} {moeda}"],
             ["Clientes únicos (por telefone)", str(clientes_u)],
-            ["Média por corte", f"{(total_val/total_ags):,.0f} {moeda}" if total_ags else "—"],
+            [f"Média por {lbl_agendamento.lower()}", f"{(total_val/total_ags):,.0f} {moeda}" if total_ags else "—"],
         ], colWidths=[10*cm, 6*cm])
         t_resumo.setStyle(TableStyle([
             ("BACKGROUND",    (0, 0), (-1, 0), cor_accent),
@@ -220,9 +228,9 @@ def register(app):
         elems.append(t_resumo)
         elems.append(Spacer(1, 0.5*cm))
 
-        # Desempenho por barbeiro
-        elems.append(Paragraph("Desempenho por Barbeiro", sec_style))
-        barb_data = [["Barbeiro", "Cortes", "Receita", "Avaliação média"]]
+        # Desempenho por profissional
+        elems.append(Paragraph(f"Desempenho por {lbl_profissional}", sec_style))
+        barb_data = [[lbl_profissional, lbl_agendamentos, "Receita", "Avaliação média"]]
         for k, info in sorted(por_barbeiro.items(), key=lambda x: -x[1]["valor"]):
             av = info["avaliacoes"]
             barb_data.append([
@@ -251,7 +259,7 @@ def register(app):
         # Actividade diária
         if por_dia:
             elems.append(Paragraph("Actividade Diária", sec_style))
-            col_data = [["Dia", "Cortes"]] + [
+            col_data = [["Dia", lbl_agendamentos]] + [
                 [d[8:] + "/" + d[5:7], str(cnt)]
                 for d, cnt in sorted(por_dia.items())
             ]

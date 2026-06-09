@@ -76,47 +76,52 @@
                     <div class="lembrete-badge">⏰ Em {{ a.minutos_ate }} min</div>
                     {% endif %}
                 </div>
-                <div class="item-acoes">
+                <div class="item-acoes" style="flex-direction:column;gap:5px;align-items:stretch;min-width:90px">
                     {% if a.status == 'em_andamento' %}
-                    <!-- Terminar via QR — termina logo ao escanear (usa valor do campo abaixo) -->
+                    <!-- Terminar via QR -->
                     <button class="btn btn-qr-scan btn-terminar-qr"
                             data-ag-id="{{ a.id }}" data-acao="terminar"
-                            title="Escanear QR para terminar">
-                        
+                            title="Escanear QR para terminar"
+                            style="width:100%">
+
                     </button>
-                    <!-- Terminar direto (usa valor do campo abaixo) -->
+                    <!-- Terminar direto -->
                     <button class="btn btn-terminar-qr js-terminar-direto"
                             data-ag-id="{{ a.id }}"
                             data-preco="{{ a.preco or 0 }}"
                             data-url="{{ url_for('cliente_terminar_servico', slug=barbearia.slug, id=a.id) }}"
-                            style="padding:6px 10px;font-size:0.8rem">
+                            style="width:100%;font-size:0.8rem">
                         Terminar
                     </button>
                     {% else %}
-                    <!-- Iniciar via QR -->
-                    <button class="btn btn-qr-scan"
-                            data-ag-id="{{ a.id }}" data-acao="iniciar"
-                            title="Escanear QR para iniciar">
-                        
-                    </button>
-                    <!-- Iniciar direto (sem QR) -->
-                    <form action="{{ url_for('cliente_iniciar_servico', slug=barbearia.slug, id=a.id) }}"
-                          method="post" style="display:inline"
-                          data-confirm="Iniciar serviço de {{ a.servico_nome | e }} agora?">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-primary"
-                                style="font-size:0.78rem;padding:6px 10px">
-                            Iniciar
+                    <!-- Linha 1: QR + Iniciar -->
+                    <div style="display:flex;gap:5px">
+                        <button class="btn btn-qr-scan"
+                                data-ag-id="{{ a.id }}" data-acao="iniciar"
+                                title="Escanear QR para iniciar">
+
                         </button>
-                    </form>
-                    <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
-                       class="btn btn-reagendar"></a>
-                    <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
-                          method="post"
-                          data-confirm="Cancelar marcação de {{ a.servico_nome | e }}?">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-cancel">✕</button>
-                    </form>
+                        <form action="{{ url_for('cliente_iniciar_servico', slug=barbearia.slug, id=a.id) }}"
+                              method="post" style="flex:1"
+                              data-confirm="Iniciar serviço de {{ a.servico_nome | e }} agora?">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary"
+                                    style="width:100%;font-size:0.78rem;padding:6px 10px">
+                                Iniciar
+                            </button>
+                        </form>
+                    </div>
+                    <!-- Linha 2: Reagendar + Cancelar -->
+                    <div style="display:flex;gap:5px">
+                        <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
+                           class="btn btn-reagendar" style="flex:1;text-align:center"></a>
+                        <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
+                              method="post" style="flex:1"
+                              data-confirm="Cancelar marcação de {{ a.servico_nome | e }}?">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-cancel" style="width:100%">✕ Cancelar</button>
+                        </form>
+                    </div>
                     {% endif %}
                 </div>
                 {% if a.status == 'em_andamento' %}
