@@ -352,7 +352,8 @@ def _copy_com_timeout(src, dst, timeout=60):
 
 
 def _fazer_backup_arranque():
-    """Backup diário da BD. Máx. 1× por dia. Aguarda 5 min após arranque."""
+    """Backup diário da BD. Máx. 1× por dia. Aguarda 5 min após arranque.
+    Guarda os últimos 14 dias (PA recicla workers várias vezes/dia → ~1 cópia/dia)."""
     import glob
     import sqlite3 as _sqlite3
     _log_bak = logging.getLogger("backup")
@@ -383,7 +384,7 @@ def _fazer_backup_arranque():
             finally:
                 chk_conn.close()
             todos = sorted(glob.glob(os.path.join(bak_dir, "barbearia_*.db")))
-            for antigo in todos[:-3]:
+            for antigo in todos[:-14]:
                 try: os.remove(antigo)
                 except OSError: pass
             _log_bak.info(f"Backup criado e verificado: {dest}")
