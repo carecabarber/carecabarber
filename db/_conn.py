@@ -184,6 +184,18 @@ def get_conn() -> sqlite3.Connection:
     return _CONN
 
 
+def _reset_conn():
+    """Fecha e anula a conexão global — usar nos teardowns de testes.
+    Evita ResourceWarning: unclosed database (o GC não precisa fechar)."""
+    global _CONN
+    if _CONN is not None:
+        try:
+            _CONN.close()
+        except Exception:
+            pass
+        _CONN = None
+
+
 def _acquire_lock(timeout_por_tentativa: int = 8, tentativas: int = 3, pausa: float = 2.0) -> bool:
     """Tenta adquirir _CONN_LOCK com retry para absorver picos de NFS lento.
 

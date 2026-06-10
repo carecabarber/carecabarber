@@ -42,6 +42,8 @@ def client():
     with app_module.app.test_client() as c:
         yield c
 
+    _db_conn._reset_conn()
+    db_module._CONN = None
     _db_conn.DB_PATH = original_db
     db_module.DB_PATH = original_db
     shutil.rmtree(tmp_dir, ignore_errors=True)

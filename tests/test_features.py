@@ -78,7 +78,7 @@ def _tmp_db():
         "svc_id":   svc_id,
     }
 
-    _db_conn._CONN = None
+    _db_conn._reset_conn()
     db_module._CONN = None
     _db_conn.DB_PATH = orig
     db_module.DB_PATH = orig
