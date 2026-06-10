@@ -6,6 +6,7 @@ from helpers import (
     _invalidar_idx, _api_ok, _booking_lock,
     get_vocab, _MOEDA_MAP, _TEL_RE, _MAX_TEL, _MAX_MOTIVO,
     _normalizar_tel, enriquecer_lista, enriquecer,
+    _VAPID_PUBLIC_KEY, _PUSH_OK,
 )
 
 
@@ -38,9 +39,11 @@ def register(app):
                     "barbearia_id": barbearia_id,
                 })
                 return redirect(url_for("cliente_home", slug=slug))
-        _mc = db.get_config("moeda", barbearia["id"], "ECV") or "ECV"
+        _mc   = db.get_config("moeda", barbearia["id"], "ECV") or "ECV"
+        aval  = db.media_avaliacoes(barbearia_id)
         return render_template("cliente_entrada.html", erro=erro, barbearia=barbearia,
                                moeda_simbolo=_MOEDA_MAP.get(_mc, _mc),
+                               aval=aval,
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
 
 
@@ -58,8 +61,11 @@ def register(app):
         _outras   = sorted([a for a in _raw if a.get("status") not in _proximas_statuses],
                            key=lambda a: a.get("data_hora", ""), reverse=True)
         agendamentos = _proximas + _outras
+        _slots_disponiveis = db.espera_verificar_cliente(barbearia_id, session.get("telefone",""))
         return render_template("cliente_home.html", agendamentos=agendamentos, barbearia=barbearia,
-                               vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
+                               vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")),
+                               vapid_public_key=_VAPID_PUBLIC_KEY if _PUSH_OK else None,
+                               slots_disponiveis=_slots_disponiveis)
 
 
     @app.route("/cliente/<slug>/marcar", methods=["GET","POST"])
@@ -182,6 +188,12 @@ def register(app):
                 and ag["status"] == ST_AGENDADO):
             db.cancelar_agendamento(id)
             _invalidar_idx(barbearia_id)
+            # Notificar fila de espera
+            try:
+                data_cancelada = ag["data_hora"][:10]
+                db.espera_notificar_proximo(barbearia_id, data_cancelada, ag.get("barbeiro_id"))
+            except Exception:
+                pass
         return redirect(url_for("cliente_home", slug=slug))
 
 
@@ -444,3 +456,50 @@ def register(app):
                                sucesso=sucesso, ja_avaliou=ja_avaliou,
                                nao_concluido=nao_concluido, erro=erro,
                                vocab=get_vocab(barbearia.get("tipo") if barbearia else None, barbearia.get("vocab_custom") if barbearia else None))
+
+
+    @app.route("/cliente/<slug>/fila-espera", methods=["POST"])
+    def cliente_fila_espera(slug):
+        barbearia = db.get_barbearia_por_slug(slug)
+        if not barbearia or not barbearia["ativa"]:
+            return redirect(url_for("cliente_entrada", slug=slug))
+        barbearia_id = barbearia["id"]
+        if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
+            return redirect(url_for("cliente_entrada", slug=slug))
+        if not _api_ok(request.remote_addr or "?"):
+            flash("Demasiados pedidos. Aguarda um momento.")
+            return redirect(url_for("cliente_home", slug=slug))
+        data = _limpar(request.form.get("data",""), 10)
+        try:
+            sid = int(request.form.get("servico_id", 0))
+        except (ValueError, TypeError):
+            sid = 0
+        try:
+            bid_raw = request.form.get("barbeiro_id") or None
+            bid_ = int(bid_raw) if bid_raw else None
+        except (ValueError, TypeError):
+            bid_ = None
+        if not data or not _val_data(data):
+            flash("Data inválida.")
+            return redirect(url_for("cliente_marcar", slug=slug))
+        nome = session.get("user_nome", "")
+        tel  = session.get("telefone", "")
+        ok = db.espera_adicionar(barbearia_id, nome, tel, sid or None, bid_, data)
+        if ok:
+            flash("Adicionado à fila de espera! Avisamos quando houver vaga.", "sucesso")
+        else:
+            flash("Já estás na fila de espera para este dia.")
+        return redirect(url_for("cliente_home", slug=slug))
+
+
+    @app.route("/cliente/<slug>/dispensar-espera/<int:id>", methods=["POST"])
+    def cliente_dispensar_espera(slug, id):
+        barbearia = db.get_barbearia_por_slug(slug)
+        if not barbearia: return redirect(url_for("login"))
+        if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia["id"]:
+            return redirect(url_for("cliente_entrada", slug=slug))
+        try:
+            db.espera_marcar_notificado(id)
+        except Exception:
+            pass
+        return redirect(url_for("cliente_home", slug=slug))

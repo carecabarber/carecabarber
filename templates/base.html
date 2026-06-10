@@ -339,6 +339,16 @@
             window.addEventListener('load', function() {
                 navigator.serviceWorker.register('/sw.js', { scope: '/' })
                     .then(function(reg) {
+                        // Quando o novo SW toma controlo (skipWaiting + clients.claim),
+                        // recarregar a página para servir assets frescos e evitar
+                        // o estado "JS antigo + SW novo" que congela a app PWA.
+                        navigator.serviceWorker.addEventListener('controllerchange', function() {
+                            // Não recarregar se já estamos a navegar (evitar loop)
+                            if (window._swReloadPending) return;
+                            window._swReloadPending = true;
+                            window.location.reload();
+                        });
+
                         // Verificar updates silenciosamente
                         reg.addEventListener('updatefound', function() {
                             const newWorker = reg.installing;

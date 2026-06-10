@@ -86,6 +86,8 @@ from db.agendamentos import (
     get_agendamento_por_token, get_agendamento_por_token_avaliar,
     guardar_avaliacao, media_avaliacoes,
     limpar_em_andamento_presos, novos_agendamentos, proximos_agendamentos,
+    espera_adicionar, espera_verificar_cliente, espera_marcar_notificado,
+    espera_notificar_proximo, espera_listar_activa, espera_limpar_expiradas,
 )
 
 # ── db/relatorios.py ──────────────────────────────────────────────────────────
@@ -98,4 +100,5 @@ from db.relatorios import (
 from db.push import (
     push_guardar, push_remover, push_listar, push_remover_expiradas,
     resumo_hoje,
+    cliente_push_guardar, cliente_push_remover, cliente_push_listar_por_tel,
 )

@@ -344,7 +344,7 @@ def backup_db(dest_path: str):
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 18   # versão actual do schema
+_SCHEMA_VERSION = 20   # versão actual do schema
 
 def _run_migrations(conn: sqlite3.Connection):
     """Aplica todas as migrações pendentes de forma idempotente."""
@@ -525,6 +525,39 @@ def _run_migrations(conn: sqlite3.Connection):
                     conn.execute(f"ALTER TABLE barbeiros ADD COLUMN {col} TEXT")
                 except sqlite3.OperationalError:
                     pass   # coluna já existe
+
+        elif _v == 19:
+            # Tabela de push subscriptions de clientes (lembrete 24h antes)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cliente_push_subs (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telefone   TEXT NOT NULL,
+                    barbearia_id INTEGER NOT NULL,
+                    endpoint   TEXT UNIQUE NOT NULL,
+                    p256dh     TEXT NOT NULL,
+                    auth       TEXT NOT NULL,
+                    criado_em  TEXT NOT NULL
+                )""")
+            _done(19)
+
+        elif _v == 20:
+            # Fila de espera: clientes que querem uma vaga quando não há horários
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS lista_espera (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    barbearia_id   INTEGER NOT NULL,
+                    cliente_nome   TEXT NOT NULL,
+                    telefone       TEXT NOT NULL,
+                    servico_id     INTEGER,
+                    barbeiro_id    INTEGER,
+                    data_preferida TEXT NOT NULL,
+                    slot_livre     INTEGER DEFAULT 0,
+                    notificado     INTEGER DEFAULT 0,
+                    criado_em      TEXT NOT NULL,
+                    expira_em      TEXT NOT NULL
+                )""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_espera_barbearia ON lista_espera(barbearia_id, data_preferida, slot_livre)")
+            _done(20)
 
         conn.commit()
         _done(_v)

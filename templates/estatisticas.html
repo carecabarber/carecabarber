@@ -3,11 +3,11 @@
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <h1>Estatísticas</h1>
     <button type="button" id="btn-pdf-toggle"
-            style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;
-                   padding:8px 14px;border-radius:8px;border:1px solid var(--border);
-                   color:var(--text2);background:var(--card);cursor:pointer;
-                   transition:color .15s,border-color .15s">
-        ⬇ PDF
+            style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:700;
+                   padding:8px 16px;border-radius:8px;border:1px solid var(--accent);
+                   color:var(--accent-dark,#b8922a);background:rgba(232,196,106,0.12);cursor:pointer;
+                   transition:background .15s,border-color .15s">
+        📄 Relatório PDF
     </button>
 </div>
 
@@ -53,10 +53,16 @@
     </form>
 </div>
 <script nonce="{{ csp_nonce }}">
-document.getElementById('btn-pdf-toggle').addEventListener('click', function() {
-    var p = document.getElementById('pdf-panel');
-    p.style.display = p.style.display === 'none' ? 'block' : 'none';
-});
+var _pdfPanel = document.getElementById('pdf-panel');
+var _btn = document.getElementById('btn-pdf-toggle');
+function _togglePdf(force) {
+    var open = force !== undefined ? force : (_pdfPanel.style.display === 'none');
+    _pdfPanel.style.display = open ? 'block' : 'none';
+    _btn.style.background = open ? 'rgba(232,196,106,0.22)' : 'rgba(232,196,106,0.12)';
+}
+_btn.addEventListener('click', function() { _togglePdf(); });
+// Auto-abrir se URL tem ?pdf=1
+if (new URLSearchParams(location.search).get('pdf') === '1') { _togglePdf(true); }
 // Se data_ini muda, limpar o campo mes (e vice-versa)
 var ini = document.getElementById('pdf-ini');
 var fim = document.getElementById('pdf-fim');

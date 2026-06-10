@@ -819,3 +819,76 @@ def proximos_agendamentos(barbearia_id, minutos=20, barbeiro_id=None):
 
 # ── Estatísticas ───────────────────────────────────────────
 
+
+# ── Fila de espera ────────────────────────────────────────────────────────────
+
+def espera_adicionar(barbearia_id, cliente_nome, telefone, servico_id, barbeiro_id, data_preferida):
+    """Adiciona cliente à fila de espera. Retorna False se já existe entrada igual activa."""
+    from db._conn import FMT, _agora, _write_exclusive
+    from datetime import timedelta
+    agora = _agora(barbearia_id).strftime(FMT)
+    expira = (_agora(barbearia_id) + timedelta(days=7)).strftime(FMT)
+    with _write_exclusive() as conn:
+        existe = conn.execute(
+            "SELECT id FROM lista_espera WHERE barbearia_id=? AND telefone=? "
+            "AND data_preferida=? AND slot_livre=0 AND expira_em > ?",
+            (barbearia_id, telefone, data_preferida, agora)).fetchone()
+        if existe:
+            return False
+        conn.execute(
+            "INSERT INTO lista_espera (barbearia_id, cliente_nome, telefone, servico_id, "
+            "barbeiro_id, data_preferida, criado_em, expira_em) VALUES (?,?,?,?,?,?,?,?)",
+            (barbearia_id, cliente_nome, telefone or "", servico_id, barbeiro_id,
+             data_preferida, agora, expira))
+    return True
+
+
+def espera_verificar_cliente(barbearia_id, telefone):
+    """Verifica se o cliente tem slot disponível na fila de espera."""
+    with _read() as conn:
+        rows = conn.execute(
+            "SELECT * FROM lista_espera WHERE barbearia_id=? AND telefone=? "
+            "AND slot_livre=1 AND notificado=0 ORDER BY data_preferida",
+            (barbearia_id, telefone)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def espera_marcar_notificado(espera_id):
+    with _write() as conn:
+        conn.execute("UPDATE lista_espera SET notificado=1 WHERE id=?", (espera_id,))
+
+
+def espera_notificar_proximo(barbearia_id, data_cancelada, barbeiro_id_cancelado):
+    """Quando um agendamento é cancelado, notifica o próximo da fila de espera para esse dia."""
+    with _write() as conn:
+        row = conn.execute(
+            "SELECT id FROM lista_espera WHERE barbearia_id=? AND data_preferida=? "
+            "AND slot_livre=0 AND expira_em > datetime('now') "
+            "AND (barbeiro_id IS NULL OR barbeiro_id=?) "
+            "ORDER BY criado_em LIMIT 1",
+            (barbearia_id, data_cancelada, barbeiro_id_cancelado)).fetchone()
+        if row:
+            conn.execute("UPDATE lista_espera SET slot_livre=1 WHERE id=?", (row["id"],))
+            return row["id"]
+    return None
+
+
+def espera_listar_activa(barbearia_id):
+    """Lista fila de espera activa (para o chefe ver no painel)."""
+    with _read() as conn:
+        rows = conn.execute(
+            "SELECT e.*, s.nome AS servico_nome, b.nome AS barbeiro_nome "
+            "FROM lista_espera e "
+            "LEFT JOIN servicos s ON s.id=e.servico_id "
+            "LEFT JOIN barbeiros b ON b.id=e.barbeiro_id "
+            "WHERE e.barbearia_id=? AND e.expira_em > datetime('now') "
+            "ORDER BY e.data_preferida, e.criado_em",
+            (barbearia_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def espera_limpar_expiradas():
+    """Remove entradas expiradas (chamado pelo thread de limpeza)."""
+    with _write() as conn:
+        conn.execute("DELETE FROM lista_espera WHERE expira_em <= datetime('now')")
+

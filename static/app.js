@@ -493,6 +493,26 @@ document.addEventListener("keydown", e => {
     if (e.key === "Escape") fecharModal();
 });
 
+// ── Fechar modal ao clicar fora da box (backdrop) ────────────
+document.addEventListener("click", e => {
+    const overlay = document.getElementById("modalOverlay");
+    if (overlay && overlay.classList.contains("open")) {
+        // Só fechar se o clique foi directamente no overlay (backdrop), não na box
+        if (e.target === overlay) fecharModal();
+    }
+});
+
+// ── Segurança: resetar overlay se BFCache restaurar a página ─
+window.addEventListener("pageshow", e => {
+    if (e.persisted) {
+        // Página restaurada do BFCache — garantir que o overlay não fica preso
+        const overlay = document.getElementById("modalOverlay");
+        if (overlay) overlay.classList.remove("open");
+        _modalAberto = false;
+        _reloadPending = false;
+    }
+});
+
 // ── Swipe para baixo para fechar modal (mobile) ──────────────
 (function() {
     let _ty0 = 0;

@@ -21,6 +21,18 @@
         </div>
         {% endif %}
         <h1 class="login-titulo">{{ barbearia.nome }}</h1>
+        {% if aval and aval.total > 0 %}
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px">
+            <span style="color:#f5c842;font-size:1.1rem;letter-spacing:1px">
+                {%- set _m = aval.media | round(0, 'floor') | int -%}
+                {%- for _ in range(_m) %}★{% endfor -%}
+                {%- for _ in range(5 - _m) %}☆{% endfor -%}
+            </span>
+            <span style="font-size:0.82rem;color:var(--text2);font-weight:600">
+                {{ "%.1f"|format(aval.media) }} <span style="font-weight:400">({{ aval.total }} avaliações)</span>
+            </span>
+        </div>
+        {% endif %}
         <p style="color:var(--text2);font-size:0.88rem;margin-bottom:24px;text-align:center">
             Entra com o teu nome e telemóvel para marcares o teu {{ vocab.servico | lower }}.
         </p>

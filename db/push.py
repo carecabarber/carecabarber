@@ -47,6 +47,34 @@ def push_remover_expiradas(endpoints_invalidos):
             conn.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (ep,))
 
 
+def cliente_push_guardar(telefone, barbearia_id, endpoint, p256dh, auth):
+    agora = datetime.now(timezone.utc).strftime(FMT)
+    with _write() as conn:
+        conn.execute("""
+            INSERT INTO cliente_push_subs (telefone, barbearia_id, endpoint, p256dh, auth, criado_em)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                telefone=excluded.telefone,
+                barbearia_id=excluded.barbearia_id,
+                p256dh=excluded.p256dh,
+                auth=excluded.auth,
+                criado_em=excluded.criado_em
+        """, (telefone, barbearia_id, endpoint, p256dh, auth, agora))
+
+
+def cliente_push_remover(endpoint):
+    with _write() as conn:
+        conn.execute("DELETE FROM cliente_push_subs WHERE endpoint=?", (endpoint,))
+
+
+def cliente_push_listar_por_tel(telefone, barbearia_id):
+    with _read() as conn:
+        rows = conn.execute(
+            "SELECT * FROM cliente_push_subs WHERE telefone=? AND barbearia_id=?",
+            (telefone, barbearia_id)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def resumo_hoje(barbearia_id, barbeiro_id=None):
     hoje = _agora(barbearia_id).strftime("%Y-%m-%d")
     with _read() as conn:

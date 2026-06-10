@@ -223,3 +223,41 @@ def register(app):
             h = db.estado_hoje(barbearia_id, uid)
             _pc_set(_ck, h, 2)
         return jsonify({"h": h})
+
+
+    @app.route("/api/cliente-push/subscribe", methods=["POST"])
+    def api_cliente_push_subscribe():
+        from helpers import _PUSH_OK
+        if not _PUSH_OK:
+            return {"ok": False, "error": "Push não disponível"}, 503
+        if session.get("role") != "cliente":
+            return {"ok": False, "error": "Não autorizado"}, 403
+        barbearia_id = session.get("barbearia_id")
+        telefone = session.get("telefone", "")
+        if not telefone or not barbearia_id:
+            return {"ok": False, "error": "Sessão inválida"}, 400
+        data = request.get_json(silent=True) or {}
+        endpoint = data.get("endpoint", "")
+        p256dh   = data.get("p256dh", "")
+        auth_key = data.get("auth", "")
+        if not endpoint or not p256dh or not auth_key:
+            return {"ok": False, "error": "Dados incompletos"}, 400
+        try:
+            db.cliente_push_guardar(telefone, barbearia_id, endpoint, p256dh, auth_key)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}, 500
+
+
+    @app.route("/api/cliente-push/unsubscribe", methods=["POST"])
+    def api_cliente_push_unsubscribe():
+        if session.get("role") != "cliente":
+            return {"ok": False}, 403
+        data = request.get_json(silent=True) or {}
+        endpoint = data.get("endpoint", "")
+        if endpoint:
+            try:
+                db.cliente_push_remover(endpoint)
+            except Exception:
+                pass
+        return {"ok": True}

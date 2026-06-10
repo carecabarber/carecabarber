@@ -11,14 +11,38 @@
 <div class="resumo-bar">
     <div class="resumo-item">
         <span class="resumo-val">{{ resumo.clientes }}</span>
-        <span class="resumo-label">Clientes</span>
+        <span class="resumo-label">Concluídos</span>
     </div>
     <div class="resumo-sep"></div>
     <div class="resumo-item">
         <span class="resumo-val">{{ resumo.valor | moeda }} <small>{{ moeda_simbolo }}</small></span>
-        <span class="resumo-label">Faturado hoje</span>
+        <span class="resumo-label">Faturado</span>
     </div>
+    {% if resumo_extra and resumo_extra.agendados > 0 %}
+    <div class="resumo-sep"></div>
+    <div class="resumo-item">
+        <span class="resumo-val" style="color:var(--text2)">{{ resumo_extra.agendados }}</span>
+        <span class="resumo-label">Pendentes</span>
+    </div>
+    {% endif %}
+    {% if resumo_extra and resumo_extra.valor_esperado > resumo.valor %}
+    <div class="resumo-sep"></div>
+    <div class="resumo-item" title="Receita se todos os agendamentos forem concluídos">
+        <span class="resumo-val" style="color:var(--text2);font-size:0.95em">~{{ resumo_extra.valor_esperado | moeda }} <small>{{ moeda_simbolo }}</small></span>
+        <span class="resumo-label">Esperado</span>
+    </div>
+    {% endif %}
 </div>
+
+{% if session.get('role') == 'chefe' %}
+<div style="text-align:right;margin:-4px 0 10px">
+    <a href="{{ url_for('estatisticas') }}?pdf=1&amp;mes={{ agora_iso[:7] }}"
+       style="font-size:0.75rem;font-weight:600;color:var(--accent-dark,#b8922a);
+              text-decoration:none;opacity:0.85;display:inline-flex;align-items:center;gap:4px">
+        📄 Relatório {{ agora_iso[5:7] }}/{{ agora_iso[:4] }}
+    </a>
+</div>
+{% endif %}
 
 {% if barbeiros %}
 <div class="filtro-bar">

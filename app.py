@@ -462,51 +462,127 @@ def _enviar_lembretes_push():
             pass
 
 
-def _thread_limpeza():
-    """Background: limpa atendimentos 'em_andamento' presos e faz GC de memória.
-    Cada operação é separada por time.sleep(0.05) para ceder o GIL à main thread
-    e evitar starvar pedidos HTTP que precisem de _CONN_LOCK."""
+def _push_notif_sub(endpoint, p256dh, auth, barbearia_id, titulo, corpo, url="/"):
+    """Envia push directamente a uma subscripção (endpoint+keys) de cliente."""
+    from helpers import _PUSH_OK, _VAPID_PRIVATE_KEY, _VAPID_CLAIMS
+    if not _PUSH_OK or not _VAPID_PRIVATE_KEY:
+        return
+    try:
+        from pywebpush import webpush, WebPushException
+        import json as _json
+        payload = _json.dumps({"titulo": titulo, "corpo": corpo, "url": url})
+        webpush(
+            subscription_info={"endpoint": endpoint,
+                                "keys": {"p256dh": p256dh, "auth": auth}},
+            data=payload,
+            vapid_private_key=_VAPID_PRIVATE_KEY,
+            vapid_claims=_VAPID_CLAIMS,
+        )
+    except Exception:
+        pass
+
+
+def _enviar_lembretes_push_cliente():
+    """Envia push 24h antes ao cliente de cada marcação próxima."""
+    from helpers import _PUSH_OK, _VAPID_PRIVATE_KEY
+    if not _PUSH_OK or not _VAPID_PRIVATE_KEY:
+        return
+    try:
+        barbearias = db.listar_barbearias(apenas_ativas=True)
+    except Exception:
+        return
+    for b in barbearias:
+        bid_ = b["id"]
+        try:
+            agora_b = _agora(barbearia_id=bid_)
+            # Janela: entre 23h55 e 24h05 antes da marcação
+            ini = (agora_b + timedelta(hours=23, minutes=55)).strftime("%Y-%m-%d %H:%M:%S")
+            fim = (agora_b + timedelta(hours=24, minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+            with db._read() as _conn:
+                _rows = _conn.execute(
+                    "SELECT a.id, a.cliente, a.telefone, a.data_hora, s.nome AS servico_nome, "
+                    "       b.nome AS barbeiro_nome "
+                    "FROM agendamentos a "
+                    "LEFT JOIN servicos s ON s.id=a.servico_id "
+                    "LEFT JOIN barbeiros b ON b.id=a.barbeiro_id "
+                    "WHERE a.barbearia_id=? AND a.status='agendado' "
+                    "  AND a.data_hora BETWEEN ? AND ? AND a.telefone IS NOT NULL",
+                    (bid_, ini, fim)).fetchall()
+            for ag in _rows:
+                chave = (ag["id"], "24h_cliente")
+                if chave in _lembretes_enviados:
+                    continue
+                tel = ag["telefone"]
+                if not tel:
+                    continue
+                subs = db.cliente_push_listar_por_tel(tel, bid_)
+                if not subs:
+                    continue
+                _lembretes_enviados.add(chave)
+                hora = ag["data_hora"][11:16]
+                barb = ag["barbeiro_nome"] or ""
+                corpo = f"{ag['servico_nome'] or 'Corte'} amanhã às {hora}"
+                if barb:
+                    corpo += f" com {barb}"
+                for sub in subs:
+                    try:
+                        _push_notif_sub(sub["endpoint"], sub["p256dh"], sub["auth"],
+                                        bid_, "⏰ Lembrete de amanhã", corpo)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+
+def _ciclo_limpeza(ciclo: int) -> None:
+    """Um ciclo do loop de limpeza — extraído para ser testável."""
     _log_lim = logging.getLogger("limpeza")
+    try:
+        _pc_evict()
+    except Exception as e:
+        _log_lim.warning("Erro em _pc_evict: %s", e)
+    try:
+        _rl_evict()
+    except Exception as e:
+        _log_lim.warning("Erro em _rl_evict: %s", e)
+    try:
+        db.invalidar_cache_slots()
+    except Exception as e:
+        _log_lim.warning("Erro em invalidar_cache_slots: %s", e)
+    try:
+        _enviar_lembretes_push()
+    except Exception as e:
+        _log_lim.warning("Erro nos lembretes push: %s", e)
+    try:
+        _enviar_lembretes_push_cliente()
+    except Exception as e:
+        _log_lim.warning("Erro nos lembretes push cliente: %s", e)
+    if ciclo % 6 == 0:
+        try:
+            for b in db.listar_barbearias(apenas_ativas=True):
+                libertados = db.limpar_em_andamento_presos(b["id"], horas=8)
+                if libertados:
+                    _invalidar_idx(b["id"])
+        except Exception as e:
+            _log_lim.warning("Erro na limpeza automática: %s", e)
+        try:
+            db.espera_limpar_expiradas()
+        except Exception as e:
+            _log_lim.warning("Erro ao limpar fila de espera: %s", e)
+    if ciclo % 288 == 0:
+        try:
+            db.desativar_planos_expirados()
+        except Exception as e:
+            _log_lim.warning("Erro em desativar_planos_expirados: %s", e)
+
+
+def _thread_limpeza():
+    """Background thread: chama _ciclo_limpeza() em loop com sleeps para ceder o GIL."""
     _indices_prontos.wait(timeout=180)
     _ciclo = 0
     while True:
-        time.sleep(0.05)   # ceder GIL à main thread antes de começar ciclo
-        try:
-            _pc_evict()
-        except Exception as e:
-            _log_lim.warning(f"Erro em _pc_evict: {e}")
         time.sleep(0.05)
-        try:
-            _rl_evict()
-        except Exception as e:
-            _log_lim.warning(f"Erro em _rl_evict: {e}")
-        time.sleep(0.05)
-        try:
-            db.invalidar_cache_slots()
-        except Exception as e:
-            _log_lim.warning(f"Erro em invalidar_cache_slots: {e}")
-        time.sleep(0.05)
-        try:
-            _enviar_lembretes_push()
-        except Exception as e:
-            _log_lim.warning(f"Erro nos lembretes push: {e}")
-        if _ciclo % 6 == 0:
-            time.sleep(0.05)
-            try:
-                barbearias = db.listar_barbearias(apenas_ativas=True)
-                for b in barbearias:
-                    time.sleep(0.02)  # janela entre barbearias para HTTP requests
-                    libertados = db.limpar_em_andamento_presos(b["id"], horas=8)
-                    if libertados:
-                        _invalidar_idx(b["id"])
-            except Exception as e:
-                _log_lim.warning(f"Erro na limpeza automática: {e}")
-        if _ciclo % 288 == 0:
-            time.sleep(0.05)
-            try:
-                db.desativar_planos_expirados()
-            except Exception as e:
-                _log_lim.warning(f"Erro em desativar_planos_expirados: {e}")
+        _ciclo_limpeza(_ciclo)
         _ciclo += 1
         time.sleep(5 * 60)
 

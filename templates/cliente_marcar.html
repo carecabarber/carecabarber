@@ -42,6 +42,19 @@
             {% if erro %}
             <div class="login-erro">{{ erro }}</div>
             {% endif %}
+            {% if erro and "vagas" in erro %}
+            <form action="{{ url_for('cliente_fila_espera', slug=barbearia.slug) }}" method="post" style="margin-top:8px">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="data" value="{{ request.form.get('data', hoje) }}">
+                <input type="hidden" name="servico_id" value="{{ request.form.get('servico_id', '') }}">
+                <input type="hidden" name="barbeiro_id" value="{{ request.form.get('barbeiro_id', '') }}">
+                <div style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.25);border-radius:10px;padding:14px;margin-bottom:12px">
+                    <div style="font-size:0.88rem;font-weight:600;color:var(--accent);margin-bottom:6px">Sem vagas para este dia</div>
+                    <div style="font-size:0.82rem;color:var(--text2);margin-bottom:10px">Entras na fila — avisamos quando houver um cancelamento.</div>
+                    <button type="submit" class="btn btn-primary btn-full" style="padding:10px">🔔 Entrar na fila de espera</button>
+                </div>
+            </form>
+            {% endif %}
 
             <div class="field">
                 <label for="servico_id">{{ vocab.servico }}</label>

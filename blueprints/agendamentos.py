@@ -91,9 +91,17 @@ def register(app):
                 "media_avaliacao": round(sum(_avals) / len(_avals), 1) if _avals else None,
                 "n_avals":         len(_avals),
             }
+        # Resumo enriquecido: receita esperada + breakdown de estados
+        _status_ativos = {ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO}
+        resumo_extra = {
+            "agendados":     sum(1 for a in agendamentos if a["status"] == ST_AGENDADO),
+            "valor_esperado": sum((a.get("preco") or 0) for a in agendamentos
+                                  if a["status"] in _status_ativos),
+        }
         return render_template("index.html", agendamentos=agendamentos, em_andamento=em_andamento,
                                barbeiros=barbeiros, barbeiro_id_sel=filtro_bid,
                                resumo=resumo,
+                               resumo_extra=resumo_extra,
                                bloqueios=bloqueios,
                                resumo_fim_dia=resumo_fim_dia,
                                agora=_agora_dt.strftime("%H:%M"),
@@ -355,6 +363,12 @@ def register(app):
             db.cancelar_agendamento(id, incluir_em_andamento=True)
             _blog("CANCELAR", bid=ag["barbearia_id"], ag_id=id, uid=session.get("user_id"))
             _invalidar_idx(ag["barbearia_id"])
+            # Notificar fila de espera
+            try:
+                data_cancelada = ag["data_hora"][:10]
+                db.espera_notificar_proximo(ag["barbearia_id"], data_cancelada, ag.get("barbeiro_id"))
+            except Exception:
+                pass
         return redirect(url_for("index"))
 
 
