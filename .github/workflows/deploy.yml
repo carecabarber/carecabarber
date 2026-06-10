@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  # ── 1. Testes ───────────────────────────────────────────────────
+  # ── 1a. Testes Python ──────────────────────────────────────────
   test:
     name: pytest
     runs-on: ubuntu-latest
@@ -26,10 +26,26 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      - name: Correr testes
+      - name: Correr testes Python
         env:
           SECRET_KEY: ci-secret-apenas-testes
         run: python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
+
+  # ── 1b. Testes JavaScript (Node.js nativo, sem dependências) ───
+  test-js:
+    name: node:test (JS)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Correr testes JS
+        run: node --test tests/test_frontend.js
 
   # ── 1b. Verificar se os Secrets de deploy estão configurados ───
   # Permite que o CI de testes fique sempre verde mesmo sem Secrets;
@@ -55,7 +71,7 @@ jobs:
   # Corre só em push para main, se os testes passaram E os Secrets existirem
   deploy:
     name: Deploy → PythonAnywhere
-    needs: [test, check-secrets]
+    needs: [test, test-js, check-secrets]
     if: github.event_name == 'push' && needs.check-secrets.outputs.ready == 'true'
     runs-on: ubuntu-latest
 
