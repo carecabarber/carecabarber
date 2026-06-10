@@ -7,4 +7,13 @@ barbearia.db
 .pythonanywhere
 .root_init_password
 backups/
+backups_prod/
 security.log
+.coverage
+*.db-journal
+*.db-wal
+*.db-shm
+.migr_tmp
+.migr2_done
+qr_clientes.png
+qr_site.png

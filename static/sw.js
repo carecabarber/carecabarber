@@ -7,7 +7,7 @@
 //    • POST/mutations → Network Only (nunca em cache)
 // ══════════════════════════════════════════════════════════════
 
-const APP_VERSION    = 'v12';          // Incrementar sempre que o conteúdo mudar
+const APP_VERSION    = 'v14';          // Incrementar sempre que o conteúdo mudar
 const STATIC_CACHE   = `cb-static-${APP_VERSION}`;
 const DYNAMIC_CACHE  = `cb-dynamic-${APP_VERSION}`;
 const OFFLINE_URL    = '/offline';

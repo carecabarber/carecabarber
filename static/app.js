@@ -282,6 +282,7 @@ function verificarLembretes() {
 // ── Intervalo adaptativo: rápido em horário de trabalho, lento fora ──────────
 // Usa _horaServidor() (hora de Cabo Verde) — não o relógio local do browser
 function _intervaloEstado() {
+    if (document.querySelector(".cronometro")) return 3000;  // serviço em curso → sync rápido
     const h = _horaServidor().getHours();
     return (h >= 8 && h < 20) ? 30000 : 120000;   // 30s em horas de pico (era 12s)
 }

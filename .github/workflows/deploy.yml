@@ -31,12 +31,32 @@ jobs:
           SECRET_KEY: ci-secret-apenas-testes
         run: python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing
 
+  # ── 1b. Verificar se os Secrets de deploy estão configurados ───
+  # Permite que o CI de testes fique sempre verde mesmo sem Secrets;
+  # o deploy só activa quando PA_TOKEN existir.
+  check-secrets:
+    name: Secrets configurados?
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.c.outputs.ready }}
+    steps:
+      - id: c
+        env:
+          T: ${{ secrets.PA_TOKEN }}
+        run: |
+          if [ -n "$T" ]; then
+            echo "ready=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️  Secrets PA_* ausentes — deploy automático desactivado."
+          fi
+
   # ── 2. Deploy para PythonAnywhere ──────────────────────────────
-  # Corre apenas em push para main E se os testes passaram
+  # Corre só em push para main, se os testes passaram E os Secrets existirem
   deploy:
     name: Deploy → PythonAnywhere
-    needs: test
-    if: github.event_name == 'push'
+    needs: [test, check-secrets]
+    if: github.event_name == 'push' && needs.check-secrets.outputs.ready == 'true'
     runs-on: ubuntu-latest
 
     env:

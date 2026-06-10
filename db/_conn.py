@@ -152,39 +152,33 @@ _HORARIO_PADRAO = [
 # arranque do processo e reutilizá-la em todos os pedidos HTTP.
 # check_same_thread=False: uWSGI single-worker — só um thread activo de cada vez.
 _CONN: sqlite3.Connection | None = None
-_CONN_LOCK = threading.RLock()   # RLock: permite re-aquisição pelo mesmo thread
+_CONN_LOCK = threading.RLock()   # serializa leituras/escritas (_read/_write)
+_INIT_LOCK = threading.Lock()    # serializa APENAS a inicialização da conexão
 
 
 def _connect() -> sqlite3.Connection:
-    """Abre conexão SQLite persistente com retry para NFS stale locks.
-    locking_mode=EXCLUSIVE: adquire o file lock POSIX uma vez no arranque e mantém-no
-    para sempre — elimina fcntl() por transaction, a principal causa de HARAKIRI em NFS.
-    DELETE mode: sem WAL file nem .db-shm (ficheiros que também usam POSIX locks em NFS).
-    synchronous=OFF: sem fsync() — escrita em NFS cache; aceitável para dados de barbearia.
-    Retry: após reload no PythonAnywhere o processo antigo pode segurar o lock NFS uns
-    segundos; tentamos 5 vezes com 5 s de pausa antes de desistir."""
-    _ultimo_erro = None
-    for _tentativa in range(5):
-        try:
-            c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-            c.row_factory = sqlite3.Row
-            c.execute("PRAGMA busy_timeout=30000")
-            c.execute("PRAGMA journal_mode=DELETE")
-            c.execute("PRAGMA locking_mode=EXCLUSIVE")
-            c.execute("PRAGMA synchronous=OFF")
-            return c
-        except sqlite3.OperationalError as _e:
-            _ultimo_erro = _e
-            if _tentativa < 4:
-                time.sleep(5)
-    raise _ultimo_erro  # type: ignore[misc]
+    # SEM locking_mode=EXCLUSIVE. O EXCLUSIVE obriga o worker a segurar um POSIX
+    # file-lock durante toda a vida do processo: impede reloads limpos (o worker
+    # novo bloqueia até o antigo morrer — 60s de "mercy" do uWSGI), torna o
+    # arranque lento (31s+) e provoca downtime a cada recycle do PythonAnywhere.
+    # Com UM único worker e UMA única conexão persistente não há contenção entre
+    # conexões, logo o fcntl() por operação em NFS é barato (não há lock para
+    # disputar). busy_timeout cobre a janela de transição em que o worker antigo
+    # (ainda EXCLUSIVE) só liberta o ficheiro ao ser morto.
+    c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=60000")
+    c.execute("PRAGMA synchronous=OFF")  # sem fsync em NFS → commits instantâneos → _CONN_LOCK libertado rapidamente
+    return c
 
 
 def get_conn() -> sqlite3.Connection:
-    """Devolve conexão persistente — aberta uma vez, reutilizada em todos os pedidos."""
+    """Devolve conexão persistente — aberta uma vez por processo, reutilizada sempre.
+    Usa _INIT_LOCK (separado de _CONN_LOCK) para que a inicialização não bloqueie
+    os context managers _read()/_write() que dependem de _CONN_LOCK."""
     global _CONN
     if _CONN is None:
-        with _CONN_LOCK:
+        with _INIT_LOCK:
             if _CONN is None:
                 _CONN = _connect()
     return _CONN
@@ -223,7 +217,6 @@ def _write():
         raise
     finally:
         _CONN_LOCK.release()
-        # Sem conn.close() — conexão persistente
 
 
 @contextmanager
@@ -244,7 +237,6 @@ def _write_exclusive():
         raise
     finally:
         _CONN_LOCK.release()
-        # Sem conn.close() — conexão persistente
 
 
 @contextmanager
@@ -257,7 +249,6 @@ def _read():
         yield conn
     finally:
         _CONN_LOCK.release()
-        # Sem conn.close() — conexão persistente
 
 
 # ── Normalização de telemóvel ──────────────────────────────
@@ -532,9 +523,8 @@ def _run_migrations(conn: sqlite3.Connection):
 def init_db():
     conn = get_conn()
     try:
-        # locking_mode=EXCLUSIVE já definido em _connect() — adquire POSIX file lock
-        # uma vez e mantém-no para sempre, eliminando fcntl() por transaction em NFS.
-        # Forçar a aquisição do lock imediatamente com um SELECT trivial.
+        # Durante a transição de deploy, o worker antigo pode ainda segurar um lock
+        # EXCLUSIVE; busy_timeout (60s, em _connect) absorve essa espera até ele morrer.
         conn.execute("SELECT 1")
 
         c = conn.cursor()

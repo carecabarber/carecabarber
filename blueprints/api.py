@@ -206,14 +206,14 @@ def register(app):
             if cached is not None:
                 return jsonify({"h": cached})
             h = db.estado_cliente(session.get("telefone",""), barbearia_id)
-            _pc_set(_ck, h, 6)
+            _pc_set(_ck, h, 2)
         elif role == "chefe":
             _ck = f"estado:chefe:{barbearia_id}:"
             cached = _pc_get(_ck)
             if cached is not None:
                 return jsonify({"h": cached})
             h = db.estado_hoje(barbearia_id)
-            _pc_set(_ck, h, 6)
+            _pc_set(_ck, h, 2)
         else:
             uid = session.get("user_id")
             _ck = f"estado:barb:{barbearia_id}:{uid}"
@@ -221,5 +221,5 @@ def register(app):
             if cached is not None:
                 return jsonify({"h": cached})
             h = db.estado_hoje(barbearia_id, uid)
-            _pc_set(_ck, h, 6)
+            _pc_set(_ck, h, 2)
         return jsonify({"h": h})

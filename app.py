@@ -298,9 +298,9 @@ def erro_servidor(e):
 
 @app.errorhandler(RuntimeError)
 def _handle_runtime(e):
-    """DB_TIMEOUT: lock preso por NFS → 503 rápido."""
+    """DB_TIMEOUT: lock NFS preso após 3 tentativas (~26s) → 503."""
     if "DB_TIMEOUT" in str(e):
-        _log(f"DB_TIMEOUT path={request.path} — lock não obtido em 8s")
+        _log(f"DB_TIMEOUT path={request.path} — lock não obtido após 3 tentativas")
         if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify({"ok": False, "error": "Serviço temporariamente indisponível. Tenta novamente."}), 503
         flash("Serviço temporariamente indisponível. Tenta novamente.", "erro")
@@ -308,6 +308,16 @@ def _handle_runtime(e):
         if ref and request.host in ref:
             return redirect(ref), 303
         return redirect(url_for("login")), 303
+    raise e
+
+
+@app.errorhandler(OSError)
+def _handle_oserror(e):
+    """Ignora write errors de clientes que desligaram (BrokenPipe, etc.).
+    Acontece quando o CI/reload termina pedidos em voo — não é erro da aplicação."""
+    msg = str(e).lower()
+    if any(p in msg for p in ("write error", "broken pipe", "connection reset", "epipe")):
+        return "", 499   # 499 = client closed request (nginx convention)
     raise e
 
 
@@ -452,37 +462,46 @@ def _enviar_lembretes_push():
 
 
 def _thread_limpeza():
-    """Background: limpa atendimentos 'em_andamento' presos e faz GC de memória."""
+    """Background: limpa atendimentos 'em_andamento' presos e faz GC de memória.
+    Cada operação é separada por time.sleep(0.05) para ceder o GIL à main thread
+    e evitar starvar pedidos HTTP que precisem de _CONN_LOCK."""
     _log_lim = logging.getLogger("limpeza")
     _indices_prontos.wait(timeout=180)
     _ciclo = 0
     while True:
+        time.sleep(0.05)   # ceder GIL à main thread antes de começar ciclo
         try:
             _pc_evict()
         except Exception as e:
             _log_lim.warning(f"Erro em _pc_evict: {e}")
+        time.sleep(0.05)
         try:
             _rl_evict()
         except Exception as e:
             _log_lim.warning(f"Erro em _rl_evict: {e}")
+        time.sleep(0.05)
         try:
             db.invalidar_cache_slots()
         except Exception as e:
             _log_lim.warning(f"Erro em invalidar_cache_slots: {e}")
+        time.sleep(0.05)
         try:
             _enviar_lembretes_push()
         except Exception as e:
             _log_lim.warning(f"Erro nos lembretes push: {e}")
         if _ciclo % 6 == 0:
+            time.sleep(0.05)
             try:
                 barbearias = db.listar_barbearias(apenas_ativas=True)
                 for b in barbearias:
+                    time.sleep(0.02)  # janela entre barbearias para HTTP requests
                     libertados = db.limpar_em_andamento_presos(b["id"], horas=8)
                     if libertados:
                         _invalidar_idx(b["id"])
             except Exception as e:
                 _log_lim.warning(f"Erro na limpeza automática: {e}")
         if _ciclo % 288 == 0:
+            time.sleep(0.05)
             try:
                 db.desativar_planos_expirados()
             except Exception as e:
@@ -555,25 +574,10 @@ _indices_prontos = threading.Event()
 
 
 def _garantir_indices():
-    """Garante que os índices críticos existem na BD."""
-    indices = [
-        "CREATE INDEX IF NOT EXISTS idx_ag_barbearia_data        ON agendamentos(barbearia_id, data_hora)",
-        "CREATE INDEX IF NOT EXISTS idx_ag_barbeiro_status       ON agendamentos(barbeiro_id, status)",
-        "CREATE INDEX IF NOT EXISTS idx_ag_barbearia_status_data ON agendamentos(barbearia_id, status, data_hora)",
-        "CREATE INDEX IF NOT EXISTS idx_ag_telefone              ON agendamentos(barbearia_id, telefone)",
-        "CREATE INDEX IF NOT EXISTS idx_barb_barbearia_ativo     ON barbeiros(barbearia_id, ativo)",
-    ]
-    try:
-        with db._write() as conn:
-            for sql in indices:
-                try:
-                    conn.execute(sql)
-                except Exception:
-                    pass
-    except Exception as _e:
-        logging.getLogger("indices").warning(f"Índice falhou: {_e}")
-    finally:
-        _indices_prontos.set()
+    """Sinaliza que os índices estão prontos.
+    init_db() já cria todos os índices necessários — esta função existe apenas
+    para sinalizar _indices_prontos sem adquirir _CONN_LOCK no arranque."""
+    _indices_prontos.set()
 
 
 # Register pwa blueprint after _APP_START and _indices_prontos are defined
