@@ -70,13 +70,13 @@
             </div>
             <div id="ativo-info" style="font-size:0.88rem;color:var(--text2);margin-bottom:6px"></div>
             <div style="font-size:0.78rem;color:var(--text2);margin-bottom:20px">
-                Quando o teu {{ vocab.servico | lower }} acabar, indica o valor e clica em terminar.
+                Quando o teu {{ vocab.servico | lower }} acabar, clica em terminar.
             </div>
-            <div class="field" style="margin-bottom:18px;text-align:left">
-                <label>Valor cobrado ({{ moeda_simbolo }})</label>
-                <input type="number" id="wi-valor" min="0" max="999999"
-                       placeholder="0" autocomplete="off"
-                       style="font-size:1.1rem;text-align:center">
+            <div id="wi-preco-display" style="display:none;margin-bottom:18px;
+                 background:rgba(var(--accent-rgb,212,175,55),0.1);border:1px solid rgba(var(--accent-rgb,212,175,55),0.3);
+                 border-radius:8px;padding:12px;text-align:center">
+                <div style="font-size:0.75rem;color:var(--text2);margin-bottom:4px">Valor do serviço</div>
+                <div id="wi-preco-valor" style="font-size:1.4rem;font-weight:800;color:var(--accent)"></div>
             </div>
             <button id="btn-terminar" class="btn btn-full"
                     style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);
@@ -133,8 +133,12 @@
             _agId = s.agId;
             _mesaToken = s.mesaToken || MESA_TOKEN;  // usar token guardado — não o do URL atual
             document.getElementById("ativo-info").textContent = s.nome + " · " + s.servico;
-            const valorInp = document.getElementById("wi-valor");
-            if (valorInp && s.preco > 0) valorInp.value = s.preco;
+            if (s.preco > 0) {
+                var _pd = document.getElementById("wi-preco-display");
+                var _pv = document.getElementById("wi-preco-valor");
+                if (_pd) _pd.style.display = "block";
+                if (_pv) _pv.textContent = s.preco.toFixed(2) + " {{ moeda_simbolo }}";
+            }
             mostrar(eAtivo);
         }
     } catch(e) {}
@@ -164,8 +168,12 @@
                     agId: _agId, mesaToken: MESA_TOKEN, nome: r.cliente, servico: r.servico_nome, preco: preco
                 }));
                 document.getElementById("ativo-info").textContent = r.cliente + " · " + r.servico_nome;
-                const valorInp = document.getElementById("wi-valor");
-                if (valorInp) valorInp.value = preco > 0 ? preco : "";
+                if (preco > 0) {
+                    var _pd2 = document.getElementById("wi-preco-display");
+                    var _pv2 = document.getElementById("wi-preco-valor");
+                    if (_pd2) _pd2.style.display = "block";
+                    if (_pv2) _pv2.textContent = preco.toFixed(2) + " {{ moeda_simbolo }}";
+                }
                 ativoMsg.textContent = "";
                 mostrar(eAtivo);
             } else {
@@ -178,15 +186,13 @@
     // Terminar serviço
     document.getElementById("btn-terminar").addEventListener("click", async function() {
         if (!_agId) return;
-        const valorInput = document.getElementById("wi-valor");
-        const valor = Math.max(0, parseInt(valorInput ? valorInput.value || "0" : "0", 10) || 0);
         this.disabled = true; this.textContent = "A terminar…";
         ativoMsg.textContent = "";
         try {
             const resp = await fetch("/mesa/" + _mesaToken + "/terminar", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ag_id: _agId, valor })
+                body: JSON.stringify({ ag_id: _agId, valor: 0 })
             });
             const r = await resp.json();
             if (r.ok) {
@@ -203,7 +209,8 @@
     });
 
     // Botão "Novo walk-in" (substitui onclick= inline — CSP)
-    document.getElementById("btn-novo-walkin")?.addEventListener("click", function() {
+    var _btnNovo = document.getElementById("btn-novo-walkin");
+    if (_btnNovo) _btnNovo.addEventListener("click", function() {
         location.reload();
     });
 
