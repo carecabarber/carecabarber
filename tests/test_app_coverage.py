@@ -377,42 +377,35 @@ class TestFazerBackup:
 
 class TestRlEvict:
     def test_rl_evict_limpa_expirados(self, client):
-        """_rl_evict remove entradas expiradas dos dicionários de rate-limit."""
+        """_rl_evict chama cleanup() no rate_limit SQLite e limpa backoffs expirados."""
         c, ctx = client
         import app as app_module
-        from helpers import _ip_attempts, _ip_lock, _api_calls, _api_lock
+        import db.rate_limit as _rl
 
-        # Inserir entradas antigas (já expiradas)
-        old_time = time.time() - 999
-        with _ip_lock:
-            _ip_attempts["1.2.3.4"] = [old_time, old_time]
-        with _api_lock:
-            _api_calls["5.6.7.8"] = [old_time]
+        # Inserir backoff expirado
+        _rl.reset_all()
+        _rl.set_backoff("1.2.3.4", -10, 1)  # expirado há 10s
 
         app_module._rl_evict()
 
-        with _ip_lock:
-            assert "1.2.3.4" not in _ip_attempts
-        with _api_lock:
-            assert "5.6.7.8" not in _api_calls
+        # Após cleanup, o backoff expirado deve ser removido
+        assert _rl.ip_retry_after("1.2.3.4") == 0
 
     def test_rl_evict_preserva_recentes(self, client):
-        """_rl_evict não remove entradas recentes."""
+        """_rl_evict não remove backoffs activos."""
         c, ctx = client
         import app as app_module
-        from helpers import _ip_attempts, _ip_lock
+        import db.rate_limit as _rl
 
-        now = time.time()
-        with _ip_lock:
-            _ip_attempts["9.9.9.9"] = [now, now]
+        _rl.reset_all()
+        _rl.set_backoff("9.9.9.9", 3600, 1)  # expira daqui a 1h
 
         app_module._rl_evict()
 
-        with _ip_lock:
-            assert "9.9.9.9" in _ip_attempts
+        # Backoff activo deve ser preservado
+        assert _rl.ip_retry_after("9.9.9.9") > 0
         # Limpar
-        with _ip_lock:
-            _ip_attempts.pop("9.9.9.9", None)
+        _rl.reset_ip("9.9.9.9")
 
 
 # ══════════════════════════════════════════════════════════════

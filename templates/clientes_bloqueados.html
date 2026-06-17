@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('configuracoes') }}" class="btn-back">← Voltar</a>
+    <h1>Clientes Bloqueados</h1>
+</div>
+
+<!-- Formulário para bloquear novo número -->
+<form action="{{ url_for('cliente_bloquear_post') }}" method="post" class="form-card" style="margin-bottom:24px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h2 class="section-title" style="margin-bottom:12px">Bloquear número</h2>
+    <div class="field-row">
+        <div class="field" style="flex:2">
+            <label>Número de telemóvel</label>
+            <input type="tel" name="telefone" placeholder="Ex: 9911234"
+                   required autocomplete="off" inputmode="tel">
+        </div>
+        <div class="field" style="flex:3">
+            <label>Motivo (opcional)</label>
+            <input type="text" name="motivo" placeholder="Ex: Faltou sem avisar"
+                   maxlength="200" autocomplete="off">
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-full">Bloquear</button>
+</form>
+
+<!-- Lista de clientes bloqueados -->
+<h2 class="section-title">Bloqueados ({{ bloqueados|length }})</h2>
+
+{% if bloqueados %}
+<ul class="lista-agendamentos">
+    {% for b in bloqueados %}
+    <li class="item-agendamento">
+        <div class="item-hora" style="font-size:0.7rem;min-width:54px;line-height:1.4">
+            {{ b.bloqueado_em[8:10] }}/{{ b.bloqueado_em[5:7] }}<br>
+            <span style="color:var(--text2)">{{ b.bloqueado_em[11:16] }}</span>
+        </div>
+        <div class="item-body">
+            <div class="item-cliente">{{ b.telefone | tel }}</div>
+            <div class="item-servico">
+                {% if b.motivo %}{{ b.motivo }}{% else %}<span style="color:var(--text2)">Sem motivo</span>{% endif %}
+            </div>
+        </div>
+        <form action="{{ url_for('cliente_desbloquear_post', id=b.id) }}" method="post" style="margin:0"
+              data-confirm="Desbloquear {{ b.telefone }}?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-iniciar" style="padding:7px 12px;font-size:0.78rem">
+                Desbloquear
+            </button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="empty-state"><p>Nenhum cliente bloqueado.</p></div>
+{% endif %}
+
+{% endblock %}

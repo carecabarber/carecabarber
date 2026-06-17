@@ -8,7 +8,7 @@ from helpers import (
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/root")
     @root_required

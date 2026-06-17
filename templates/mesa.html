@@ -91,6 +91,10 @@
             </div>
         </div>
 
+        <!-- ── Erro global (substitui alert() bloqueado em iOS PWA) ──── -->
+        <div id="ag-erro" style="display:none;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);
+             border-radius:10px;padding:12px 14px;margin-top:10px;color:var(--red);font-size:0.88rem;font-weight:600"></div>
+
         <!-- ── Walk-in ─────────────────────────────────── -->
         <div class="section-title" style="margin:28px 0 12px">Walk-in — cliente sem marcação</div>
         <div class="card" id="card-walkin">
@@ -196,6 +200,7 @@ async function iniciarAg(id, btn) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         const d = await r.json();
         if (d.ok) {
+            document.getElementById("ag-erro").style.display = "none";
             const card = document.getElementById("ag-" + id);
             if (card) {
                 card.dataset.status = "em_andamento";
@@ -218,12 +223,17 @@ async function iniciarAg(id, btn) {
                 }
             }
         } else {
-            alert("Erro: " + (d.error || "desconhecido"));
+            const erroEl = document.getElementById("ag-erro");
+            erroEl.textContent = "Erro: " + (d.error || "desconhecido");
+            erroEl.style.display = "block";
+            erroEl.scrollIntoView({behavior: "smooth", block: "nearest"});
             btn.disabled = false;
             btn.textContent = textoOriginal;
         }
     } catch(err) {
-        alert("Erro de rede. Tenta novamente.");
+        const erroEl = document.getElementById("ag-erro");
+        erroEl.textContent = "Erro de rede. Verifica a ligação e tenta novamente.";
+        erroEl.style.display = "block";
         btn.disabled = false;
         btn.textContent = textoOriginal;
     }

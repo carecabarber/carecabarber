@@ -238,29 +238,30 @@ class TestLogOutsideContext:
 
 class TestIpOk:
     def setup_method(self):
-        # Limpar estado entre testes
-        hs._ip_backoff.clear()
-        hs._ip_attempts.clear()
+        import db.rate_limit as _rl
+        _rl.reset_all()
 
     def test_backoff_activo_retorna_false(self):
         """IP com backoff futuro → retorna False (linha 173)."""
+        import db.rate_limit as _rl
         test_ip = "10.0.0.1"
-        hs._ip_backoff[test_ip] = (time.time() + 3600, 1)
+        _rl.set_backoff(test_ip, 3600, 1)
         result = hs._ip_ok(test_ip)
         assert result is False
-        assert test_ip in hs._ip_backoff  # não foi apagado
+        assert _rl.ip_retry_after(test_ip) > 0  # não foi apagado
 
     def test_backoff_expirado_remove_entrada(self):
         """IP com backoff expirado → remove entrada (linha 180) e continua."""
+        import db.rate_limit as _rl
         test_ip = "10.0.0.2"
-        hs._ip_backoff[test_ip] = (time.time() - 1, 1)
+        _rl.set_backoff(test_ip, -1, 1)
         result = hs._ip_ok(test_ip)
-        assert test_ip not in hs._ip_backoff
+        assert _rl.ip_retry_after(test_ip) == 0
         assert result is True  # sem tentativas anteriores → ok
 
     def teardown_method(self):
-        hs._ip_backoff.clear()
-        hs._ip_attempts.clear()
+        import db.rate_limit as _rl
+        _rl.reset_all()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -269,13 +270,14 @@ class TestIpOk:
 
 class TestIpRetryAfter:
     def setup_method(self):
-        hs._ip_backoff.clear()
+        import db.rate_limit as _rl
+        _rl.reset_all()
 
     def test_retry_after_com_backoff(self):
         """IP em backoff → retorna segundos restantes (linha 195)."""
+        import db.rate_limit as _rl
         test_ip = "10.0.0.3"
-        future = time.time() + 300
-        hs._ip_backoff[test_ip] = (future, 1)
+        _rl.set_backoff(test_ip, 300, 1)
         result = hs._ip_retry_after(test_ip)
         assert result > 0
         assert result <= 300
@@ -286,7 +288,8 @@ class TestIpRetryAfter:
         assert result == 0
 
     def teardown_method(self):
-        hs._ip_backoff.clear()
+        import db.rate_limit as _rl
+        _rl.reset_all()
 
 
 # ══════════════════════════════════════════════════════════════

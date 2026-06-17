@@ -8,6 +8,16 @@
 - **Deploy:** PythonAnywhere — corre atrás de nginx, usa `ProxyFix`
 - **URL produção:** `https://carecabarber.pythonanywhere.com`
 
+## Armadilhas conhecidas
+- **Cache slots** — após qualquer escrita que afecte disponibilidade → `_invalidar_idx(bid)`
+- **PythonAnywhere workers** — cache em memória não é partilhada; comportamento esperado
+- **WebAuthn** — só funciona em HTTPS; desactivado automaticamente em localhost
+- **ProxyFix** — obrigatório; sem ele CSRF falha (cookies secure vs. proxy)
+- **Logos** — guardar em `static/logos/{barbearia_id}/`; criar pasta antes
+- **RotatingFileHandler** — não usar no PA (OSError); usar stderr
+- **Templates e sessão** — NÃO usar `session.get('user_nome')` nos templates para dados do barbeiro; passar `barbeiro=barb_atual` explicitamente da rota e usar `barbeiro.nome` *(bug corrigido 18/05/2026)*
+- **bidfax** — (VIN Remover) usa minúsculas no URL; usar `{vin_lower}`
+
 ## Ficheiros principais
 | Ficheiro | O que faz |
 |----------|-----------|
@@ -19,6 +29,214 @@
 | `templates/` | 25+ templates Jinja2 |
 | `static/style.css` | CSS com design system (variáveis CSS) |
 | `static/app.js` | JS principal do frontend |
+
+## Arquitectura multi-tenant
+- `root` — superadmin que gere todas as barbearias via `/root`
+- `bid()` → retorna `session['barbearia_id']` — usar em todas as rotas de staff
+- Cada barbearia tem `slug` único (URL cliente: `/cliente/<slug>`)
+- Sessão Flask: `user_id`, `user_nome`, `role`, `barbearia_id`
+- Decoradores: `@staff_required`, `@chefe_required`, `@root_required`
+
+## Fusos horários
+- Default: `Atlantic/Cape_Verde` (Cabo Verde — onde a barbearia opera)
+- Sempre usar `_agora(barbearia_id)` em vez de `datetime.now()`
+- Cache de fuso: TTL 5 min (`_TZ_CACHE_TTL = 300`)
+
+## Segurança
+- CSRF em todos os POSTs — rotas públicas (mesa, cliente, ag) têm `@csrf.exempt`
+- `WTF_CSRF_SSL_STRICT = False` e `WTF_CSRF_TIME_LIMIT = None` — obrigatório para PA
+- Rate limiting: `_ip_ok()` para login, `_api_ok()` para APIs da mesa
+- Validação de imagens por magic bytes (`_IMG_MAGIC`) — não confiar só na extensão
+- Logging de segurança → stderr (PA não suporta RotatingFileHandler)
+- `_booking_lock` — threading.Lock para operações de agendamento (evita race conditions)
+
+## Cache de slots
+- Em memória, TTL 60s (datas futuras) / 15s (hoje)
+- Máx 300 entradas — evita OOM no PythonAnywhere
+- **Sempre** chamar `_invalidar_idx(barbearia_id)` após criar/cancelar/reagendar
+- PythonAnywhere tem workers separados — cache não é partilhada (comportamento esperado)
+
+## Convenções de código
+- SQL **nunca** em `app.py` — sempre via funções de `database.py`
+- `db._write()` / `db._read()` — context managers, nunca chamar `get_conn()` directamente
+- Datas: `YYYY-MM-DD`, horas: `HH:MM`, datetime completo: `YYYY-MM-DD HH:MM:SS`
+- Flash messages: `flash(msg, 'sucesso'|'erro'|'aviso'|'info')` (em PT, não EN)
+- `_limpar(v, maxlen)` para sanitizar strings de utilizador
+- `_val_data(v)` e `_val_hora(v)` para validar antes de usar em SQL
+- JSON errors: `jsonify({'error': msg}), 4xx`
+- Templates recebem variáveis explícitas — não aceder a `session` no template para dados do barbeiro
+
+## Rotas por papel
+| Rota | Papel | Notas |
+|------|-------|-------|
+| `/login`, `/logout` | Todos | |
+| `/` | Staff | Agenda do dia |
+| `/novo` | Staff | Nova marcação manual |
+| `/walkin` | Staff | Walk-in imediato |
+| `/historico` | Staff | Histórico + exportar CSV |
+| `/estatisticas` | Chefe | Stats da barbearia |
+| `/barbeiros` | Chefe | Gerir equipa |
+| `/servicos` | Chefe | Gerir serviços |
+| `/configuracoes` | Chefe | Configurações |
+| `/perfil` | Staff | Perfil + QR da mesa + biometria |
+| `/cliente/<slug>` | Cliente | Página pública |
+| `/cliente/<slug>/marcar` | Cliente | Marcação online |
+| `/mesa/<token>` | Tablet | Autoatendimento QR (sem auth) |
+| `/mesa/<token>/entrar` | Cliente | Escanear QR → escolher serviço |
+| `/ag/<token>` | Cliente | Iniciar/terminar via QR pessoal |
+| `/root` | Root | Gerir todas as barbearias |
+
+## Receitas Comuns
+
+### Adicionar nova rota (staff)
+```python
+@app.route('/nova-rota', methods=['GET', 'POST'])
+@staff_required
+def nova_rota():
+    barb_atual = db.get_barbeiro(session['user_id'])
+    # lógica...
+    return render_template('nova_rota.html',
+                           barbeiro=barb_atual,
+                           csp_nonce=csp_nonce)
+```
+
+### Adicionar nova rota (API JSON)
+```python
+@app.route('/api/nova', methods=['POST'])
+@staff_required
+def api_nova():
+    data = request.get_json(silent=True) or {}
+    val = _limpar(data.get('campo', ''), 100)
+    if not val:
+        return jsonify({'error': 'Campo obrigatório'}), 400
+    # lógica...
+    return jsonify({'ok': True})
+```
+
+### Adicionar coluna à BD
+```python
+# Em database.py, na função de inicialização ou migração:
+with _write() as conn:
+    conn.execute("ALTER TABLE agendamentos ADD COLUMN nova_coluna TEXT")
+# Atualizar schema em CLAUDE.md após alterar
+```
+
+### Adicionar chave de configuração
+```python
+# Ler:  db.get_config('nova_chave', barbearia_id, 'valor_default')
+# Guardar: db.set_config('nova_chave', valor, barbearia_id)
+# Expor em configuracoes.html: adicionar campo + submit na rota /configuracoes
+```
+
+### Invalidar cache após escrita
+```python
+# SEMPRE após criar/cancelar/reagendar/terminar agendamento:
+db._invalidar_idx(bid())
+# ou:
+db.invalidar_cache_slots(barbearia_id)
+```
+
+## Previsão de Pedidos Comuns
+- **"Adicionar campo ao agendamento"** → alterar schema `agendamentos` + `criar_agendamento()` + forms HTML + CLAUDE.md
+- **"Nova página de relatório/stats"** → rota `@chefe_required` + template + link na nav de chefe
+- **"Novo tipo de notificação"** → `mostrarToast()` + `notificar()` no app.js + endpoint `/api/...`
+- **"Enviar SMS/WhatsApp"** → implementar em `app.py` via API externa; guardar `telefone` do agendamento
+- **"Filtro no histórico"** → `listar_todos(bid, ...)` já aceita filtros; adicionar param na rota + select no HTML
+- **"Exportar PDF"** → usar `weasyprint` ou `reportlab`; rota separada que devolve `send_file()`
+
+## base.html — Globals e Auto-behaviors
+
+### Context processors (auto-disponíveis em TODOS os templates sem passar)
+| Variable | O que é |
+|----------|---------|
+| `csp_nonce` | Nonce para `<script nonce="{{ csp_nonce }}">` |
+| `agora_iso` | Datetime servidor em ISO — injectado como `_SERVER_NOW` no JS |
+| `_wn_ok` | True se WebAuthn está activo (`_WEBAUTHN_OK` flag) |
+| `_wn_user_id` | ID do utilizador actual (para chaves localStorage do WebAuthn) |
+| `csrf_token()` | Função CSRF do Flask-WTF |
+| `request`, `session` | Objectos Flask padrão |
+| `bid()` | Shortcut para `session['barbearia_id']` |
+
+### JS globals (disponíveis em todas as páginas após carregar app.js)
+- `_SERVER_NOW` — string ISO da hora do servidor (Cape Verde); usado por `_horaServidor()`
+- Todas as funções de `app.js`: `mostrarToast()`, `abrirModal()`, `fecharModal()`, `confirmarTerminar()`, `toggleFab()`, `_fetch()`, `notificar()`, `setStar()`
+
+### Auto-behaviors do base.html (não precisam de código extra)
+- **CSRF auto-inject** — base.html injeta `<input name="csrf_token">` em TODOS os forms via JS → nunca precisas de adicionar manualmente (mas não faz mal se existir)
+- **Flash messages → toasts** — `flash(msg, 'sucesso'|'erro'|'aviso'|'info')` no Python aparece automaticamente como toast no frontend
+- **`data-confirm="mensagem"`** em qualquer `<form>` → mostra `confirm()` antes de submeter (substitui `onsubmit=confirm()`)
+- **Fuso timezone cookie** — `tz=<browser tz>` definido automaticamente; lido pelo Flask para contexto horário
+- **Modal terminar** — definido no base.html, sempre presente; IDs: `#modalOverlay`, `#modalBox`, `#modalCliente`, `#modalServico`, `#modalDuracao`, `#modalValor`, `#modalAvaliacao`, `#modalStars`
+
+### Navegação inferior (bottom nav)
+Sempre presente: Hoje (`/`), Histórico, Stats, Gerir (só `role=='chefe'`), Perfil.
+Para marcar tab activa: `class="bnav-item {% if request.endpoint=='nome_rota' %}active{% endif %}"`
+
+## Jinja2 — filtros e globais em app.py
+```
+{{ valor | moeda }}          → formata preço (inteiro → "1.500 CVE")
+{{ lista | omit_keys('k') }} → remove chaves de lista de dicts
+{{ tel | tel }}              → formata telefone
+bid()                        → session['barbearia_id'] (helper global)
+csp_nonce                    → nonce para CSP inline scripts (usar em <script nonce="{{ csp_nonce }}">)
+```
+
+## APIs Internas — Respostas
+| Endpoint | Resposta |
+|----------|----------|
+| `GET /api/estado` | `{"h": "abc123"}` — hash do estado actual dos agendamentos |
+| `GET /api/novos-agendamentos?desde_id=N` | `[{"id": N, "cliente": "...", "servico": "...", "barbeiro": "...", "hora": "HH:MM", "tipo": "agendado\|walk-in"}]` |
+| `GET /api/lembretes` | `[{"id": N, "cliente": "...", "servico": "...", "hora": "HH:MM", "telefone": "...", "minutos_ate": N}]` |
+| `GET /api/meu-status` | `[{"id": N, "servico": "...", "barbeiro": "..."}]` — agendamentos em_andamento do cliente |
+
+## app.js — Padrões e Funções
+
+### Modal de terminar serviço
+```javascript
+// Abrir modal (modo seguro via data-* — evita XSS)
+abrirModalBtn(btn)   // lê data-id, data-cliente, data-duracao, data-servico, data-preco
+// Ou directamente:
+abrirModal(id, cliente, duracaoEstimada, servicoNome, precoServico)
+fecharModal()        // fecha; se _reloadPending → reload automático
+confirmarTerminar()  // anti-double-click, submete form-terminar-{id}
+```
+Flags: `_modalAberto` (true enquanto modal aberto), `_reloadPending` (reload pendente).
+
+### Toast e notificações
+```javascript
+mostrarToast(msg, tipo)  // tipo: "sucesso" (verde), "aviso" (azul), "erro" (vermelho, default)
+notificar(titulo, corpo) // notificação nativa — só dispara se tab em 2.º plano
+pedirPermissaoNotificacao()  // pedir permissão (chamado no DOMContentLoaded)
+```
+
+### Polling e auto-refresh
+```javascript
+_fetch(url, opts)  // fetch com timeout automático (8s), cancela pedido anterior
+verificarEstadoPagina()        // GET /api/estado → {h: "hash"} — reload se hash mudou
+verificarNovosAgendamentos()   // GET /api/novos-agendamentos?desde_id=N → lista
+verificarLembretes()           // GET /api/lembretes → lista com minutos_ate
+```
+- Intervalo adaptativo: 30s das 8h-20h, 2min fora de horas
+- `_modalAberto=true` → suspende reload (usa `_reloadPending`)
+- Polling de lembretes e novos agendamentos **só na dashboard** (`/`)
+
+### Hora do servidor (Cabo Verde)
+```javascript
+_horaServidor()  // DateTime calibrado com offset servidor — usar sempre em vez de new Date()
+// Calibrado em DOMContentLoaded a partir de _SERVER_NOW (variável global do template base)
+```
+
+### Cronómetros
+HTML: `<span class="cronometro" data-id="{id}" data-segundos="{s}" data-estimado="{min*60}">`
+JS: auto-arrancado no DOMContentLoaded. Adiciona classe `em-atraso` quando ultrapassa estimado.
+
+### FAB (botão flutuante)
+```javascript
+toggleFab()  // toggle #fabBtn e #fabMenu com classe "open"
+// Clique fora do .fab-group fecha automaticamente
+```
+
+---
 
 ## Schema da base de dados (colunas reais)
 
@@ -89,7 +307,7 @@ get_agendamento(id) / listar_hoje(bid, barbeiro_id) / listar_todos(bid, ...)
 cancelar_agendamento(id) / reagendar_agendamento(id, nova_data_hora, novo_barbeiro_id, novo_servico_id)
 iniciar_trabalho(id) / terminar_trabalho(id, valor) / marcar_nao_compareceu(id)
 barbeiro_tem_em_andamento(barbeiro_id) / barbeiro_proxima_marcacao_minutos(barbeiro_id, bid)
-verificar_disponibilidade(barbeiro_id, data_hora_str, duracao_min, bid, excluir_id)
+verificar_disponibilidade(barbeiro_id, data_hora_str, duracao_min, bid, excluir_id) → (bool, "HH:MM"|None)
 horarios_disponiveis(barbeiro_id, data_str, duracao_min, bid)
 get_agendamento_por_token(token) / get_agendamento_por_token_avaliar(token)
 gerar_token_reagendar(agendamento_id)
@@ -105,15 +323,6 @@ _agora(barbearia_id) → datetime local / get_barbearia_tz(bid) / set_barbearia_
 estatisticas(bid, barbeiro_id) / estatisticas_detalhadas_barbeiro(barbeiro_id, bid)
 tendencia_semanal(bid, barbeiro_id, semanas) / resumo_hoje(bid, barbeiro_id)
 media_avaliacoes(bid, barbeiro_id)
-```
-
-## Jinja2 — filtros e globais em app.py
-```
-{{ valor | moeda }}          → formata preço (inteiro → "1.500 CVE")
-{{ lista | omit_keys('k') }} → remove chaves de lista de dicts
-{{ tel | tel }}              → formata telefone
-bid()                        → session['barbearia_id'] (helper global)
-csp_nonce                    → nonce para CSP inline scripts (usar em <script nonce="{{ csp_nonce }}">)
 ```
 
 ## Design system — variáveis CSS (style.css)
@@ -140,80 +349,6 @@ csp_nonce                    → nonce para CSP inline scripts (usar em <script 
 /* Sombras */
 --sh-xs / --sh-sm / --sh / --sh-lg / --sh-accent
 ```
-
-## Arquitectura multi-tenant
-- `root` — superadmin que gere todas as barbearias via `/root`
-- `bid()` → retorna `session['barbearia_id']` — usar em todas as rotas de staff
-- Cada barbearia tem `slug` único (URL cliente: `/cliente/<slug>`)
-- Sessão Flask: `user_id`, `user_nome`, `role`, `barbearia_id`
-- Decoradores: `@staff_required`, `@chefe_required`, `@root_required`
-
-## Fusos horários
-- Default: `Atlantic/Cape_Verde` (Cabo Verde — onde a barbearia opera)
-- Sempre usar `_agora(barbearia_id)` em vez de `datetime.now()`
-- Cache de fuso: TTL 5 min (`_TZ_CACHE_TTL = 300`)
-
-## Cache de slots
-- Em memória, TTL 60s (datas futuras) / 15s (hoje)
-- Máx 300 entradas — evita OOM no PythonAnywhere
-- **Sempre** chamar `_invalidar_idx(barbearia_id)` após criar/cancelar/reagendar
-- PythonAnywhere tem workers separados — cache não é partilhada (comportamento esperado)
-
-## Segurança
-- CSRF em todos os POSTs — rotas públicas (mesa, cliente, ag) têm `@csrf.exempt`
-- `WTF_CSRF_SSL_STRICT = False` e `WTF_CSRF_TIME_LIMIT = None` — obrigatório para PA
-- Rate limiting: `_ip_ok()` para login, `_api_ok()` para APIs da mesa
-- Validação de imagens por magic bytes (`_IMG_MAGIC`) — não confiar só na extensão
-- Logging de segurança → stderr (PA não suporta RotatingFileHandler)
-- `_booking_lock` — threading.Lock para operações de agendamento (evita race conditions)
-
-## Rotas por papel
-| Rota | Papel | Notas |
-|------|-------|-------|
-| `/login`, `/logout` | Todos | |
-| `/` | Staff | Agenda do dia |
-| `/novo` | Staff | Nova marcação manual |
-| `/walkin` | Staff | Walk-in imediato |
-| `/historico` | Staff | Histórico + exportar CSV |
-| `/estatisticas` | Chefe | Stats da barbearia |
-| `/barbeiros` | Chefe | Gerir equipa |
-| `/servicos` | Chefe | Gerir serviços |
-| `/configuracoes` | Chefe | Configurações |
-| `/perfil` | Staff | Perfil + QR da mesa + biometria |
-| `/cliente/<slug>` | Cliente | Página pública |
-| `/cliente/<slug>/marcar` | Cliente | Marcação online |
-| `/mesa/<token>` | Tablet | Autoatendimento QR (sem auth) |
-| `/mesa/<token>/entrar` | Cliente | Escanear QR → escolher serviço |
-| `/ag/<token>` | Cliente | Iniciar/terminar via QR pessoal |
-| `/root` | Root | Gerir todas as barbearias |
-
-## base.html — Globals e Auto-behaviors
-
-### Context processors (auto-disponíveis em TODOS os templates sem passar)
-| Variable | O que é |
-|----------|---------|
-| `csp_nonce` | Nonce para `<script nonce="{{ csp_nonce }}">` |
-| `agora_iso` | Datetime servidor em ISO — injectado como `_SERVER_NOW` no JS |
-| `_wn_ok` | True se WebAuthn está activo (`_WEBAUTHN_OK` flag) |
-| `_wn_user_id` | ID do utilizador actual (para chaves localStorage do WebAuthn) |
-| `csrf_token()` | Função CSRF do Flask-WTF |
-| `request`, `session` | Objectos Flask padrão |
-| `bid()` | Shortcut para `session['barbearia_id']` |
-
-### JS globals (disponíveis em todas as páginas após carregar app.js)
-- `_SERVER_NOW` — string ISO da hora do servidor (Cape Verde); usado por `_horaServidor()`
-- Todas as funções de `app.js`: `mostrarToast()`, `abrirModal()`, `fecharModal()`, `confirmarTerminar()`, `toggleFab()`, `_fetch()`, `notificar()`, `setStar()`
-
-### Auto-behaviors do base.html (não precisam de código extra)
-- **CSRF auto-inject** — base.html injeta `<input name="csrf_token">` em TODOS os forms via JS → nunca precisas de adicionar manualmente (mas não faz mal se existir)
-- **Flash messages → toasts** — `flash(msg, 'sucesso'|'erro'|'aviso'|'info')` no Python aparece automaticamente como toast no frontend
-- **`data-confirm="mensagem"`** em qualquer `<form>` → mostra `confirm()` antes de submeter (substitui `onsubmit=confirm()`)
-- **Fuso timezone cookie** — `tz=<browser tz>` definido automaticamente; lido pelo Flask para contexto horário
-- **Modal terminar** — definido no base.html, sempre presente; IDs: `#modalOverlay`, `#modalBox`, `#modalCliente`, `#modalServico`, `#modalDuracao`, `#modalValor`, `#modalAvaliacao`, `#modalStars`
-
-### Navegação inferior (bottom nav)
-Sempre presente: Hoje (`/`), Histórico, Stats, Gerir (só `role=='chefe'`), Perfil.
-Para marcar tab activa: `class="bnav-item {% if request.endpoint=='nome_rota' %}active{% endif %}"`
 
 ## Padrões HTML (componentes do design system)
 
@@ -298,26 +433,6 @@ Para marcar tab activa: `class="bnav-item {% if request.endpoint=='nome_rota' %}
 </form>
 ```
 
-## Convenções de código
-- SQL **nunca** em `app.py` — sempre via funções de `database.py`
-- `db._write()` / `db._read()` — context managers, nunca chamar `get_conn()` directamente
-- Datas: `YYYY-MM-DD`, horas: `HH:MM`, datetime completo: `YYYY-MM-DD HH:MM:SS`
-- Flash messages: `flash(msg, 'sucesso'|'erro'|'aviso'|'info')` (em PT, não EN)
-- `_limpar(v, maxlen)` para sanitizar strings de utilizador
-- `_val_data(v)` e `_val_hora(v)` para validar antes de usar em SQL
-- JSON errors: `jsonify({'error': msg}), 4xx`
-- Templates recebem variáveis explícitas — não aceder a `session` no template para dados do barbeiro
-
-## Armadilhas conhecidas
-- **Cache slots** — após qualquer escrita que afecte disponibilidade → `_invalidar_idx(bid)`
-- **PythonAnywhere workers** — cache em memória não é partilhada; comportamento esperado
-- **WebAuthn** — só funciona em HTTPS; desactivado automaticamente em localhost
-- **ProxyFix** — obrigatório; sem ele CSRF falha (cookies secure vs. proxy)
-- **Logos** — guardar em `static/logos/{barbearia_id}/`; criar pasta antes
-- **RotatingFileHandler** — não usar no PA (OSError); usar stderr
-- **Templates e sessão** — NÃO usar `session.get('user_nome')` nos templates para dados do barbeiro; passar `barbeiro=barb_atual` explicitamente da rota e usar `barbeiro.nome` *(bug corrigido 18/05/2026)*
-- **bidfax** — (VIN Remover) usa minúsculas no URL; usar `{vin_lower}`
-
 ## Template Variables por Página
 | Template | Variáveis passadas pela rota |
 |----------|------------------------------|
@@ -352,119 +467,6 @@ Para marcar tab activa: `class="bnav-item {% if request.endpoint=='nome_rota' %}
 → Usar sempre em vez de acesso directo ao `ag` cru da BD.
 
 **Regra:** Sempre passar `csp_nonce=csp_nonce` a TODOS os render_template. Barbeiro actual: `barb_atual = db.get_barbeiro(session['user_id'])` → passar como `barbeiro=barb_atual`.
-
-## app.js — Padrões e Funções
-
-### Modal de terminar serviço
-```javascript
-// Abrir modal (modo seguro via data-* — evita XSS)
-abrirModalBtn(btn)   // lê data-id, data-cliente, data-duracao, data-servico, data-preco
-// Ou directamente:
-abrirModal(id, cliente, duracaoEstimada, servicoNome, precoServico)
-fecharModal()        // fecha; se _reloadPending → reload automático
-confirmarTerminar()  // anti-double-click, submete form-terminar-{id}
-```
-Flags: `_modalAberto` (true enquanto modal aberto), `_reloadPending` (reload pendente).
-
-### Toast e notificações
-```javascript
-mostrarToast(msg, tipo)  // tipo: "sucesso" (verde), "aviso" (azul), "erro" (vermelho, default)
-notificar(titulo, corpo) // notificação nativa — só dispara se tab em 2.º plano
-pedirPermissaoNotificacao()  // pedir permissão (chamado no DOMContentLoaded)
-```
-
-### Polling e auto-refresh
-```javascript
-_fetch(url, opts)  // fetch com timeout automático (8s), cancela pedido anterior
-verificarEstadoPagina()        // GET /api/estado → {h: "hash"} — reload se hash mudou
-verificarNovosAgendamentos()   // GET /api/novos-agendamentos?desde_id=N → lista
-verificarLembretes()           // GET /api/lembretes → lista com minutos_ate
-```
-- Intervalo adaptativo: 30s das 8h-20h, 2min fora de horas
-- `_modalAberto=true` → suspende reload (usa `_reloadPending`)
-- Polling de lembretes e novos agendamentos **só na dashboard** (`/`)
-
-### Hora do servidor (Cabo Verde)
-```javascript
-_horaServidor()  // DateTime calibrado com offset servidor — usar sempre em vez de new Date()
-// Calibrado em DOMContentLoaded a partir de _SERVER_NOW (variável global do template base)
-```
-
-### Cronómetros
-HTML: `<span class="cronometro" data-id="{id}" data-segundos="{s}" data-estimado="{min*60}">`
-JS: auto-arrancado no DOMContentLoaded. Adiciona classe `em-atraso` quando ultrapassa estimado.
-
-### FAB (botão flutuante)
-```javascript
-toggleFab()  // toggle #fabBtn e #fabMenu com classe "open"
-// Clique fora do .fab-group fecha automaticamente
-```
-
-## APIs Internas — Respostas
-| Endpoint | Resposta |
-|----------|----------|
-| `GET /api/estado` | `{"h": "abc123"}` — hash do estado actual dos agendamentos |
-| `GET /api/novos-agendamentos?desde_id=N` | `[{"id": N, "cliente": "...", "servico": "...", "barbeiro": "...", "hora": "HH:MM", "tipo": "agendado\|walk-in"}]` |
-| `GET /api/lembretes` | `[{"id": N, "cliente": "...", "servico": "...", "hora": "HH:MM", "telefone": "...", "minutos_ate": N}]` |
-| `GET /api/meu-status` | `[{"id": N, "servico": "...", "barbeiro": "..."}]` — agendamentos em_andamento do cliente |
-
-## Receitas Comuns
-
-### Adicionar nova rota (staff)
-```python
-@app.route('/nova-rota', methods=['GET', 'POST'])
-@staff_required
-def nova_rota():
-    barb_atual = db.get_barbeiro(session['user_id'])
-    # lógica...
-    return render_template('nova_rota.html',
-                           barbeiro=barb_atual,
-                           csp_nonce=csp_nonce)
-```
-
-### Adicionar nova rota (API JSON)
-```python
-@app.route('/api/nova', methods=['POST'])
-@staff_required
-def api_nova():
-    data = request.get_json(silent=True) or {}
-    val = _limpar(data.get('campo', ''), 100)
-    if not val:
-        return jsonify({'error': 'Campo obrigatório'}), 400
-    # lógica...
-    return jsonify({'ok': True})
-```
-
-### Adicionar coluna à BD
-```python
-# Em database.py, na função de inicialização ou migração:
-with _write() as conn:
-    conn.execute("ALTER TABLE agendamentos ADD COLUMN nova_coluna TEXT")
-# Atualizar schema em CLAUDE.md após alterar
-```
-
-### Adicionar chave de configuração
-```python
-# Ler:  db.get_config('nova_chave', barbearia_id, 'valor_default')
-# Guardar: db.set_config('nova_chave', valor, barbearia_id)
-# Expor em configuracoes.html: adicionar campo + submit na rota /configuracoes
-```
-
-### Invalidar cache após escrita
-```python
-# SEMPRE após criar/cancelar/reagendar/terminar agendamento:
-db._invalidar_idx(bid())
-# ou:
-db.invalidar_cache_slots(barbearia_id)
-```
-
-## Previsão de Pedidos Comuns
-- **"Adicionar campo ao agendamento"** → alterar schema `agendamentos` + `criar_agendamento()` + forms HTML + CLAUDE.md
-- **"Nova página de relatório/stats"** → rota `@chefe_required` + template + link na nav de chefe
-- **"Novo tipo de notificação"** → `mostrarToast()` + `notificar()` no app.js + endpoint `/api/...`
-- **"Enviar SMS/WhatsApp"** → implementar em `app.py` via API externa; guardar `telefone` do agendamento
-- **"Filtro no histórico"** → `listar_todos(bid, ...)` já aceita filtros; adicionar param na rota + select no HTML
-- **"Exportar PDF"** → usar `weasyprint` ou `reportlab`; rota separada que devolve `send_file()`
 
 ## Deploy — Automático (PostToolUse hook)
 O projeto tem deploy automático para PythonAnywhere configurado via Claude Code hook:

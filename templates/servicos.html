@@ -50,12 +50,14 @@
                     {% if not s.ativo %}<span style="color:var(--red)">Inativo</span>{% else %}Ativo{% endif %}
                 </div>
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
                 <button class="btn btn-outline-small js-toggle-edit" data-id="{{ s.id }}">Editar</button>
-                <form action="{{ url_for('apagar_servico', id=s.id) }}" method="post" style="margin:0"
-                      class="js-confirm-form" data-nome="{{ s.nome | e }}">
+                <form action="{{ url_for('toggle_servico', id=s.id) }}" method="post" style="margin:0"
+                      title="{{ 'Desativar' if s.ativo else 'Ativar' }} serviço">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-cancel" style="padding:7px 10px"></button>
+                    <button type="submit" class="srv-toggle {{ 'srv-toggle-on' if s.ativo else 'srv-toggle-off' }}">
+                        <span class="srv-toggle-knob"></span>
+                    </button>
                 </form>
             </div>
         </div>
@@ -87,6 +89,14 @@
                     <button type="button" class="btn btn-cancel js-toggle-edit"
                             data-id="{{ s.id }}" style="flex:1">Cancelar</button>
                 </div>
+            </form>
+            <form action="{{ url_for('apagar_servico', id=s.id) }}" method="post"
+                  style="margin-top:10px" class="js-confirm-form" data-nome="{{ s.nome | e }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-full"
+                        style="background:rgba(239,68,68,0.07);color:var(--red);border:1px solid rgba(239,68,68,0.2);font-size:0.82rem">
+                    Apagar serviço
+                </button>
             </form>
         </div>
 

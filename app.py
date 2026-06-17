@@ -36,6 +36,12 @@ csrf = CSRFProtect()
 # Versão dos assets — muda a cada deploy para forçar cache-bust no browser
 _ASSET_VER  = int(time.time())
 _APP_START  = time.monotonic()   # âncora para calcular uptime da app
+# Número de deploy (incrementado automaticamente pelo deploy.sh)
+try:
+    with open(os.path.join(os.path.dirname(__file__), "version.txt")) as _vf:
+        _APP_VERSION = int(_vf.read().strip())
+except Exception:
+    _APP_VERSION = 0
 
 # ══════════════════════════════════════════════════════════════
 #  CONFIGURAÇÃO DE SEGURANÇA
@@ -105,7 +111,8 @@ _CSP_TMPL = (
 def _gerar_csp_nonce():
     """Gera um nonce criptográfico único por pedido para a CSP."""
     from flask import g
-    g.csp_nonce = secrets.token_hex(16)
+    g.csp_nonce  = secrets.token_hex(16)
+    g.request_id = secrets.token_hex(8)   # trace ID — correlaciona logs com erros do utilizador
 
 
 @app.before_request
@@ -150,6 +157,9 @@ def set_security_headers(response):
                  'usb=(), bluetooth=(), serial=(), hid=()')
     h.pop('Server',       None)
     h.pop('X-Powered-By', None)
+    rid = getattr(g, "request_id", None)
+    if rid:
+        h['X-Request-ID'] = rid   # visível em DevTools — utilizador pode reportar este ID
     if (response.content_type.startswith('text/html') and
             'user_id' in session):
         h.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, private')
@@ -167,10 +177,12 @@ def _inject_csp_nonce():
     if session.get("role") == "chefe" and not session.get("root_gerir"):
         plano_info = getattr(g, "plano_info", None)
     return {
-        "csp_nonce":  getattr(g, "csp_nonce", ""),
-        "agora_iso":  _agora().strftime("%Y-%m-%dT%H:%M:%S"),
-        "plano_info": plano_info,
-        "av":         _ASSET_VER,
+        "csp_nonce":   getattr(g, "csp_nonce", ""),
+        "agora_iso":   _agora().strftime("%Y-%m-%dT%H:%M:%S"),
+        "plano_info":  plano_info,
+        "av":          _ASSET_VER,
+        "app_version": _APP_VERSION,
+        "tema_claro":  request.cookies.get("cb-theme") == "light",
     }
 
 
@@ -236,6 +248,14 @@ def inject_vocab():
             tipo = b.get("tipo")
             vocab_custom = b.get("vocab_custom")
     return {"vocab": get_vocab(tipo, vocab_custom), "VOCAB_TIPOS": VOCAB_TIPOS}
+
+
+@app.context_processor
+def inject_pdf_ok():
+    """Injeta pdf_ok em todos os templates — usado para esconder o botão PDF quando
+    reportlab não está instalado. Evita mostrar funcionalidade indisponível."""
+    from helpers import _PDF_OK
+    return {"pdf_ok": _PDF_OK}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -305,7 +325,7 @@ def _handle_runtime(e):
             return jsonify({"ok": False, "error": "Serviço temporariamente indisponível. Tenta novamente."}), 503
         flash("Serviço temporariamente indisponível. Tenta novamente.", "erro")
         ref = request.referrer or url_for("login")
-        if ref and request.host in ref:
+        if ref and urlparse(ref).netloc == request.host:
             return redirect(ref), 303
         return redirect(url_for("login")), 303
     raise e
@@ -327,6 +347,35 @@ def csrf_error(e):
         return jsonify({"ok": False, "error": "Sessão expirada. Recarrega a página."}), 400
     flash("A sessão expirou. Por favor, entra novamente.", "erro")
     return redirect(url_for("login"))
+
+
+# ══════════════════════════════════════════════════════════════
+#  HEALTH CHECK
+# ══════════════════════════════════════════════════════════════
+
+@app.route("/health")
+@csrf.exempt
+def health():
+    """Endpoint de health check para monitorização externa (UptimeRobot, etc.).
+
+    Verifica conectividade com a BD.  Devolve 200 OK se tudo estiver operacional,
+    503 Service Unavailable se a BD não responder.
+    Sem autenticação — só retorna dados mínimos (sem informação sensível).
+    """
+    db_ok = False
+    try:
+        with db._read() as _hc:
+            _hc.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception:
+        pass
+    uptime_s = int(time.monotonic() - _APP_START)
+    payload = {
+        "ok":      db_ok,
+        "uptime":  uptime_s,
+        "version": _APP_VERSION,
+    }
+    return jsonify(payload), (200 if db_ok else 503)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -401,30 +450,27 @@ def _fazer_backup_arranque():
 # ══════════════════════════════════════════════════════════════
 
 def _rl_evict():
-    """Remove entradas expiradas dos dicionários de rate-limiting."""
+    """Limpa state expirado do rate limiter (chamado pelo background thread)."""
+    from db import rate_limit as _rl
+    try:
+        _rl.cleanup()
+    except Exception:
+        pass
+    # Manter limpeza dos _user_fails em memória
     now = time.time()
-    with _ip_lock:
-        for ip in list(_ip_attempts.keys()):
-            _ip_attempts[ip] = [t for t in _ip_attempts[ip] if now - t < _IP_WINDOW]
-            if not _ip_attempts[ip]:
-                del _ip_attempts[ip]
-        for ip in list(_ip_backoff.keys()):
-            if now >= _ip_backoff[ip][0]:
-                del _ip_backoff[ip]
     with _user_lock:
         for u in list(_user_fails.keys()):
             _user_fails[u] = [t for t in _user_fails[u] if now - t < _USER_LOCKOUT]
             if not _user_fails[u]:
                 del _user_fails[u]
-    with _api_lock:
-        for ip in list(_api_calls.keys()):
-            _api_calls[ip] = [t for t in _api_calls[ip] if now - t < _API_WINDOW]
-            if not _api_calls[ip]:
-                del _api_calls[ip]
 
 
-# IDs de agendamentos para os quais o lembrete T-1h já foi enviado
-_lembretes_enviados: set = set()
+# IDs de agendamentos para os quais o lembrete já foi enviado
+# Formato: {chave: timestamp_float} — limpo periodicamente em _ciclo_limpeza
+# Lock obrigatório: _thread_limpeza e request handlers podem aceder concorrentemente
+_lembretes_enviados: dict = {}
+_lembretes_lock = threading.Lock()
+_LEMBRETES_MAX = 50_000  # cap de segurança: ~5 MB máx, evita OOM em produção
 
 
 def _enviar_lembretes_push():
@@ -446,40 +492,83 @@ def _enviar_lembretes_push():
                 _rows = _conn.execute(
                     "SELECT a.id, a.cliente, a.barbeiro_id, a.data_hora, s.nome AS servico_nome "
                     "FROM agendamentos a LEFT JOIN servicos s ON s.id=a.servico_id "
-                    "WHERE a.barbearia_id=? AND a.status='agendado' AND a.data_hora BETWEEN ? AND ?",
+                    f"WHERE a.barbearia_id=? AND a.status='{ST_AGENDADO}' AND a.data_hora BETWEEN ? AND ?",
                     (bid_, ini, fim)).fetchall()
             for ag in _rows:
                 chave = (ag["id"], "1h")
-                if chave in _lembretes_enviados:
-                    continue
-                _lembretes_enviados.add(chave)
+                with _lembretes_lock:
+                    if chave in _lembretes_enviados:
+                        continue
+                    if len(_lembretes_enviados) >= _LEMBRETES_MAX:
+                        continue  # cap de segurança
+                    _lembretes_enviados[chave] = time.time()
                 hora = ag["data_hora"][11:16]
                 _push_async(bid_,
                             "🔔 Marcação em 1 hora",
                             f"{ag['cliente']} — {ag['servico_nome'] or 'Corte'} às {hora}",
                             barbeiro_id=ag["barbeiro_id"])
-        except Exception:
-            pass
+        except Exception as _e:
+            _log_lim.warning("Erro em _enviar_lembretes_push bid=%s: %s", bid_, _e)
 
 
 def _push_notif_sub(endpoint, p256dh, auth, barbearia_id, titulo, corpo, url="/"):
     """Envia push directamente a uma subscripção (endpoint+keys) de cliente."""
-    from helpers import _PUSH_OK, _VAPID_PRIVATE_KEY, _VAPID_CLAIMS
+    from helpers import _PUSH_OK, _VAPID_PRIVATE_KEY, _VAPID_CLAIMS, _push_one
     if not _PUSH_OK or not _VAPID_PRIVATE_KEY:
         return
+    import json as _json
+    payload = _json.dumps({"titulo": titulo, "corpo": corpo, "url": url})
+    sub = {"endpoint": endpoint, "p256dh": p256dh, "auth": auth}
+    result = _push_one(sub, payload)
+    if result == "expired":
+        try:
+            db.push_remover_expiradas([endpoint])
+        except Exception:
+            pass
+
+
+def _push_espera(entrada: dict, barbearia_id: int) -> None:
+    """Envia push ao cliente da fila de espera quando um slot fica livre.
+
+    Executa em background (não bloqueia o pedido HTTP que despoletou o cancelamento).
+    Silencioso em caso de erro — o slot já foi marcado como livre na BD.
+    """
+    tel = (entrada.get("telefone") or "").strip()
+    if not tel:
+        return
+    subs = db.cliente_push_listar_por_tel(tel, barbearia_id)
+    if not subs:
+        return
+    data = entrada.get("data_preferida", "")
     try:
-        from pywebpush import webpush, WebPushException
-        import json as _json
-        payload = _json.dumps({"titulo": titulo, "corpo": corpo, "url": url})
-        webpush(
-            subscription_info={"endpoint": endpoint,
-                                "keys": {"p256dh": p256dh, "auth": auth}},
-            data=payload,
-            vapid_private_key=_VAPID_PRIVATE_KEY,
-            vapid_claims=_VAPID_CLAIMS,
-        )
+        barbearia = db.get_barbearia(barbearia_id)
+        slug = barbearia.get("slug", "") if barbearia else ""
     except Exception:
-        pass
+        slug = ""
+    url = f"/cliente/{slug}" if slug else "/"
+
+    def _enviar():
+        invalidas = []
+        for sub in subs:
+            try:
+                _push_notif_sub(
+                    sub["endpoint"], sub["p256dh"], sub["auth"],
+                    barbearia_id,
+                    "🎉 Vaga disponível!",
+                    f"Abriu uma vaga para o dia {data}. Entra na app para marcar!",
+                    url,
+                )
+            except Exception as _e:
+                logging.getLogger("fila_espera").warning(
+                    "push_espera falhou sub=%s tel=%s: %s",
+                    sub.get("endpoint", "?")[:40], tel, _e)
+        if invalidas:
+            try:
+                db.push_remover_expiradas(invalidas)
+            except Exception:
+                pass
+
+    threading.Thread(target=_enviar, daemon=True, name=f"push-espera-{barbearia_id}").start()
 
 
 def _enviar_lembretes_push_cliente():
@@ -505,20 +594,23 @@ def _enviar_lembretes_push_cliente():
                     "FROM agendamentos a "
                     "LEFT JOIN servicos s ON s.id=a.servico_id "
                     "LEFT JOIN barbeiros b ON b.id=a.barbeiro_id "
-                    "WHERE a.barbearia_id=? AND a.status='agendado' "
-                    "  AND a.data_hora BETWEEN ? AND ? AND a.telefone IS NOT NULL",
+                    f"WHERE a.barbearia_id=? AND a.status='{ST_AGENDADO}' "
+                    "  AND a.data_hora BETWEEN ? AND ? AND a.telefone IS NOT NULL AND a.telefone != ''",
                     (bid_, ini, fim)).fetchall()
             for ag in _rows:
                 chave = (ag["id"], "24h_cliente")
-                if chave in _lembretes_enviados:
-                    continue
+                with _lembretes_lock:
+                    if chave in _lembretes_enviados:
+                        continue
+                    if len(_lembretes_enviados) >= _LEMBRETES_MAX:
+                        continue  # cap de segurança
+                    _lembretes_enviados[chave] = time.time()
                 tel = ag["telefone"]
                 if not tel:
                     continue
                 subs = db.cliente_push_listar_por_tel(tel, bid_)
                 if not subs:
                     continue
-                _lembretes_enviados.add(chave)
                 hora = ag["data_hora"][11:16]
                 barb = ag["barbeiro_nome"] or ""
                 corpo = f"{ag['servico_nome'] or 'Corte'} amanhã às {hora}"
@@ -528,10 +620,12 @@ def _enviar_lembretes_push_cliente():
                     try:
                         _push_notif_sub(sub["endpoint"], sub["p256dh"], sub["auth"],
                                         bid_, "⏰ Lembrete de amanhã", corpo)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _e:
+                        _log_lim_cli = logging.getLogger("lembretes_cliente")
+                        _log_lim_cli.warning("Erro push sub %s: %s", sub.get("endpoint", "?"), _e)
+        except Exception as _e:
+            _log_lim_cli2 = logging.getLogger("lembretes_cliente")
+            _log_lim_cli2.warning("Erro em _enviar_lembretes_push_cliente bid=%s: %s", bid_, _e)
 
 
 def _ciclo_limpeza(ciclo: int) -> None:
@@ -569,20 +663,42 @@ def _ciclo_limpeza(ciclo: int) -> None:
             db.espera_limpar_expiradas()
         except Exception as e:
             _log_lim.warning("Erro ao limpar fila de espera: %s", e)
+        try:
+            _limite = time.time() - 48 * 3600  # manter 48h
+            with _lembretes_lock:
+                expirados = [c for c, t in _lembretes_enviados.items() if t < _limite]
+                for c in expirados:
+                    del _lembretes_enviados[c]
+        except Exception as e:
+            _log_lim.warning("Erro ao limpar _lembretes_enviados: %s", e)
     if ciclo % 288 == 0:
         try:
             db.desativar_planos_expirados()
         except Exception as e:
             _log_lim.warning("Erro em desativar_planos_expirados: %s", e)
+        try:
+            from db._conn import get_conn
+            from helpers_security import alerta_critico
+            row = get_conn().execute("PRAGMA integrity_check(1)").fetchone()
+            ok  = row[0] if row else "error"
+            if ok != "ok":
+                _log_lim.error("DB integrity_check falhou: %s", ok)
+                alerta_critico("DB corrompida", f"integrity_check: {ok}")
+        except Exception as e:
+            _log_lim.error("Erro em integrity_check: %s", e)
 
 
 def _thread_limpeza():
     """Background thread: chama _ciclo_limpeza() em loop com sleeps para ceder o GIL."""
     _indices_prontos.wait(timeout=180)
     _ciclo = 0
+    _log_tl = logging.getLogger("limpeza")
     while True:
         time.sleep(0.05)
-        _ciclo_limpeza(_ciclo)
+        try:
+            _ciclo_limpeza(_ciclo)
+        except Exception as _e_tl:
+            _log_tl.error("_ciclo_limpeza falhou inesperadamente ciclo=%s: %s", _ciclo, _e_tl)
         _ciclo += 1
         time.sleep(5 * 60)
 
@@ -621,7 +737,7 @@ def _migrar_hashes_lentos():
             _h  = generate_password_hash(_pw, method="pbkdf2:sha256:10000")
             _conn.execute("UPDATE barbeiros SET password_hash=? WHERE id=?", (_h, _r[0]))
             _out_lines.append(f"  {_r[1]} ({_r[2]}, {_r[3]}) → senha temp: {_pw}")
-            logging.getLogger("migr").warning(f"MIGR_HASH id={_r[0]} user={_r[2]} tipo={_r[4][:20]}")
+            logging.getLogger("migr").warning(f"MIGR_HASH id={_r[0]} tipo={_r[4][:20]}")
         _conn.commit()
         _conn.close()
         with open(_out, "a") as _f:

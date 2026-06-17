@@ -4,6 +4,7 @@
 from flask import session, redirect, url_for, request
 from functools import wraps
 from collections import defaultdict
+from collections.abc import Callable
 from html import escape as _html_escape
 import threading
 import logging
@@ -24,6 +25,15 @@ try:
     _PUSH_OK = True
 except ImportError:
     _PUSH_OK = False
+    # Stubs para que patch('helpers_security.webpush') funcione em testes
+    # sem pywebpush instalado. Nunca são chamados em produção (_PUSH_OK é False).
+    def webpush(*a, **kw):  # type: ignore[misc]
+        raise RuntimeError("pywebpush não instalado")
+    class WebPushException(Exception):  # type: ignore[misc]
+        """Stub compatível com pywebpush.WebPushException — aceita response=."""
+        def __init__(self, message="", response=None, **kw):
+            super().__init__(message)
+            self.response = response
 
 # ── PDF (reportlab) ───────────────────────────────────────────────
 try:
@@ -50,7 +60,45 @@ _VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY",
 _VAPID_CLAIMS      = {"sub": "mailto:carecabarber@gmail.com"}
 
 
-def _push_notif(barbearia_id, titulo, corpo, barbeiro_id=None, url="/"):
+_PUSH_RETRY_DELAYS = (0, 2, 8)  # segundos entre tentativas (3 total)
+_PUSH_EXPIRED_CODES = frozenset((404, 410))  # status que indicam subscrição inválida
+
+
+def _push_one(sub: dict, payload: str) -> str:
+    """Tenta enviar push a uma subscrição com retry + backoff exponencial.
+
+    Retorna:
+      "ok"      — envio bem-sucedido
+      "expired" — endpoint expirado (404/410), não deve ser retentado
+      "failed"  — falhou nas 3 tentativas por outro motivo
+    """
+    endpoint = sub["endpoint"]
+    last_exc = None
+    for delay in _PUSH_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            webpush(
+                subscription_info={"endpoint": endpoint,
+                                   "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}},
+                data=payload,
+                vapid_private_key=_VAPID_PRIVATE_KEY,
+                vapid_claims=_VAPID_CLAIMS,
+            )
+            return "ok"
+        except WebPushException as e:
+            if e.response and e.response.status_code in _PUSH_EXPIRED_CODES:
+                # Subscrição expirada/inválida — sem retry
+                return "expired"
+            last_exc = e
+        except Exception as e:
+            last_exc = e
+    # Esgotou as tentativas
+    _elog.error("push_failed", extra={"endpoint": endpoint[:80], "exc": str(last_exc)})
+    return "failed"
+
+
+def _push_notif(barbearia_id: int, titulo: str, corpo: str, barbeiro_id: int | None = None, url: str = "/") -> None:
     if not _PUSH_OK or not _VAPID_PRIVATE_KEY:
         return
     subs = db.push_listar(barbearia_id, barbeiro_id=barbeiro_id)
@@ -59,33 +107,138 @@ def _push_notif(barbearia_id, titulo, corpo, barbeiro_id=None, url="/"):
     payload = json.dumps({"titulo": titulo, "corpo": corpo, "url": url})
     invalidas = []
     for sub in subs:
-        try:
-            webpush(
-                subscription_info={"endpoint": sub["endpoint"],
-                                   "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}},
-                data=payload,
-                vapid_private_key=_VAPID_PRIVATE_KEY,
-                vapid_claims=_VAPID_CLAIMS,
-            )
-        except WebPushException as e:
-            if e.response and e.response.status_code in (404, 410):
-                invalidas.append(sub["endpoint"])
-        except Exception:
-            pass
+        result = _push_one(sub, payload)
+        if result == "expired":
+            invalidas.append(sub["endpoint"])
     if invalidas:
         db.push_remover_expiradas(invalidas)
 
 
-def _push_async(barbearia_id, titulo, corpo, barbeiro_id=None, url="/"):
+def _push_async(barbearia_id: int, titulo: str, corpo: str, barbeiro_id: int | None = None, url: str = "/") -> None:
     t = threading.Thread(target=_push_notif,
                          args=(barbearia_id, titulo, corpo, barbeiro_id, url),
                          daemon=True)
     t.start()
 
 
+def _push_espera(entrada: dict, barbearia_id: int) -> None:
+    """Push ao cliente da fila de espera quando um slot fica livre.
+
+    Chama de forma assíncrona (thread daemon) — não bloqueia o pedido HTTP.
+    Silencioso em caso de erro; o slot já foi marcado como livre na BD.
+    """
+    def _enviar():
+        tel = (entrada.get("telefone") or "").strip()
+        if not tel or not _PUSH_OK or not _VAPID_PRIVATE_KEY:
+            return
+        subs = db.cliente_push_listar_por_tel(tel, barbearia_id)
+        if not subs:
+            return
+        data = entrada.get("data_preferida", "")
+        try:
+            _barb = db.get_barbearia(barbearia_id)
+            slug = _barb.get("slug", "") if _barb else ""
+        except Exception:
+            slug = ""
+        url = f"/cliente/{slug}" if slug else "/"
+        payload = json.dumps({
+            "titulo": "🎉 Vaga disponível!",
+            "corpo":  f"Abriu uma vaga para o dia {data}. Entra na app para marcar!",
+            "url":    url,
+        })
+        invalidas = []
+        for sub in subs:
+            result = _push_one(sub, payload)
+            if result == "expired":
+                invalidas.append(sub["endpoint"])
+        if invalidas:
+            try:
+                db.push_remover_expiradas(invalidas)
+            except Exception:
+                pass
+
+    threading.Thread(target=_enviar, daemon=True,
+                     name=f"push-espera-{barbearia_id}").start()
+
+
+# ── Caminho do ficheiro de alertas críticos ──────────────────
+_ALERT_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alerts_criticos.log")
+_log_alertas = logging.getLogger("alertas")
+
+
+def alerta_critico(titulo: str, detalhe: str = "") -> None:
+    """Alerta crítico de sistema — escreve em ficheiro + push para todos os admins.
+
+    Usar para eventos que requerem intervenção humana imediata:
+    DB corrompida, integrity_check falhado, disco cheio, etc.
+
+    Não lança excepção — falha silenciosa para não bloquear a app.
+    """
+    import datetime
+
+    # 1. Ficheiro de alerta local (persiste mesmo sem push)
+    try:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        linha = f"[{ts}] CRITICO: {titulo}"
+        if detalhe:
+            linha += f" | {detalhe}"
+        with open(_ALERT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(linha + "\n")
+        _log_alertas.critical("%s | %s", titulo, detalhe)
+    except Exception:
+        pass
+
+    # 2. Push para todos os admins de todas as barbearias activas
+    if not _PUSH_OK or not _VAPID_PRIVATE_KEY:
+        return
+
+    def _enviar():
+        try:
+            barbearias = db.listar_barbearias(apenas_ativas=True)
+        except Exception:
+            return
+        payload = json.dumps({"titulo": f"⚠️ {titulo}", "corpo": detalhe or titulo, "url": "/"})
+        invalidas = []
+        for barb in barbearias:
+            try:
+                subs = db.push_listar(barb["id"])
+            except Exception:
+                continue
+            for sub in subs:
+                try:
+                    webpush(
+                        subscription_info={"endpoint": sub["endpoint"],
+                                           "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}},
+                        data=payload,
+                        vapid_private_key=_VAPID_PRIVATE_KEY,
+                        vapid_claims=_VAPID_CLAIMS,
+                    )
+                except WebPushException as e:
+                    if e.response and e.response.status_code in (404, 410):
+                        invalidas.append(sub["endpoint"])
+                except Exception:
+                    pass
+        if invalidas:
+            try:
+                db.push_remover_expiradas(invalidas)
+            except Exception:
+                pass
+
+    threading.Thread(target=_enviar, daemon=True).start()
+
+
 # ══════════════════════════════════════════════════════════════
 #  LOGGING ESTRUTURADO (JSON)
 # ══════════════════════════════════════════════════════════════
+
+_LOG_BUILTIN_KEYS = frozenset((
+    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+    "created", "msecs", "relativeCreated", "thread", "threadName",
+    "processName", "process", "message", "taskName", "asctime",
+))
+
 
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -97,18 +250,14 @@ class _JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
+        # Inclui todos os campos extra passados via extra={} ou **kwargs
         for k, v in record.__dict__.items():
-            if k not in logging.LogRecord.__init__.__code__.co_varnames and \
-               k not in ("msg","args","levelname","levelno","pathname","filename",
-                         "module","exc_info","exc_text","stack_info","lineno",
-                         "funcName","created","msecs","relativeCreated","thread",
-                         "threadName","processName","process","name","message",
-                         "taskName","asctime"):
+            if k not in _LOG_BUILTIN_KEYS:
                 payload[k] = v
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def _make_json_handler(stream=sys.stderr) -> logging.StreamHandler:
+def _make_json_handler(stream: object = sys.stderr) -> logging.StreamHandler:
     h = logging.StreamHandler(stream)
     h.setFormatter(_JsonFormatter())
     return h
@@ -133,7 +282,7 @@ if not _elog.handlers:
     _elog.propagate = False
 
 
-def _log(msg: str, **extra):
+def _log(msg: str, **extra) -> None:
     try:
         ip   = request.remote_addr or "?" if request else "?"
         path = request.path if request else "-"
@@ -142,7 +291,7 @@ def _log(msg: str, **extra):
     _slog.warning(msg, extra={"ip": ip, "path": path, **extra})
 
 
-def _blog(evento: str, **kwargs):
+def _blog(evento: str, **kwargs) -> None:
     _blog_logger.info(evento, extra=kwargs)
 
 
@@ -150,67 +299,65 @@ def _blog(evento: str, **kwargs):
 #  RATE LIMITING
 # ══════════════════════════════════════════════════════════════
 
-_ip_attempts: dict  = defaultdict(list)
+_ip_attempts: dict  = {}   # legado — estado real em db/rate_limit.py
 _ip_lock              = threading.Lock()
 _IP_MAX    = 10
 _IP_WINDOW = 300
 
-_ip_backoff: dict = {}
+_ip_backoff: dict = {}   # legado
 
 _user_fails: dict = defaultdict(list)
 _user_lock            = threading.Lock()
 _USER_MAX     = 5
 _USER_LOCKOUT = 900
 
-_api_calls: dict  = defaultdict(list)
+# Carregar falhas persistidas no arranque — sobrevive a restarts do servidor
+def _carregar_user_fails() -> None:
+    try:
+        from db import rate_limit as _rl
+        for username, timestamps in _rl.user_fail_load_all(_USER_LOCKOUT).items():
+            _user_fails[username].extend(timestamps)
+    except Exception:
+        pass  # BD não disponível no arranque? cache fica vazio, sem problema
+
+_carregar_user_fails()
+
+_api_calls: dict  = {}   # legado
 _api_lock             = threading.Lock()
 _API_MAX    = 120
 _API_WINDOW = 60
 
 
+def _api_ok(ip: str) -> bool:
+    from db import rate_limit as _rl
+    from flask import session as _sess
+    if not ip or ip == "?":
+        ip = "__unknown__"
+    # Chave composta: IP + user_id (quando autenticado) — evita que 1 user bloqueie todos
+    uid = _sess.get("user_id") if _sess else None
+    chave = f"{ip}:{uid}" if uid else ip
+    ok = _rl.api_ok(chave, max_req=_API_MAX, window=_API_WINDOW)
+    if not ok:
+        _slog.warning("RATE_LIMIT_API", extra={
+            "ip": ip,
+            "uid": uid,
+            "path": request.path if request else "-",
+        })
+    return ok
+
+
 def _ip_ok(ip: str) -> bool:
+    from db import rate_limit as _rl
     if not ip or ip in ("?", "unknown"):
         ip = "__unknown__"
-    now = time.time()
-    with _ip_lock:
-        if ip in _ip_backoff:
-            ate, nivel = _ip_backoff[ip]
-            if now < ate:
-                return False
-            del _ip_backoff[ip]
-        hist = [t for t in _ip_attempts[ip] if now - t < _IP_WINDOW]
-        _ip_attempts[ip] = hist
-        if len(hist) >= _IP_MAX:
-            nivel_atual = _ip_backoff.get(ip, (0, 0))[1] if ip in _ip_backoff else 0
-            nivel_novo  = nivel_atual + 1
-            espera      = min(30 * (2 ** nivel_atual), 1800)
-            _ip_backoff[ip] = (now + espera, nivel_novo)
-            return False
-        _ip_attempts[ip].append(now)
-    return True
+    return _rl.ip_ok(ip, max_attempts=_IP_MAX, window=_IP_WINDOW)
 
 
 def _ip_retry_after(ip: str) -> int:
+    from db import rate_limit as _rl
     if not ip or ip in ("?", "unknown"):
         ip = "__unknown__"
-    with _ip_lock:
-        if ip in _ip_backoff:
-            ate, _ = _ip_backoff[ip]
-            return max(0, int(ate - time.time()))
-    return 0
-
-
-def _api_ok(ip: str) -> bool:
-    if not ip or ip == "?":
-        ip = "__unknown__"
-    now = time.time()
-    with _api_lock:
-        hist = [t for t in _api_calls[ip] if now - t < _API_WINDOW]
-        _api_calls[ip] = hist
-        if len(hist) >= _API_MAX:
-            return False
-        _api_calls[ip].append(now)
-    return True
+    return _rl.ip_retry_after(ip)
 
 
 def _user_locked(username: str) -> bool:
@@ -221,14 +368,24 @@ def _user_locked(username: str) -> bool:
         return len(hist) >= _USER_MAX
 
 
-def _record_fail(username: str):
+def _record_fail(username: str) -> None:
     with _user_lock:
         _user_fails[username].append(time.time())
+    try:
+        from db import rate_limit as _rl
+        _rl.user_fail_record(username)
+    except Exception:
+        pass  # falha silenciosa — o cache em memória garante o funcionamento
 
 
-def _clear_fails(username: str):
+def _clear_fails(username: str) -> None:
     with _user_lock:
         _user_fails[username] = []
+    try:
+        from db import rate_limit as _rl
+        _rl.user_fail_clear(username)
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════
@@ -251,7 +408,7 @@ def _mime_ok(file_bytes: bytes) -> bool:
     return False
 
 
-def _salvar_logo(file, barbearia_id):
+def _salvar_logo(file: object, barbearia_id: int) -> str | None:
     if not file or not file.filename:
         return None
     ext = file.filename.rsplit(".", 1)[-1].lower()
@@ -297,7 +454,7 @@ def _validar_imagem(dados: bytes, mime: str) -> bool:
 #  DECORADORES DE AUTENTICAÇÃO
 # ══════════════════════════════════════════════════════════════
 
-def staff_required(f):
+def staff_required(f: Callable) -> Callable:
     @wraps(f)
     def d(*a, **kw):
         if "user_id" not in session:
@@ -322,7 +479,7 @@ def staff_required(f):
     return d
 
 
-def chefe_required(f):
+def chefe_required(f: Callable) -> Callable:
     @wraps(f)
     def d(*a, **kw):
         if "user_id" not in session:
@@ -336,7 +493,7 @@ def chefe_required(f):
     return d
 
 
-def root_required(f):
+def root_required(f: Callable) -> Callable:
     @wraps(f)
     def d(*a, **kw):
         if "user_id" not in session or session.get("role") != "root":
@@ -349,7 +506,7 @@ def root_required(f):
 #  AUTORIZAÇÃO DE AGENDAMENTOS
 # ══════════════════════════════════════════════════════════════
 
-def pode_gerir_agendamento(ag):
+def pode_gerir_agendamento(ag: dict | None) -> bool:
     if not ag or ag.get("barbearia_id") != bid():
         _log(f"IDOR_BLOCK ag_id={ag.get('id') if ag else '?'} barbearia={ag.get('barbearia_id') if ag else '?'}")
         return False

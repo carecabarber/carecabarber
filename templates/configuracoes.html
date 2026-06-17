@@ -59,6 +59,16 @@
             <span class="config-nav-label">{{ vocab.servicos }}</span>
             <span class="config-nav-arrow">›</span>
         </a>
+        <a href="{{ url_for('fila_espera') }}" class="config-nav-card">
+            <span class="config-nav-icon">🔔</span>
+            <span class="config-nav-label">Fila de Espera</span>
+            <span class="config-nav-arrow">›</span>
+        </a>
+        <a href="{{ url_for('clientes_analytics') }}" class="config-nav-card">
+            <span class="config-nav-icon">👥</span>
+            <span class="config-nav-label">Clientes</span>
+            <span class="config-nav-arrow">›</span>
+        </a>
     </div>
 </section>
 
@@ -159,6 +169,18 @@
                                value="{{ configs.get('max_por_dia','20') }}"
                                min="1" max="100" inputmode="numeric">
                         <span class="config-unit">marc.</span>
+                    </div>
+                </div>
+            </div>
+            <div class="config-card">
+                <div class="config-card-icon">⏰</div>
+                <div class="config-card-body">
+                    <label class="config-card-label">Prazo mínimo p/ reagendar</label>
+                    <div class="config-card-input">
+                        <input type="number" name="min_horas_reagendar"
+                               value="{{ configs.get('min_horas_reagendar','0') }}"
+                               min="0" max="168" inputmode="numeric">
+                        <span class="config-unit">h</span>
                     </div>
                 </div>
             </div>
@@ -291,6 +313,63 @@
     {% else %}
     <p style="color:var(--text2);font-size:0.85rem;padding:12px 0">Nenhum dia fechado registado.</p>
     {% endif %}
+</section>
+
+<!-- Programa de Fidelidade -->
+<section class="config-section">
+    <h2 class="section-title">🎁 Programa de Fidelidade</h2>
+    <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
+        Recompensa os clientes com um stamp card: após N visitas concluídas, ganham um prémio.
+        O card é visível na área do cliente.
+    </p>
+    <form action="{{ url_for('configuracoes') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="acao" value="fidelidade">
+        <div class="config-cards-row">
+            <div class="config-card">
+                <div class="config-card-icon">🎁</div>
+                <div class="config-card-body" style="flex:1">
+                    <label class="config-card-label">Ativar programa</label>
+                    <label class="horario-toggle" style="margin-top:6px">
+                        <input type="checkbox" name="fidelidade_ativo" value="1"
+                               {{ 'checked' if configs.get('fidelidade_ativo') == '1' }}>
+                        <span class="toggle-pill">
+                            <span class="pill-on">● Ativo</span>
+                            <span class="pill-off">○ Inativo</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+            <div class="config-card">
+                <div class="config-card-icon">🔢</div>
+                <div class="config-card-body">
+                    <label class="config-card-label">Visitas para prémio</label>
+                    <div class="config-card-input">
+                        <input type="number" name="fidelidade_visitas"
+                               value="{{ configs.get('fidelidade_visitas','10') }}"
+                               min="2" max="50" inputmode="numeric">
+                        <span class="config-unit">v.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="config-card" style="margin-top:12px">
+            <div class="config-card-icon">🏆</div>
+            <div class="config-card-body" style="flex:1">
+                <label class="config-card-label">Descrição do prémio</label>
+                <input type="text" name="fidelidade_premio"
+                       value="{{ configs.get('fidelidade_premio','Serviço gratuito') }}"
+                       maxlength="80" placeholder="Ex: Corte gratuito"
+                       style="background:var(--surface3);border:1px solid var(--border);border-radius:8px;
+                              padding:7px 10px;color:var(--text);font-size:0.88rem;width:100%;
+                              margin-top:4px;box-sizing:border-box">
+                <div style="font-size:0.72rem;color:var(--text2);margin-top:4px">
+                    Texto mostrado ao cliente quando atinge o nº de visitas.
+                </div>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:12px">Guardar fidelidade</button>
+    </form>
 </section>
 
 <script nonce="{{ csp_nonce }}">

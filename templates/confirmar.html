@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#080808">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <title>{% if ag %}Presença confirmada{% else %}Link inválido{% endif %} — {{ barbearia.nome }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <span class="logo">
+            {% if barbearia.logo %}
+            <img src="{{ url_for('static', filename='logos/' + barbearia.logo) }}"
+                 alt="{{ barbearia.nome }}" style="height:28px;vertical-align:middle;margin-right:6px"
+                 onerror="this.style.display='none'">
+            {% endif %}{{ barbearia.nome }}
+        </span>
+    </header>
+
+    <main class="container" style="text-align:center;padding-top:60px">
+        {% if ag %}
+        <div style="font-size:3.5rem;margin-bottom:16px">✅</div>
+        <h1 style="font-size:1.4rem;font-weight:800;color:#22c55e;margin-bottom:8px">
+            {% if ja_confirmado %}Já tinhas confirmado!{% else %}Presença confirmada!{% endif %}
+        </h1>
+        <p style="color:var(--text2);font-size:0.9rem;margin-bottom:24px">
+            {{ ag.cliente }} · {{ ag.data_hora[8:10] }}/{{ ag.data_hora[5:7] }} às {{ ag.data_hora[11:16] }}
+        </p>
+        {% else %}
+        <div style="font-size:3.5rem;margin-bottom:16px">❌</div>
+        <h1 style="font-size:1.2rem;color:var(--red);margin-bottom:8px">Link inválido ou expirado</h1>
+        <p style="color:var(--text2);font-size:0.85rem;margin-bottom:24px">
+            Este link de confirmação não é válido.
+        </p>
+        {% endif %}
+
+        <a href="{{ url_for('cliente_home', slug=barbearia.slug) }}"
+           class="btn btn-primary" style="display:inline-block;padding:12px 28px">
+            Ver as minhas marcações
+        </a>
+    </main>
+</body>
+</html>

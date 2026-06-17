@@ -2,6 +2,7 @@
 {% block content %}
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <h1>Estatísticas</h1>
+    {% if pdf_ok %}
     <button type="button" id="btn-pdf-toggle"
             style="display:inline-flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:700;
                    padding:8px 16px;border-radius:8px;border:1px solid var(--accent);
@@ -9,9 +10,13 @@
                    transition:background .15s,border-color .15s">
         📄 Relatório PDF
     </button>
+    {% else %}
+    <span style="font-size:0.75rem;color:var(--text2);opacity:0.6" title="Módulo PDF não instalado neste servidor">📄 PDF indisponível</span>
+    {% endif %}
 </div>
 
-<!-- Painel de filtros PDF -->
+<!-- Painel de filtros PDF — só visível quando reportlab está instalado -->
+{% if pdf_ok %}
 <div id="pdf-panel" style="display:none;background:var(--card);border:1px solid var(--border);
      border-radius:12px;padding:16px 18px;margin-bottom:18px">
     <div style="font-size:0.75rem;font-weight:700;color:var(--accent);letter-spacing:.05em;margin-bottom:12px">
@@ -52,7 +57,9 @@
         </button>
     </form>
 </div>
+{% endif %}{# pdf_ok #}
 <script nonce="{{ csp_nonce }}">
+{% if pdf_ok %}
 var _pdfPanel = document.getElementById('pdf-panel');
 var _btn = document.getElementById('btn-pdf-toggle');
 function _togglePdf(force) {
@@ -74,6 +81,7 @@ var mesInp = document.querySelector('[name="mes"]');
 if (mesInp) mesInp.addEventListener('change', function() {
     if (mesInp.value) { if(ini) ini.value=''; if(fim) fim.value=''; }
 });
+{% endif %}{# pdf_ok #}
 </script>
 
 <!-- Resumo hoje / semana / mês -->
@@ -127,6 +135,46 @@ if (mesInp) mesInp.addEventListener('change', function() {
     </div>
 </section>
 {% endif %}
+
+<!-- Taxa de cancelamentos + Ranking de clientes -->
+<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+    {% if taxa_cancel %}
+    <div class="card" style="flex:1;min-width:140px;text-align:center;padding:16px 12px">
+        <div class="stat-label" style="margin-bottom:6px">Cancelamentos este mês</div>
+        <div style="font-size:1.8rem;font-weight:900;color:{% if taxa_cancel.pct > 20 %}var(--red){% elif taxa_cancel.pct > 10 %}#f59e0b{% else %}var(--green){% endif %}">
+            {{ taxa_cancel.pct }}%
+        </div>
+        <div style="font-size:0.75rem;color:var(--text2);margin-top:4px">
+            {{ taxa_cancel.perdidos }} de {{ taxa_cancel.total }} marcações
+        </div>
+    </div>
+    {% endif %}
+
+    {% if clientes_top %}
+    <div class="card" style="flex:2;min-width:200px;padding:14px">
+        <div class="stat-label" style="margin-bottom:10px">Top clientes (visitas)</div>
+        {% for c in clientes_top[:5] %}
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:5px 0;border-bottom:1px solid var(--border)">
+            <div style="font-size:0.82rem;font-weight:600;min-width:0;
+                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                {{ c.cliente }}
+                {% if c.telefone %}
+                <span style="font-size:0.7rem;color:var(--text2);font-weight:400">· {{ c.telefone }}</span>
+                {% endif %}
+            </div>
+            <span style="font-size:0.8rem;font-weight:800;color:var(--accent);
+                         flex-shrink:0;margin-left:8px">{{ c.visitas }}×</span>
+        </div>
+        {% endfor %}
+        {% if clientes_top|length > 5 %}
+        <div style="font-size:0.72rem;color:var(--text2);text-align:center;margin-top:8px">
+            + {{ clientes_top|length - 5 }} clientes
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
 
 <!-- Alertas de desempenho -->
 {% if alertas_perf %}

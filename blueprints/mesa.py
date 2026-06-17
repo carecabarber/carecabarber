@@ -7,7 +7,7 @@ from helpers import (
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/mesa/<token>/entrar")
     @app.csrf.exempt
@@ -105,6 +105,11 @@ def register(app):
             valor = max(0, min(int(data.get("valor", 0)), 999_999))
         except (TypeError, ValueError):
             valor = 0
+        # Protecção anti-fraude: valor=0 usa preço configurado no serviço
+        if valor == 0:
+            _srv = db.servico_por_id(ag.get("servico_id"))
+            if _srv and _srv.get("preco"):
+                valor = _srv["preco"]
         db.terminar_trabalho(ag_id, valor)
         _invalidar_idx(barb["barbearia_id"])
         return jsonify({"ok": True})
@@ -139,6 +144,8 @@ def register(app):
         barb = db.get_barbeiro_por_mesa_token(token)
         if not barb or not barb.get("barbearia_id"):
             return jsonify({"ok": False, "error": "Token inválido"}), 403
+        if not barb.get("ativo", 1):
+            return jsonify({"ok": False, "error": "Barbeiro inactivo"}), 403
         barbearia = db.get_barbearia(barb["barbearia_id"])
         if not barbearia or not barbearia["ativa"]:
             return jsonify({"ok": False, "error": "Barbearia inativa"}), 403
@@ -156,13 +163,14 @@ def register(app):
         if not s or s.get("barbearia_id") != barb["barbearia_id"]:
             return jsonify({"ok": False, "error": "Serviço inválido"}), 400
         _agora_wi = _agora(barb["barbearia_id"])
-        _bloq = db.ausencia_ativa(barb["id"],
-                                  _agora_wi.strftime("%Y-%m-%d"),
-                                  _agora_wi.strftime("%H:%M"))
-        if _bloq:
-            return jsonify({"ok": False,
-                            "error": f"Barbeiro em pausa até {_bloq.get('hora_fim','?')}"}), 400
         with _booking_lock:
+            # ausencia_ativa DENTRO do lock — evita TOCTOU (regra #17)
+            _bloq = db.ausencia_ativa(barb["id"],
+                                      _agora_wi.strftime("%Y-%m-%d"),
+                                      _agora_wi.strftime("%H:%M"))
+            if _bloq:
+                return jsonify({"ok": False,
+                                "error": f"Barbeiro em pausa até {_bloq.get('hora_fim','?')}"}), 400
             if db.barbeiro_tem_em_andamento(barb["id"]):
                 return jsonify({"ok": False,
                                 "error": "Já tens um serviço em curso. Termina-o primeiro."}), 400
@@ -229,9 +237,8 @@ def register(app):
                     else:
                         erro = "Não foi possível iniciar — serviço já em curso."
             elif acao == "terminar" and ag["status"] == ST_EM_ANDAMENTO:
-                db.terminar_trabalho(ag["id"], 0)
-                _invalidar_idx(ag["barbearia_id"])
-                return redirect(url_for("ag_acao_cliente", token=token))
+                # Terminação via token público bloqueada — só staff autenticado pode terminar
+                erro = "Acção não permitida por este link."
             ag = db.get_agendamento_por_token_avaliar(token) or ag
 
         return render_template("ag_acao.html",

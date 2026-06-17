@@ -23,6 +23,29 @@
         <div style="font-size:0.8rem;color:var(--text2)">{{ 'Chefe' if session.get('role')=='chefe' else vocab.profissional }}</div>
         <div id="foto-msg" style="font-size:0.78rem;margin-top:4px;display:none"></div>
     </div>
+    <div style="font-size:0.65rem;color:var(--text3);font-weight:600;letter-spacing:0.4px;white-space:nowrap;flex-shrink:0">
+        v{{ app_version }}
+    </div>
+</div>
+
+<!-- Toggle tema claro/escuro -->
+<div class="card" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:14px 16px">
+    <div>
+        <div style="font-weight:600;font-size:0.9rem">Tema</div>
+        <div style="font-size:0.75rem;color:var(--text2)">
+            {% if tema_claro %}☀ Claro{% else %}🌙 Escuro{% endif %}
+        </div>
+    </div>
+    <form action="{{ url_for('set_theme') }}" method="post" style="margin:0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="tema" value="{% if tema_claro %}dark{% else %}light{% endif %}">
+        <button type="submit"
+                style="padding:8px 18px;border-radius:20px;border:1.5px solid var(--border);
+                       background:var(--surface2);color:var(--text);font-size:0.82rem;font-weight:600;
+                       cursor:pointer">
+            {% if tema_claro %}Escuro{% else %}Claro{% endif %}
+        </button>
+    </form>
 </div>
 
 <!-- Menu de opções de foto (popup) -->
@@ -504,4 +527,5 @@ async function apagarCredencial(id, btnEl) {
 }
 </script>
 {% endif %}
+
 {% endblock %}

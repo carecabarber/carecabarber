@@ -7,7 +7,7 @@ from helpers import (
 from werkzeug.security import check_password_hash
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/login", methods=["GET","POST"])
     def login():
@@ -61,7 +61,8 @@ def register(app):
                         return redirect(url_for("root_dashboard"))
                     return redirect(url_for("index"))
                 else:
-                    _record_fail(username)
+                    if staff:  # só bloqueia usernames que existem — evita DoS por memória com usernames falsos
+                        _record_fail(username)
                     _u_log = (username[:6] + "…") if len(username) > 6 else "***"
                     _log(f"LOGIN_FAIL username_prefix={_u_log}")
                     erro = "Utilizador ou senha incorretos."

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <a href="{{ url_for('configuracoes') }}" class="btn-back">← Voltar</a>
+    <h1>Fila de Espera</h1>
+</div>
+
+{% with msgs = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in msgs %}
+<div class="flash flash-{{ cat }}" style="margin-bottom:12px">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
+
+{% if grupos %}
+<p style="font-size:0.82rem;color:var(--text2);margin-bottom:16px">
+    {{ total }} pessoa{{ 's' if total != 1 else '' }} aguardam vaga.
+    Quando uma marcação é cancelada, o próximo da fila é notificado automaticamente via push.
+</p>
+
+{% for data, entradas in grupos %}
+<h2 class="section-title" style="margin-top:20px">
+    {{ data[8:10] }}/{{ data[5:7] }}/{{ data[:4] }}
+    <span style="font-size:0.75rem;color:var(--text2);font-weight:400">({{ entradas|length }} em espera)</span>
+</h2>
+
+<ul class="lista-agendamentos" style="margin-bottom:0">
+{% for e in entradas %}
+<li class="item-agendamento" style="{% if e.slot_livre %}background:rgba(46,204,113,0.07);border-color:rgba(46,204,113,0.3){% endif %}">
+    <div class="item-hora" style="font-size:0.7rem;min-width:44px;color:var(--text2);line-height:1.4">
+        {{ e.criado_em[11:16] if e.criado_em else '' }}
+        {% if e.slot_livre %}
+        <div style="font-size:0.6rem;color:var(--green)">vaga!</div>
+        {% endif %}
+    </div>
+    <div class="item-body">
+        <div class="item-cliente">{{ e.cliente_nome }}</div>
+        <div class="item-servico">
+            {% if e.servico_nome %}{{ e.servico_nome }}{% else %}<span style="color:var(--text2)">Qualquer serviço</span>{% endif %}
+            {% if e.barbeiro_nome %} · {{ e.barbeiro_nome }}{% endif %}
+        </div>
+        {% if e.telefone %}
+        <div class="contacto-bar" style="margin-top:4px">
+            <a href="tel:{{ e.telefone }}" class="btn-contacto">{{ e.telefone | tel }}</a>
+            <a href="https://wa.me/{{ '238' if e.telefone|replace(' ','')|length == 7 else '' }}{{ e.telefone|replace(' ','') }}"
+               target="_blank" class="btn-contacto btn-whatsapp">WA</a>
+        </div>
+        {% endif %}
+    </div>
+    <div class="item-acoes">
+        <form action="{{ url_for('fila_espera_remover', id=e.id) }}" method="post"
+              data-confirm="Remover {{ e.cliente_nome | e }} da fila de espera?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-cancel" title="Remover da fila">✕</button>
+        </form>
+    </div>
+</li>
+{% endfor %}
+</ul>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <p>Nenhum cliente em fila de espera.</p>
+    <p style="font-size:0.8rem;color:var(--text2)">
+        Quando não há slots disponíveis, os clientes podem entrar na fila de espera a partir da página de marcação.
+        São notificados automaticamente quando uma vaga abre.
+    </p>
+</div>
+{% endif %}
+
+{% endblock %}

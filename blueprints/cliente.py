@@ -1,6 +1,7 @@
+from datetime import datetime
 from flask import render_template, request, redirect, url_for, session, flash
 import database as db
-from database import ST_AGENDADO, ST_EM_ANDAMENTO, ST_WALKIN
+from database import ST_AGENDADO, ST_EM_ANDAMENTO
 from helpers import (
     _log, _blog, _agora, _limpar, _val_data, _val_hora, _no_passado, _dentro_horario,
     _invalidar_idx, _api_ok, _booking_lock,
@@ -10,7 +11,7 @@ from helpers import (
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/cliente/<slug>", methods=["GET","POST"])
     def cliente_entrada(slug):
@@ -30,6 +31,10 @@ def register(app):
             elif not _TEL_RE.match(tel):
                 erro = "Número de telemóvel inválido."
             else:
+                tel_norm = _normalizar_tel(tel) or tel
+                if db.cliente_bloqueado(barbearia_id, tel_norm):
+                    erro = "Não é possível efectuar marcações com este número. Contacta a barbearia."
+            if not erro:
                 session.clear()
                 session.permanent = True
                 session.update({
@@ -55,17 +60,46 @@ def register(app):
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
             return redirect(url_for("cliente_entrada", slug=slug))
-        _proximas_statuses = {"agendado", "em_andamento"}
+        _proximas_statuses = {ST_AGENDADO, ST_EM_ANDAMENTO}
         _raw = enriquecer_lista(db.listar_por_telefone(session.get("telefone",""), barbearia_id))
+        # Enriquecer com telefone do barbeiro (para link WhatsApp) — 1 query total
+        _barb_tel = {b["id"]: b.get("telefone") for b in db.listar_barbeiros(barbearia_id, incluir_chefe=True)}
+        for _a in _raw:
+            _a["barbeiro_telefone"] = _barb_tel.get(_a.get("barbeiro_id"))
         _proximas = [a for a in _raw if a.get("status") in _proximas_statuses]
         _outras   = sorted([a for a in _raw if a.get("status") not in _proximas_statuses],
                            key=lambda a: a.get("data_hora", ""), reverse=True)
         agendamentos = _proximas + _outras
         _slots_disponiveis = db.espera_verificar_cliente(barbearia_id, session.get("telefone",""))
+        _moeda_cod = db.get_config("moeda", barbearia_id, "ECV") or "ECV"
+        from helpers import _MOEDA_MAP
+        # Fidelidade — stamp card
+        _fid_ativo = db.get_config("fidelidade_ativo", barbearia_id, "0") == "1"
+        _fidelidade = None
+        if _fid_ativo:
+            try:
+                _fid_target = int(db.get_config("fidelidade_visitas", barbearia_id, "10") or 10)
+            except (ValueError, TypeError):
+                _fid_target = 10
+            _fid_target = max(2, min(50, _fid_target))
+            _fid_visitas = db.visitas_cliente(barbearia_id, session.get("telefone",""))
+            _fid_premio  = db.get_config("fidelidade_premio", barbearia_id, "Serviço gratuito") or "Serviço gratuito"
+            _fid_ciclo   = _fid_visitas % _fid_target  # posição no ciclo atual
+            _fid_ganhos  = _fid_visitas // _fid_target  # prémios já ganhos
+            _fidelidade = {
+                "visitas": _fid_visitas,
+                "target": _fid_target,
+                "ciclo": _fid_ciclo,
+                "ganhos": _fid_ganhos,
+                "premio": _fid_premio,
+                "proximo_em": _fid_target - _fid_ciclo,
+            }
         return render_template("cliente_home.html", agendamentos=agendamentos, barbearia=barbearia,
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")),
                                vapid_public_key=_VAPID_PUBLIC_KEY if _PUSH_OK else None,
-                               slots_disponiveis=_slots_disponiveis)
+                               slots_disponiveis=_slots_disponiveis,
+                               moeda_simbolo=_MOEDA_MAP.get(_moeda_cod, _moeda_cod),
+                               fidelidade=_fidelidade)
 
 
     @app.route("/cliente/<slug>/marcar", methods=["GET","POST"])
@@ -76,6 +110,10 @@ def register(app):
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
             return redirect(url_for("cliente_entrada", slug=slug))
+        tel_sessao = session.get("telefone", "")
+        if db.cliente_bloqueado(barbearia_id, tel_sessao):
+            flash("A tua conta foi bloqueada. Contacta a barbearia.", "erro")
+            return redirect(url_for("cliente_home", slug=slug))
         servicos  = db.listar_servicos(barbearia_id)
         barbeiros = db.listar_barbeiros(barbearia_id, incluir_chefe=True)
         erro = None
@@ -110,31 +148,37 @@ def register(app):
                     erro = "Serviço inválido."
                 elif bid_:
                     _bv = db.get_barbeiro(bid_)
-                    if not _bv or _bv.get("barbearia_id") != barbearia_id:
+                    if not _bv or _bv.get("barbearia_id") != barbearia_id or not _bv.get("ativo"):
                         erro = f"{get_vocab(barbearia.get('tipo'), barbearia.get('vocab_custom')).get('profissional', 'Profissional')} inválido."
                 if not erro:
                     ok_h, msg_h = _dentro_horario(data, hora, s["duracao_min"], barbearia_id)
                     if not ok_h:
                         erro = msg_h
                 if not erro and bid_:
-                    aus = db.ausencia_ativa(bid_, data, hora)
-                    if aus:
-                        erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro barbeiro ou data."
-                    else:
-                        livre, conflito = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
-                        if not livre:
-                            erro = f"Já existe marcação às {conflito['data_hora'][11:16]}. Escolhe outro horário."
+                    livre, hora_conf = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
+                    if not livre:
+                        erro = f"Já existe marcação às {hora_conf or '?'}. Escolhe outro horário."
                 if not erro:
                     with _booking_lock:
-                        if bid_:
-                            livre, conflito = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
-                            if not livre:
-                                erro = f"Já existe marcação às {conflito['data_hora'][11:16]}. Escolhe outro horário."
-                        else:
-                            max_dia   = int(db.get_config("max_por_dia", barbearia_id, 20))
-                            ativos    = db.contar_ativos_dia(barbearia_id, data)
-                            if ativos >= max_dia:
-                                erro = "Não há vagas disponíveis para este dia. Escolhe outra data."
+                        # Limite diário aplica-se sempre — com ou sem barbeiro escolhido
+                        max_dia = int(db.get_config("max_por_dia", barbearia_id, 20) or 20)
+                        ativos  = db.contar_ativos_dia(barbearia_id, data)
+                        if ativos >= max_dia:
+                            erro = "Não há vagas disponíveis para este dia. Escolhe outra data."
+                        if not erro and bid_:
+                            # Re-verificar ausência e disponibilidade dentro do lock (TOCTOU fix)
+                            aus = db.ausencia_ativa(bid_, data, hora)
+                            if aus:
+                                erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro barbeiro ou data."
+                            else:
+                                livre, hora_conf = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
+                                if not livre:
+                                    erro = f"Já existe marcação às {hora_conf or '?'}. Escolhe outro horário."
+                        # Limite: 1 marcação online por cliente por dia
+                        if not erro:
+                            _tel_s = session.get("telefone", "")
+                            if _tel_s and db.contar_marcacoes_cliente_dia(_tel_s, data, barbearia_id) >= 1:
+                                erro = "Já tens uma marcação para esse dia. Cancela a anterior ou escolhe outra data."
                         if not erro:
                             novo_id = db.criar_agendamento(
                                 session.get("user_nome",""), sid, dh, barbearia_id,
@@ -166,9 +210,24 @@ def register(app):
         if not ag or ag["telefone"] != session.get("telefone") or ag["barbearia_id"] != barbearia_id:
             return redirect(url_for("cliente_home", slug=slug))
         s = db.servico_por_id(ag["servico_id"])
-        b = db.get_barbeiro(ag["barbeiro_id"])
+        b = db.get_barbeiro(ag.get("barbeiro_id")) if ag.get("barbeiro_id") else None
         return render_template("cliente_confirmacao.html", ag=ag, servico=s,
                                barbeiro=b, barbearia=barbearia,
+                               vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
+
+
+    @app.route("/cliente/<slug>/confirmar/<token>")
+    def cliente_confirmar(slug, token):
+        """Rota pública (sem login) para confirmação de presença via link."""
+        barbearia = db.get_barbearia_por_slug(slug)
+        if not barbearia or not barbearia["ativa"]:
+            return render_template("404.html"), 404
+        ag = db.confirmar_agendamento(token)
+        if ag and ag["barbearia_id"] != barbearia["id"]:
+            ag = None   # token pertence a outra barbearia
+        ja_confirmado = ag and bool(ag.get("confirmado"))
+        return render_template("confirmar.html", barbearia=barbearia, ag=ag,
+                               ja_confirmado=ja_confirmado,
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
 
 
@@ -186,14 +245,21 @@ def register(app):
         if (ag and ag["telefone"] == session.get("telefone")
                 and ag["barbearia_id"] == barbearia_id
                 and ag["status"] == ST_AGENDADO):
-            db.cancelar_agendamento(id)
-            _invalidar_idx(barbearia_id)
-            # Notificar fila de espera
-            try:
-                data_cancelada = ag["data_hora"][:10]
-                db.espera_notificar_proximo(barbearia_id, data_cancelada, ag.get("barbeiro_id"))
-            except Exception:
-                pass
+            cancelado = db.cancelar_agendamento(id)
+            if cancelado:
+                _invalidar_idx(barbearia_id)
+                # Notificar fila de espera — push ao próximo cliente se tiver subscrição
+                try:
+                    from helpers import _push_espera
+                    data_cancelada = ag["data_hora"][:10]
+                    _entrada = db.espera_notificar_proximo(barbearia_id, data_cancelada, ag.get("barbeiro_id"))
+                    if _entrada:
+                        _push_espera(_entrada, barbearia_id)
+                except Exception as _e:
+                    import logging as _lg
+                    _lg.getLogger("fila_espera").warning("espera_notificar_proximo falhou: %s", _e)
+            else:
+                flash("Não foi possível cancelar — a marcação já não está activa.", "aviso")
         return redirect(url_for("cliente_home", slug=slug))
 
 
@@ -211,13 +277,22 @@ def register(app):
                 or ag["status"] != ST_AGENDADO):
             return redirect(url_for("cliente_home", slug=slug))
         erro = None
-        if request.method == "POST":
+        # Prazo mínimo de reagendamento configurado pelo chefe
+        _min_h = int(db.get_config("min_horas_reagendar", barbearia_id, "0") or 0)
+        if _min_h > 0:
+            try:
+                _ag_dt = datetime.strptime(ag["data_hora"], "%Y-%m-%d %H:%M:%S")
+                if (_ag_dt - _agora(barbearia_id)).total_seconds() < _min_h * 3600:
+                    erro = f"Só podes reagendar com mais de {_min_h}h de antecedência."
+            except (ValueError, TypeError):
+                pass
+        if request.method == "POST" and not erro:
             if not _api_ok(request.remote_addr or "?"):
                 return redirect(url_for("cliente_home", slug=slug))
             try:
                 sid = int(request.form.get("servico_id") or ag["servico_id"])
             except (ValueError, TypeError):
-                sid = ag["servico_id"]
+                sid = int(ag["servico_id"]) if ag.get("servico_id") else None
             try:
                 _bid_raw = request.form.get("barbeiro_id") or None
                 bid_ = int(_bid_raw) if _bid_raw else ag.get("barbeiro_id")
@@ -254,9 +329,9 @@ def register(app):
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro barbeiro ou data."
                 if not erro:
                     with _booking_lock:
-                        livre, conflito = db.verificar_disponibilidade(bid_, dh, dur, barbearia_id, excluir_id=id)
+                        livre, hora_conf = db.verificar_disponibilidade(bid_, dh, dur, barbearia_id, excluir_id=id)
                         if not livre:
-                            erro = f"Conflito às {conflito['data_hora'][11:16]}. Escolhe outro horário."
+                            erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
                             db.reagendar_agendamento(id, dh, bid_, sid)
                             db.invalidar_cache_slots(barbearia_id)
@@ -268,51 +343,6 @@ def register(app):
                                barbeiros=db.listar_barbeiros(barbearia_id, incluir_chefe=True),
                                hoje=hoje, erro=erro, origem="cliente", barbearia=barbearia,
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
-
-
-    @app.route("/cliente/<slug>/iniciar-servico/<int:id>", methods=["POST"])
-    def cliente_iniciar_servico(slug, id):
-        """Cliente inicia o seu serviço directamente."""
-        barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
-            return redirect(url_for("login"))
-        barbearia_id = barbearia["id"]
-        if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
-            return redirect(url_for("cliente_entrada", slug=slug))
-        ag = db.get_agendamento(id)
-        if (not ag or ag.get("telefone") != session.get("telefone")
-                or ag.get("barbearia_id") != barbearia_id
-                or ag.get("status") not in (ST_AGENDADO, ST_WALKIN)):
-            return redirect(url_for("cliente_home", slug=slug))
-        if not db.iniciar_trabalho(id):
-            _vcli = get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom"))
-            flash(f"⚠️ O {_vcli.get('profissional','Barbeiro').lower()} já tem um {_vcli.get('servico','serviço').lower()} em curso. Aguarda.", "erro")
-        else:
-            _invalidar_idx(barbearia_id)
-        return redirect(url_for("cliente_home", slug=slug))
-
-
-    @app.route("/cliente/<slug>/terminar-servico/<int:id>", methods=["POST"])
-    def cliente_terminar_servico(slug, id):
-        """Cliente termina o seu serviço directamente."""
-        barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
-            return redirect(url_for("login"))
-        barbearia_id = barbearia["id"]
-        if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
-            return redirect(url_for("cliente_entrada", slug=slug))
-        ag = db.get_agendamento(id)
-        if (not ag or ag.get("telefone") != session.get("telefone")
-                or ag.get("barbearia_id") != barbearia_id
-                or ag.get("status") != "em_andamento"):
-            return redirect(url_for("cliente_home", slug=slug))
-        try:
-            valor = max(0, min(int(request.form.get("valor", 0) or 0), 999_999))
-        except (ValueError, TypeError):
-            valor = 0
-        db.terminar_trabalho(id, valor)
-        _invalidar_idx(barbearia_id)
-        return redirect(url_for("cliente_home", slug=slug))
 
 
     @app.route("/reagendar-link/<token>", methods=["GET","POST"])
@@ -328,7 +358,16 @@ def register(app):
             return render_template("404.html"), 404
 
         erro = None
-        if request.method == "POST":
+        # Prazo mínimo de reagendamento configurado pelo chefe
+        _min_h_rl = int(db.get_config("min_horas_reagendar", barbearia_id, "0") or 0)
+        if _min_h_rl > 0:
+            try:
+                _ag_dt_rl = datetime.strptime(ag["data_hora"], "%Y-%m-%d %H:%M:%S")
+                if (_ag_dt_rl - _agora(barbearia_id)).total_seconds() < _min_h_rl * 3600:
+                    erro = f"Só podes reagendar com mais de {_min_h_rl}h de antecedência."
+            except (ValueError, TypeError):
+                pass
+        if request.method == "POST" and not erro:
             try:
                 sid = int(request.form.get("servico_id") or ag["servico_id"])
             except (ValueError, TypeError):
@@ -369,10 +408,10 @@ def register(app):
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro horário."
                 if not erro:
                     with _booking_lock:
-                        livre, conflito = db.verificar_disponibilidade(
+                        livre, hora_conf = db.verificar_disponibilidade(
                             bid_, dh, dur, barbearia_id, excluir_id=ag["id"])
                         if not livre:
-                            erro = f"Conflito às {conflito['data_hora'][11:16]}. Escolhe outro horário."
+                            erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
                             db.reagendar_agendamento(ag["id"], dh, bid_, sid)
                             db.invalidar_cache_slots(barbearia_id)
@@ -500,6 +539,7 @@ def register(app):
             return redirect(url_for("cliente_entrada", slug=slug))
         try:
             db.espera_marcar_notificado(id)
-        except Exception:
-            pass
+        except Exception as _e:
+            import logging as _lg
+            _lg.getLogger("fila_espera").warning("espera_marcar_notificado falhou id=%s: %s", id, _e)
         return redirect(url_for("cliente_home", slug=slug))

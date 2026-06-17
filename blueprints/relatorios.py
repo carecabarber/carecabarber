@@ -10,6 +10,7 @@ from datetime import datetime
 from collections import defaultdict as _dd
 from flask import render_template, request, redirect, url_for, session, flash, Response
 import database as db
+from database import ST_CONCLUIDO as _ST_CONC
 from helpers import (
     _log, _agora, bid,
     staff_required, chefe_required,
@@ -18,7 +19,7 @@ from helpers import (
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/estatisticas")
     @staff_required
@@ -41,9 +42,12 @@ def register(app):
         tendencia     = db.tendencia_semanal(barbearia_id, semanas=10)
         barbeiros_pdf = db.listar_barbeiros(barbearia_id, incluir_chefe=True)
         agora_mes     = _agora(barbearia_id).strftime("%Y-%m")
+        taxa_cancel   = db.taxa_cancelamentos(barbearia_id, agora_mes)
+        clientes_top  = db.top_clientes(barbearia_id, limite=10)
         return render_template("estatisticas.html", stats=stats, alertas_perf=alertas_perf,
                                tendencia=tendencia, barbeiros_pdf=barbeiros_pdf,
-                               agora_mes=agora_mes)
+                               agora_mes=agora_mes, taxa_cancel=taxa_cancel,
+                               clientes_top=clientes_top, pdf_ok=_PDF_OK)
 
 
     @app.route("/estatisticas/barbeiro/<int:id>")
@@ -127,7 +131,7 @@ def register(app):
                 LEFT JOIN barbeiros b ON b.id = a.barbeiro_id
                 LEFT JOIN servicos  s ON s.id = a.servico_id
                 WHERE a.barbearia_id=? AND a.data_hora BETWEEN ? AND ?
-                  AND a.status='concluido'{_q_extra}
+                  AND a.status='{_ST_CONC}'{_q_extra}
                 ORDER BY a.data_hora
             """, _q_params).fetchall()
 

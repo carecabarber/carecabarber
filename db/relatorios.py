@@ -1,11 +1,15 @@
 # db/relatorios.py — Estatísticas, tendência, duração real
 
 from datetime import datetime, timedelta
-from db._conn import _read, _agora, FMT
+from db._conn import _read, _agora, FMT, ST_CONCLUIDO, ST_NAO_COMP
+
+_S_CONC = f"'{ST_CONCLUIDO}'"  # 'concluido'
+_S_NC   = f"'{ST_NAO_COMP}'"   # 'nao_compareceu'
+
 from db.barbeiros import get_barbeiro
 
 
-def estatisticas(barbearia_id, barbeiro_id=None):
+def estatisticas(barbearia_id: int, barbeiro_id: int | None = None) -> dict:
     from collections import Counter
 
     hoje   = _agora(barbearia_id)
@@ -18,7 +22,7 @@ def estatisticas(barbearia_id, barbeiro_id=None):
 
     with _read() as conn:
         def query(desde):
-            q = ("SELECT * FROM agendamentos WHERE barbearia_id=? AND status='concluido' "
+            q = (f"SELECT * FROM agendamentos WHERE barbearia_id=? AND status={_S_CONC} "
                  "AND data_hora >= ?")
             p = [barbearia_id, f"{desde} 00:00:00"]
             if barbeiro_id:
@@ -56,13 +60,13 @@ def estatisticas(barbearia_id, barbeiro_id=None):
         barbeiros_stats = []
         if not barbeiro_id:
             # Uma única query com GROUP BY em vez de N queries (uma por barbeiro)
-            _bs_rows = conn.execute("""
+            _bs_rows = conn.execute(f"""
                 SELECT
                     b.id, b.nome,
-                    SUM(CASE WHEN a.status='concluido' AND a.data_hora >= ? THEN 1 ELSE 0 END)             AS clientes,
-                    SUM(CASE WHEN a.status='concluido' AND a.data_hora >= ? THEN COALESCE(a.valor,0) ELSE 0 END) AS valor,
-                    SUM(CASE WHEN a.status='concluido' AND a.data_hora >= ? THEN 1 ELSE 0 END)             AS clientes_sem,
-                    SUM(CASE WHEN a.status='concluido' AND a.data_hora >= ? THEN COALESCE(a.valor,0) ELSE 0 END) AS valor_sem,
+                    SUM(CASE WHEN a.status={_S_CONC} AND a.data_hora >= ? THEN 1 ELSE 0 END)             AS clientes,
+                    SUM(CASE WHEN a.status={_S_CONC} AND a.data_hora >= ? THEN COALESCE(a.valor,0) ELSE 0 END) AS valor,
+                    SUM(CASE WHEN a.status={_S_CONC} AND a.data_hora >= ? THEN 1 ELSE 0 END)             AS clientes_sem,
+                    SUM(CASE WHEN a.status={_S_CONC} AND a.data_hora >= ? THEN COALESCE(a.valor,0) ELSE 0 END) AS valor_sem,
                     ROUND(AVG(CASE WHEN a.avaliacao IS NOT NULL THEN a.avaliacao END), 1)                   AS avaliacao_media,
                     COUNT(CASE WHEN a.avaliacao IS NOT NULL THEN 1 END)                                     AS avaliacao_total
                 FROM barbeiros b
@@ -93,7 +97,7 @@ def estatisticas(barbearia_id, barbeiro_id=None):
     }
 
 
-def estatisticas_detalhadas_barbeiro(barbeiro_id, barbearia_id):
+def estatisticas_detalhadas_barbeiro(barbeiro_id: int, barbearia_id: int) -> dict:
     from collections import Counter
 
     hoje   = _agora(barbearia_id)
@@ -113,7 +117,7 @@ def estatisticas_detalhadas_barbeiro(barbeiro_id, barbearia_id):
     with _read() as conn:
         def query(desde):
             return conn.execute(
-                "SELECT * FROM agendamentos WHERE barbearia_id=? AND status='concluido' "
+                f"SELECT * FROM agendamentos WHERE barbearia_id=? AND status={_S_CONC} "
                 "AND barbeiro_id=? AND data_hora >= ?",
                 (barbearia_id, barbeiro_id, f"{desde} 00:00:00")).fetchall()
 
@@ -168,12 +172,12 @@ def estatisticas_detalhadas_barbeiro(barbeiro_id, barbearia_id):
         media_atraso = round(sum(atrasos) / len(atrasos), 1) if atrasos else 0
 
         nc = conn.execute(
-            "SELECT COUNT(*) FROM agendamentos WHERE barbearia_id=? "
-            "AND status='nao_compareceu' AND barbeiro_id=?",
+            f"SELECT COUNT(*) FROM agendamentos WHERE barbearia_id=? "
+            f"AND status={_S_NC} AND barbeiro_id=?",
             (barbearia_id, barbeiro_id)).fetchone()[0]
 
         recentes = conn.execute(
-            "SELECT * FROM agendamentos WHERE barbearia_id=? AND status='concluido' "
+            f"SELECT * FROM agendamentos WHERE barbearia_id=? AND status={_S_CONC} "
             "AND barbeiro_id=? ORDER BY data_hora DESC LIMIT 15",
             (barbearia_id, barbeiro_id)).fetchall()
 
@@ -208,7 +212,7 @@ def estatisticas_detalhadas_barbeiro(barbeiro_id, barbearia_id):
 
 # ── Tendências ────────────────────────────────────────────
 
-def tendencia_semanal(barbearia_id, barbeiro_id=None, semanas=10):
+def tendencia_semanal(barbearia_id: int, barbeiro_id: int | None = None, semanas: int = 10) -> list[dict]:
     """Retorna resumo dos últimos `semanas` semanas para gráfico de tendência.
     Devolve lista de {label, clientes, valor} ordenada por semana crescente."""
     # Usar _agora() com o fuso da barbearia em vez de date('now') do SQLite (que é UTC)
@@ -219,7 +223,7 @@ def tendencia_semanal(barbearia_id, barbeiro_id=None, semanas=10):
             "       COUNT(*) AS clientes, "
             "       SUM(COALESCE(valor, 0)) AS valor "
             "FROM agendamentos "
-            "WHERE barbearia_id=? AND status='concluido' "
+            f"WHERE barbearia_id=? AND status={_S_CONC} "
             "  AND data_hora >= ? "
         )
         params = [barbearia_id, cutoff]
@@ -249,11 +253,127 @@ def tendencia_semanal(barbearia_id, barbeiro_id=None, semanas=10):
 
 # ── Helpers ────────────────────────────────────────────────
 
-def duracao_real_minutos(inicio_str, fim_str):
+def duracao_real_minutos(inicio_str: str | None, fim_str: str | None) -> int | None:
     if not inicio_str or not fim_str:
         return None
     try:
         return int((datetime.strptime(fim_str, FMT) - datetime.strptime(inicio_str, FMT)).total_seconds() / 60)
     except (ValueError, TypeError):
         return None
+
+
+def taxa_cancelamentos(barbearia_id: int, mes: str) -> dict:
+    """Taxa de cancelamentos + não comparecimento num mês (YYYY-MM)."""
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN status IN ('cancelado','nao_compareceu') THEN 1 ELSE 0 END) AS perdidos "
+            "FROM agendamentos WHERE barbearia_id=? AND strftime('%Y-%m', data_hora)=? "
+            "AND status != 'agendado'",
+            (barbearia_id, mes)).fetchone()
+    total    = (row["total"]    if row else 0) or 0
+    perdidos = (row["perdidos"] if row else 0) or 0
+    return {
+        "total":    total,
+        "perdidos": perdidos,
+        "pct":      round(perdidos / total * 100) if total else 0,
+    }
+
+
+def top_clientes(barbearia_id: int, limite: int = 10) -> list[dict]:
+    """Top N clientes por número de visitas concluídas."""
+    with _read() as conn:
+        rows = conn.execute(
+            "SELECT cliente, telefone, COUNT(*) AS visitas, MAX(data_hora) AS ultima_visita "
+            "FROM agendamentos "
+            "WHERE barbearia_id=? AND status IN ('concluido','walkin') "
+            "GROUP BY COALESCE(telefone, cliente) "
+            "ORDER BY visitas DESC LIMIT ?",
+            (barbearia_id, limite)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def visitas_cliente(barbearia_id: int, telefone: str) -> int:
+    """Número de visitas concluídas de um cliente (por telefone)."""
+    if not telefone:
+        return 0
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM agendamentos "
+            "WHERE barbearia_id=? AND telefone=? AND status IN ('concluido','walkin')",
+            (barbearia_id, telefone)).fetchone()
+    return row[0] if row else 0
+
+
+def analytics_clientes(barbearia_id: int, limite: int = 100,
+                        periodo_dias: int | None = None) -> list[dict]:
+    """Analytics por cliente: LTV, frequência média, serviço favorito.
+
+    periodo_dias — se definido, limita a janela de análise a este nº de dias.
+    """
+    desde_str = ""
+    params_base = [barbearia_id]
+    if periodo_dias and periodo_dias > 0:
+        desde = (_agora(barbearia_id) - timedelta(days=periodo_dias)).strftime("%Y-%m-%d")
+        desde_str = f" AND a.data_hora >= '{desde} 00:00:00'"
+
+    with _read() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                COALESCE(a.telefone, a.cliente) AS chave,
+                a.cliente,
+                a.telefone,
+                COUNT(*) AS visitas,
+                SUM(COALESCE(a.valor,0)) AS ltv,
+                MAX(a.data_hora) AS ultima_visita,
+                MIN(a.data_hora) AS primeira_visita,
+                COALESCE((
+                    SELECT COUNT(*) FROM fidelidade_resets fr
+                    WHERE fr.barbearia_id=a.barbearia_id
+                      AND fr.telefone=a.telefone
+                ), 0) AS resets_feitos
+            FROM agendamentos a
+            WHERE a.barbearia_id=? AND a.status IN ('concluido','walkin'){desde_str}
+            GROUP BY COALESCE(a.telefone, a.cliente)
+            ORDER BY visitas DESC, ltv DESC
+            LIMIT ?
+            """,
+            (barbearia_id, limite)).fetchall()
+
+        # Serviço favorito por cliente (subquery separada para simplicidade)
+        servico_fav: dict = {}
+        fav_rows = conn.execute(
+            f"""
+            SELECT COALESCE(a.telefone, a.cliente) AS chave, s.nome AS servico_nome, COUNT(*) AS n
+            FROM agendamentos a
+            LEFT JOIN servicos s ON s.id=a.servico_id
+            WHERE a.barbearia_id=? AND a.status IN ('concluido','walkin')
+              AND s.nome IS NOT NULL{desde_str}
+            GROUP BY chave, a.servico_id
+            ORDER BY chave, n DESC
+            """,
+            (barbearia_id,)).fetchall()
+        for r in fav_rows:
+            if r["chave"] not in servico_fav:
+                servico_fav[r["chave"]] = r["servico_nome"]
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        chave = d["chave"]
+        d["servico_favorito"] = servico_fav.get(chave)
+        # Frequência média em dias (entre primeira e última visita, dividido por visitas-1)
+        if d["visitas"] > 1 and d["primeira_visita"] and d["ultima_visita"]:
+            try:
+                _fmt = "%Y-%m-%d %H:%M:%S"
+                dias = (datetime.strptime(d["ultima_visita"], _fmt) -
+                        datetime.strptime(d["primeira_visita"], _fmt)).days
+                d["freq_dias"] = round(dias / (d["visitas"] - 1), 1) if dias > 0 else None
+            except (ValueError, TypeError):
+                d["freq_dias"] = None
+        else:
+            d["freq_dias"] = None
+        result.append(d)
+    return result
 

@@ -4,13 +4,13 @@ import database as db
 from database import ST_EM_ANDAMENTO
 from helpers import (
     _log, _blog, _agora, _api_ok,
-    _pc_get, _pc_set, _invalidar_idx,
+    _pc_get, _pc_set, _pc_del, _invalidar_idx,
     staff_required, bid,
     _VAPID_PUBLIC_KEY, _val_data,
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/api/push/vapid-public")
     def api_push_vapid_public():
@@ -108,11 +108,15 @@ def register(app):
             return jsonify([])
         barbearia_id = bid()
         filtro_bid   = None if session.get("role") == "chefe" else session.get("user_id")
-        _ck = f"lemb:{barbearia_id}:{filtro_bid}"
+        try:
+            _min = min(120, max(5, int(request.args.get("minutos", 30))))
+        except (ValueError, TypeError):
+            _min = 30
+        _ck = f"lemb:{barbearia_id}:{filtro_bid}:{_min}"
         cached = _pc_get(_ck)
         if cached is not None:
             return jsonify(cached)
-        proximos  = db.proximos_agendamentos(barbearia_id, minutos=20, barbeiro_id=filtro_bid)
+        proximos  = db.proximos_agendamentos(barbearia_id, minutos=_min, barbeiro_id=filtro_bid)
         sids      = list({a["servico_id"] for a in proximos})
         servicos_m = {s["id"]: s for s in db.listar_servicos(barbearia_id) if s["id"] in sids}
         resultado = []
@@ -123,11 +127,32 @@ def register(app):
                 minutos_ate = int((hm - _agora()).total_seconds() / 60)
             except (ValueError, TypeError):
                 minutos_ate = 0
-            resultado.append({"id": a["id"], "cliente": a["cliente"],
-                              "telefone": a["telefone"] or "", "hora": a["data_hora"][11:16],
-                              "servico": s["nome"] if s else "—", "minutos_ate": minutos_ate})
+            resultado.append({
+                "id":             a["id"],
+                "cliente":        a["cliente"],
+                "telefone":       a["telefone"] or "",
+                "hora":           a["data_hora"][11:16],
+                "servico":        s["nome"] if s else "—",
+                "minutos_ate":    minutos_ate,
+                "token_confirmar": a.get("token_confirmar") or "",
+                "lembrete_wa_em": a.get("lembrete_wa_em") or "",
+            })
         _pc_set(_ck, resultado, 20)
         return jsonify(resultado)
+
+
+    @app.route("/api/marcar-lembrete/<int:id>", methods=["POST"])
+    def api_marcar_lembrete(id):
+        """Marca que o lembrete WA foi enviado para este agendamento."""
+        if "user_id" not in session or session.get("role") == "cliente":
+            return jsonify({"ok": False}), 403
+        barbearia_id = bid()
+        ok = db.marcar_lembrete_wa(id, barbearia_id)
+        # Invalidar cache de lembretes para reflectir o novo estado
+        filtro_bid = None if session.get("role") == "chefe" else session.get("user_id")
+        for _min in (5, 10, 15, 20, 30, 60, 90, 120):
+            _pc_del(f"lemb:{barbearia_id}:{filtro_bid}:{_min}")
+        return jsonify({"ok": ok})
 
 
     @app.route("/api/meu-status")
@@ -228,36 +253,66 @@ def register(app):
     @app.route("/api/cliente-push/subscribe", methods=["POST"])
     def api_cliente_push_subscribe():
         from helpers import _PUSH_OK
-        if not _PUSH_OK:
-            return {"ok": False, "error": "Push não disponível"}, 503
+        # Auth antes de feature check: 401/403 têm prioridade sobre 503
         if session.get("role") != "cliente":
-            return {"ok": False, "error": "Não autorizado"}, 403
+            return jsonify({"ok": False, "error": "Não autorizado"}), 403
+        if not _PUSH_OK:
+            return jsonify({"ok": False, "error": "Push não disponível"}), 503
         barbearia_id = session.get("barbearia_id")
         telefone = session.get("telefone", "")
         if not telefone or not barbearia_id:
-            return {"ok": False, "error": "Sessão inválida"}, 400
+            return jsonify({"ok": False, "error": "Sessão inválida"}), 400
         data = request.get_json(silent=True) or {}
         endpoint = data.get("endpoint", "")
         p256dh   = data.get("p256dh", "")
         auth_key = data.get("auth", "")
         if not endpoint or not p256dh or not auth_key:
-            return {"ok": False, "error": "Dados incompletos"}, 400
+            return jsonify({"ok": False, "error": "Dados incompletos"}), 400
         try:
             db.cliente_push_guardar(telefone, barbearia_id, endpoint, p256dh, auth_key)
-            return {"ok": True}
+            return jsonify({"ok": True})
         except Exception as e:
-            return {"ok": False, "error": str(e)}, 500
+            return jsonify({"ok": False, "error": str(e)}), 500
 
 
     @app.route("/api/cliente-push/unsubscribe", methods=["POST"])
     def api_cliente_push_unsubscribe():
         if session.get("role") != "cliente":
-            return {"ok": False}, 403
+            return jsonify({"ok": False}), 403
         data = request.get_json(silent=True) or {}
         endpoint = data.get("endpoint", "")
         if endpoint:
             try:
                 db.cliente_push_remover(endpoint)
-            except Exception:
-                pass
-        return {"ok": True}
+            except Exception as _e:
+                import logging
+                logging.getLogger("push").warning("cliente_push_remover falhou: %s", _e)
+        return jsonify({"ok": True})
+
+
+    @app.route("/api/spec")
+    def api_spec():
+        """Documentação programática das rotas da API (JSON)."""
+        from flask import url_for as _uf
+        routes = []
+        for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+            if rule.rule.startswith("/static"):
+                continue
+            methods = sorted(m for m in rule.methods if m not in ("HEAD", "OPTIONS"))
+            routes.append({
+                "path":     rule.rule,
+                "methods":  methods,
+                "endpoint": rule.endpoint,
+                "auth":     not rule.rule.startswith(("/cliente/", "/api/push/vapid",
+                                                       "/healthz", "/login", "/offline",
+                                                       "/manifest", "/sw.js", "/foto/",
+                                                       "/avaliar-link/", "/reagendar-link/",
+                                                       "/cancelar-link/", "/ag/")),
+            })
+        return jsonify({
+            "version":     "1.0",
+            "base_url":    request.host_url.rstrip("/"),
+            "total_routes": len(routes),
+            "docs":        "/docs/API.md",
+            "routes":      routes,
+        })

@@ -290,10 +290,10 @@ def test_write_exclusive_db_timeout():
 
 
 def test_read_db_timeout():
-    """Linha 258: _read() lança RuntimeError DB_TIMEOUT."""
+    """_read() lança RuntimeError DB_TIMEOUT quando _acquire_read_lock falha."""
     import db._conn as _db_conn
 
-    with patch("db._conn._acquire_lock", return_value=False):
+    with patch("db._conn._acquire_read_lock", return_value=False):
         with pytest.raises(RuntimeError, match="DB_TIMEOUT"):
             with _db_conn._read() as conn:
                 pass

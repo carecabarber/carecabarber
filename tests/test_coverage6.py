@@ -90,17 +90,6 @@ def ctx():
         "Cliente Cov6", svc_id, f"{amanha} 10:00:00",
         bid, barbeiro_id=barb_id, telefone=tel)
 
-    # Agendamento em andamento — para cliente_terminar_servico
-    ag_em_andamento_id = db.criar_agendamento(
-        "Cliente Cov6", svc_id, f"{amanha} 11:00:00",
-        bid, barbeiro_id=barb_id, telefone=tel)
-    db.iniciar_trabalho(ag_em_andamento_id)
-
-    # Agendamento para cliente_iniciar_servico (separado para não colidir)
-    ag_iniciar_id = db.criar_agendamento(
-        "Cliente Cov6", svc_id, f"{amanha} 12:00:00",
-        bid, barbeiro_id=barb_id, telefone=tel)
-
     # Agendamento dedicado para reagendar_link
     ag_reagendar_id = db.criar_agendamento(
         "Cliente Cov6", svc_id, f"{amanha} 14:00:00",
@@ -138,8 +127,6 @@ def ctx():
         "dia_id": dia_id,
         "tel": tel, "amanha": amanha,
         "ag_id": ag_id,
-        "ag_em_andamento_id": ag_em_andamento_id,
-        "ag_iniciar_id": ag_iniciar_id,
         "ag_reagendar_id": ag_reagendar_id,
         "ag_cancelar_id": ag_cancelar_id,
         "ag_concluido_id": ag_concluido_id,
@@ -359,11 +346,10 @@ class TestClienteMarcar:
         """Conflito na 1ª verificação → erro (linhas 118-120)."""
         c, ctx = client
         _cliente(c, ctx)
-        fake_conflito = {"data_hora": "2030-12-31 10:00:00"}
         with patch("blueprints.cliente._dentro_horario", return_value=(True, "")):
             with patch("blueprints.cliente.db.ausencia_ativa", return_value=None):
                 with patch("blueprints.cliente.db.verificar_disponibilidade",
-                           return_value=(False, fake_conflito)):
+                           return_value=(False, "10:00")):
                     r = c.post("/cliente/cov6/marcar", data={
                         "servico_id": str(ctx["svc_id"]),
                         "barbeiro_id": str(ctx["barb_id"]),
@@ -375,11 +361,10 @@ class TestClienteMarcar:
         """Conflito apenas dentro do booking_lock → erro (linhas 122-126)."""
         c, ctx = client
         _cliente(c, ctx)
-        fake_conflito = {"data_hora": "2030-12-31 10:00:00"}
         with patch("blueprints.cliente._dentro_horario", return_value=(True, "")):
             with patch("blueprints.cliente.db.ausencia_ativa", return_value=None):
                 with patch("blueprints.cliente.db.verificar_disponibilidade",
-                           side_effect=[(True, None), (False, fake_conflito)]):
+                           side_effect=[(True, None), (False, "10:00")]):
                     r = c.post("/cliente/cov6/marcar", data={
                         "servico_id": str(ctx["svc_id"]),
                         "barbeiro_id": str(ctx["barb_id"]),
@@ -453,38 +438,6 @@ class TestClienteConfirmacaoECancelar:
 # ══════════════════════════════════════════════════════════════
 #  cliente.py — iniciar / terminar serviço (rotas cliente)
 # ══════════════════════════════════════════════════════════════
-
-class TestClienteIniciarTerminar:
-
-    def test_iniciar_servico_ag_not_found(self, client):
-        """ag 9999 não existe → redirect (linhas 270-274)."""
-        c, ctx = client
-        _cliente(c, ctx)
-        r = c.post("/cliente/cov6/iniciar-servico/9999")
-        assert r.status_code == 302
-
-    def test_iniciar_servico_ok(self, client):
-        """ag_iniciar_id está agendado → iniciar (linhas 275-280)."""
-        c, ctx = client
-        _cliente(c, ctx)
-        r = c.post(f"/cliente/cov6/iniciar-servico/{ctx['ag_iniciar_id']}")
-        assert r.status_code == 302
-
-    def test_terminar_servico_ag_not_found(self, client):
-        """ag 9999 → redirect (linhas 292-296)."""
-        c, ctx = client
-        _cliente(c, ctx)
-        r = c.post("/cliente/cov6/terminar-servico/9999", data={"valor": "0"})
-        assert r.status_code == 302
-
-    def test_terminar_servico_ok(self, client):
-        """ag_em_andamento_id está em andamento → terminar (linhas 297-303)."""
-        c, ctx = client
-        _cliente(c, ctx)
-        r = c.post(f"/cliente/cov6/terminar-servico/{ctx['ag_em_andamento_id']}",
-                   data={"valor": "500"})
-        assert r.status_code == 302
-
 
 # ══════════════════════════════════════════════════════════════
 #  cliente.py — reagendar_link (token público)

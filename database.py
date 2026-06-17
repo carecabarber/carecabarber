@@ -45,6 +45,8 @@ from db.barbearia import (
     dia_esta_fechado,
     listar_ausencias, criar_ausencia, apagar_ausencia,
     ausencia_ativa, barbeiro_ausente,
+    cliente_bloquear, cliente_desbloquear,
+    cliente_bloqueado, clientes_bloqueados_listar,
 )
 
 # ── db/barbeiros.py ───────────────────────────────────────────────────────────
@@ -65,12 +67,13 @@ from db.barbeiros import (
 # ── db/servicos.py ────────────────────────────────────────────────────────────
 from db.servicos import (
     listar_servicos, servico_por_id, get_servicos_por_ids,
-    criar_servico, atualizar_servico, apagar_servico,
+    criar_servico, atualizar_servico, apagar_servico, toggle_servico_ativo, mover_servico,
 )
 
 # ── db/agendamentos.py ────────────────────────────────────────────────────────
 from db.agendamentos import (
-    criar_agendamento, marcar_nao_compareceu,
+    criar_agendamento, confirmar_agendamento, contar_marcacoes_cliente_dia,
+    marcar_nao_compareceu,
     listar_hoje, listar_proximas_barbeiro,
     listar_todos, contar_ativos_dia, contar_todos,
     listar_datas_historico, listar_por_telefone,
@@ -87,13 +90,16 @@ from db.agendamentos import (
     guardar_avaliacao, media_avaliacoes,
     limpar_em_andamento_presos, novos_agendamentos, proximos_agendamentos,
     espera_adicionar, espera_verificar_cliente, espera_marcar_notificado,
-    espera_notificar_proximo, espera_listar_activa, espera_limpar_expiradas,
+    espera_notificar_proximo, espera_listar_activa, espera_limpar_expiradas, espera_remover,
+    marcar_lembrete_wa,
+    fidelidade_reset, fidelidade_resets_count,
 )
 
 # ── db/relatorios.py ──────────────────────────────────────────────────────────
 from db.relatorios import (
     estatisticas, estatisticas_detalhadas_barbeiro,
     tendencia_semanal, duracao_real_minutos,
+    taxa_cancelamentos, top_clientes, visitas_cliente, analytics_clientes,
 )
 
 # ── db/push.py ────────────────────────────────────────────────────────────────

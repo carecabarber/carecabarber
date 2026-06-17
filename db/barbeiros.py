@@ -4,21 +4,26 @@ import sqlite3
 import secrets
 import threading
 from werkzeug.security import generate_password_hash, check_password_hash
-from db._conn import _read, _write, _write_exclusive, _agora, FMT, _BARB_COLS
+from db._conn import _read, _write, _write_exclusive, _agora, FMT, _BARB_COLS, ST_AGENDADO
+
+_S_AG = f"'{ST_AGENDADO}'"  # 'agendado'
 
 
-def get_barbeiro_por_username(username):
+def get_barbeiro_por_username(username: str) -> dict | None:
     with _read() as conn:
         row = conn.execute(
             "SELECT " + _BARB_COLS + " FROM barbeiros WHERE username=? AND ativo=1", (username,)).fetchone()
     return dict(row) if row else None
 
 
-def verificar_senha(utilizador, senha):
+def verificar_senha(utilizador: dict | None, senha: str) -> bool:
     """Verifica a senha e migra automaticamente hashes scrypt → pbkdf2:sha256.
     Scrypt no Werkzeug 3.x pode levar centenas de segundos em VMs partilhadas —
     pbkdf2:sha256 é previsível e rápido."""
-    if not utilizador or not utilizador["password_hash"]:
+    if not utilizador or not utilizador.get("password_hash"):
+        # Mesmo sem hash, consome tempo equivalente a evitar enumeração por timing
+        from helpers_security import _DUMMY_HASH
+        check_password_hash(_DUMMY_HASH, senha)
         return False
     ok = check_password_hash(utilizador["password_hash"], senha)
     if ok:
@@ -40,13 +45,15 @@ def verificar_senha(utilizador, senha):
                         conn.execute(
                             "UPDATE barbeiros SET password_hash=? WHERE id=? AND password_hash=?",
                             (new_hash, utilizador["id"], _ph))
-                except Exception:
-                    pass  # re-hash falhou — próxima login tenta outra vez
+                except Exception as _e:
+                    import logging
+                    logging.getLogger("auth").warning(
+                        "re-hash falhou para id=%s: %s", utilizador.get("id"), _e)
             threading.Thread(target=_rehash, daemon=True, name=f"rehash-{utilizador['id']}").start()
     return ok
 
 
-def username_existe(username):
+def username_existe(username: str) -> bool:
     """Verifica se um username já está em uso (qualquer role)."""
     with _read() as conn:
         row = conn.execute(
@@ -54,18 +61,21 @@ def username_existe(username):
     return row is not None
 
 
-def set_credenciais(id, username, senha):
+def set_credenciais(id: int, username: str, senha: str) -> bool:
     try:
         with _write() as conn:
             conn.execute(
                 "UPDATE barbeiros SET username=?, password_hash=? WHERE id=?",
                 (username, generate_password_hash(senha, method="pbkdf2:sha256:10000"), id))
         return True
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        import logging
+        logging.getLogger("auth").warning(
+            "set_credenciais falhou id=%s username=%s: %s", id, username, e)
         return False
 
 
-def alterar_senha(id, nova_senha):
+def alterar_senha(id: int, nova_senha: str) -> None:
     with _write() as conn:
         conn.execute("UPDATE barbeiros SET password_hash=? WHERE id=?",
                      (generate_password_hash(nova_senha, method="pbkdf2:sha256:10000"), id))
@@ -81,7 +91,7 @@ def guardar_foto_perfil(barbeiro_id, dados: bytes, mime: str):
             (dados, mime, barbeiro_id))
 
 
-def get_foto_perfil(barbeiro_id):
+def get_foto_perfil(barbeiro_id: int) -> tuple[bytes, str] | tuple[None, None]:
     """Devolve (bytes, mime) ou (None, None) se não houver foto."""
     with _read() as conn:
         row = conn.execute(
@@ -92,7 +102,7 @@ def get_foto_perfil(barbeiro_id):
     return None, None
 
 
-def apagar_foto_perfil(barbeiro_id):
+def apagar_foto_perfil(barbeiro_id: int) -> None:
     """Remove a foto de perfil de um barbeiro."""
     with _write() as conn:
         conn.execute(
@@ -102,7 +112,7 @@ def apagar_foto_perfil(barbeiro_id):
 
 # ── WebAuthn / Biometria ───────────────────────────────────
 
-def registar_credencial(barbeiro_id, credential_id, public_key, nome_dispositivo="Dispositivo"):
+def registar_credencial(barbeiro_id: int, credential_id: str, public_key: str, nome_dispositivo: str = "Dispositivo") -> None:
     """Guarda uma nova credencial WebAuthn para um barbeiro."""
     with _write() as conn:
         conn.execute(
@@ -113,7 +123,7 @@ def registar_credencial(barbeiro_id, credential_id, public_key, nome_dispositivo
              nome_dispositivo, _agora().strftime(FMT)))
 
 
-def get_credenciais_barbeiro(barbeiro_id):
+def get_credenciais_barbeiro(barbeiro_id: int) -> list[dict]:
     """Lista todas as credenciais registadas de um barbeiro."""
     with _read() as conn:
         rows = conn.execute(
@@ -122,7 +132,7 @@ def get_credenciais_barbeiro(barbeiro_id):
     return [dict(r) for r in rows]
 
 
-def get_credencial_por_id(credential_id):
+def get_credencial_por_id(credential_id: str) -> dict | None:
     """Devolve uma credencial pelo credential_id (base64url)."""
     with _read() as conn:
         row = conn.execute(
@@ -131,7 +141,7 @@ def get_credencial_por_id(credential_id):
     return dict(row) if row else None
 
 
-def atualizar_sign_count(id, sign_count):
+def atualizar_sign_count(id: int, sign_count: int) -> None:
     """Actualiza o contador de assinaturas de uma credencial (anti-replay)."""
     with _write() as conn:
         conn.execute(
@@ -139,7 +149,7 @@ def atualizar_sign_count(id, sign_count):
             (sign_count, id))
 
 
-def apagar_credencial(id, barbeiro_id):
+def apagar_credencial(id: int, barbeiro_id: int) -> None:
     """Remove uma credencial, verificando que pertence ao barbeiro."""
     with _write() as conn:
         conn.execute(
@@ -149,7 +159,7 @@ def apagar_credencial(id, barbeiro_id):
 
 # ── Barbeiros ──────────────────────────────────────────────
 
-def listar_barbeiros(barbearia_id, apenas_ativos=True, incluir_chefe=False):
+def listar_barbeiros(barbearia_id: int, apenas_ativos: bool = True, incluir_chefe: bool = False) -> list[dict]:
     with _read() as conn:
         if incluir_chefe:
             q = "SELECT " + _BARB_COLS + " FROM barbeiros WHERE barbearia_id=? AND role IN ('chefe','barbeiro')"
@@ -161,15 +171,15 @@ def listar_barbeiros(barbearia_id, apenas_ativos=True, incluir_chefe=False):
     return [dict(r) for r in rows]
 
 
-def criar_barbeiro(nome, barbearia_id):
+def criar_barbeiro(nome: str, barbearia_id: int, telefone: str | None = None) -> None:
     tok = secrets.token_urlsafe(32)   # 256 bits
     with _write() as conn:
         conn.execute(
-            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token) VALUES (?, 'barbeiro', ?, ?)",
-            (nome, barbearia_id, tok))
+            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token, telefone) VALUES (?, 'barbeiro', ?, ?, ?)",
+            (nome, barbearia_id, tok, telefone or None))
 
 
-def criar_chefe(nome, username, senha, barbearia_id):
+def criar_chefe(nome: str, username: str, senha: str, barbearia_id: int) -> bool:
     tok = secrets.token_urlsafe(32)   # 256 bits
     try:
         with _write() as conn:
@@ -181,23 +191,23 @@ def criar_chefe(nome, username, senha, barbearia_id):
         return False
 
 
-def toggle_barbeiro(id):
+def toggle_barbeiro(id: int) -> None:
     with _write() as conn:
         conn.execute("UPDATE barbeiros SET ativo = 1 - ativo WHERE id=?", (id,))
 
 
-def contar_agendamentos_futuros_barbeiro(barbeiro_id, a_partir_de):
+def contar_agendamentos_futuros_barbeiro(barbeiro_id: int, a_partir_de: str) -> int:
     """Conta agendamentos futuros com status 'agendado' para um barbeiro.
     Usado para impedir desativar barbeiros com agenda pendente."""
     with _read() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM agendamentos "
-            "WHERE barbeiro_id=? AND status='agendado' AND date(data_hora) >= ?",
+            f"WHERE barbeiro_id=? AND status={_S_AG} AND date(data_hora) >= ?",
             (barbeiro_id, a_partir_de)).fetchone()
     return row[0] if row else 0
 
 
-def contar_chefes_ativos(barbearia_id, excluir_id=None):
+def contar_chefes_ativos(barbearia_id: int, excluir_id: int | None = None) -> int:
     """Conta chefes activos na barbearia. Usado para impedir apagar o último chefe."""
     with _read() as conn:
         if excluir_id:
@@ -211,7 +221,7 @@ def contar_chefes_ativos(barbearia_id, excluir_id=None):
     return row[0] if row else 0
 
 
-def apagar_barbeiro(barbeiro_id, barbearia_id):
+def apagar_barbeiro(barbeiro_id: int, barbearia_id: int) -> str:
     """Apaga um barbeiro.
     - Sem histórico: hard delete.
     - Com histórico (agendamentos passados): soft delete — remove credenciais e desativa.
@@ -234,7 +244,7 @@ def apagar_barbeiro(barbeiro_id, barbearia_id):
             return "soft"
 
 
-def get_barbeiro(id):
+def get_barbeiro(id: int | None) -> dict | None:
     if not id:
         return None
     with _read() as conn:
@@ -242,7 +252,7 @@ def get_barbeiro(id):
     return dict(row) if row else None
 
 
-def get_barbeiro_por_mesa_token(token):
+def get_barbeiro_por_mesa_token(token: str | None) -> dict | None:
     """Devolve barbeiro activo associado ao mesa_token (URL do QR de mesa)."""
     if not token:
         return None
@@ -252,7 +262,7 @@ def get_barbeiro_por_mesa_token(token):
     return dict(row) if row else None
 
 
-def get_agendamentos_mesa(barbeiro_id, barbearia_id, data):
+def get_agendamentos_mesa(barbeiro_id: int, barbearia_id: int, data: str) -> list[dict]:
     """Agendamentos de hoje para a mesa: agendado, walk-in e em_andamento."""
     with _read() as conn:
         rows = conn.execute(
@@ -267,7 +277,7 @@ def get_agendamentos_mesa(barbeiro_id, barbearia_id, data):
     return [dict(r) for r in rows]
 
 
-def get_barbeiros_por_ids(ids):
+def get_barbeiros_por_ids(ids: list[int]) -> dict[int, dict]:
     """Batch-fetch: devolve dict {id: barbeiro} para uma lista de IDs (1 query)."""
     ids = [i for i in ids if i]
     if not ids:
@@ -280,22 +290,24 @@ def get_barbeiros_por_ids(ids):
     return {r["id"]: dict(r) for r in rows}
 
 
-def editar_barbeiro(id, nome, barbearia_id=None):
+def editar_barbeiro(id: int, nome: str, barbearia_id: int | None = None,
+                    telefone: str | None = None) -> None:
     with _write() as conn:
         if barbearia_id:
-            conn.execute("UPDATE barbeiros SET nome=? WHERE id=? AND barbearia_id=?",
-                         (nome, id, barbearia_id))
+            conn.execute("UPDATE barbeiros SET nome=?, telefone=? WHERE id=? AND barbearia_id=?",
+                         (nome, telefone or None, id, barbearia_id))
         else:
-            conn.execute("UPDATE barbeiros SET nome=? WHERE id=?", (nome, id))
+            conn.execute("UPDATE barbeiros SET nome=?, telefone=? WHERE id=?",
+                         (nome, telefone or None, id))
 
 
-def repor_senha_barbeiro(id, nova_senha):
+def repor_senha_barbeiro(id: int, nova_senha: str) -> None:
     with _write() as conn:
         conn.execute("UPDATE barbeiros SET password_hash=? WHERE id=?",
                      (generate_password_hash(nova_senha, method="pbkdf2:sha256:10000"), id))
 
 
-def set_pausa_almoco(barbeiro_id, barbearia_id, inicio, fim):
+def set_pausa_almoco(barbeiro_id: int, barbearia_id: int, inicio: str | None, fim: str | None) -> None:
     """Define ou remove a pausa de almoço permanente de um profissional.
     inicio/fim: string "HH:MM" ou None para remover.
     """

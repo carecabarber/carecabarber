@@ -1,17 +1,18 @@
 import base64
-from flask import render_template, request, redirect, url_for, session, flash, Response, jsonify
+import binascii
+from flask import render_template, request, redirect, url_for, session, flash, Response, jsonify, make_response
 import database as db
 from helpers import (
     _log, _blog, _agora, _limpar, _val_data, _val_hora,
     _invalidar_idx, _pc_del, _api_ok,
     staff_required, chefe_required, bid,
-    get_vocab, _USER_RE, _MAX_USERNAME, _MAX_MOTIVO, _HORA_RE,
+    get_vocab, _USER_RE, _MAX_USERNAME, _MAX_MOTIVO, _MAX_TEL, _HORA_RE,
     _validar_imagem, _FOTO_MIME_OK, _FOTO_MAX_BYTES,
-    _html_escape,
+    _html_escape, _normalizar_tel,
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/barbeiros", methods=["GET","POST"])
     @chefe_required
@@ -19,8 +20,9 @@ def register(app):
         barbearia_id = bid()
         if request.method == "POST":
             nome = _limpar(request.form.get("nome",""))
+            tel  = _limpar(request.form.get("telefone",""), _MAX_TEL) or None
             if nome:
-                db.criar_barbeiro(nome, barbearia_id)
+                db.criar_barbeiro(nome, barbearia_id, telefone=_normalizar_tel(tel) if tel else None)
                 _bb = db.get_barbearia(barbearia_id) or {}
                 _vb = get_vocab(_bb.get("tipo"), _bb.get("vocab_custom"))
                 flash(f"✓ {_vb.get('profissional','Barbeiro')} «{nome}» criado com sucesso!", "sucesso")
@@ -86,9 +88,10 @@ def register(app):
     @chefe_required
     def editar_barbeiro(id):
         nome = _limpar(request.form.get("nome",""))
+        tel  = _limpar(request.form.get("telefone",""), _MAX_TEL) or None
         b    = db.get_barbeiro(id)
         if nome and b and b.get("barbearia_id") == bid():
-            db.editar_barbeiro(id, nome, barbearia_id=bid())
+            db.editar_barbeiro(id, nome, barbearia_id=bid(), telefone=_normalizar_tel(tel) if tel else None)
         return redirect(url_for("barbeiros"))
 
 
@@ -142,7 +145,7 @@ def register(app):
                 return jsonify({"ok": False, "erro": "Formato inválido."}), 400
             try:
                 raw = base64.b64decode(b64)
-            except Exception:
+            except (ValueError, binascii.Error):
                 return jsonify({"ok": False, "erro": "Dados corrompidos."}), 400
             if len(raw) > _FOTO_MAX_BYTES:
                 return jsonify({"ok": False, "erro": "Foto demasiado grande (máx 2 MB)."}), 413
@@ -254,6 +257,16 @@ def register(app):
                         "fim": fim})
 
 
+    @app.route("/set-theme", methods=["POST"])
+    @staff_required
+    def set_theme():
+        tema = request.form.get("tema", "dark")
+        resp = make_response(redirect(url_for("perfil")))
+        resp.set_cookie("cb-theme", "light" if tema == "light" else "dark",
+                        max_age=60*60*24*365, samesite="Lax", httponly=False)
+        return resp
+
+
     @app.route("/perfil", methods=["GET","POST"])
     @staff_required
     def perfil():
@@ -304,7 +317,7 @@ def register(app):
                 return jsonify({"ok": False, "erro": "Formato inválido."}), 400
             try:
                 raw = base64.b64decode(b64)
-            except Exception:
+            except (ValueError, binascii.Error):
                 return jsonify({"ok": False, "erro": "Dados corrompidos."}), 400
             if len(raw) > _FOTO_MAX_BYTES:
                 return jsonify({"ok": False, "erro": "Foto demasiado grande (máx 2 MB)."}), 413

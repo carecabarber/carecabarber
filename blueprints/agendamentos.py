@@ -10,14 +10,14 @@ from helpers import (
     _parse_booking_form, _enriquecer_row, enriquecer_lista, enriquecer,
     _invalidar_idx, _pc_get, _pc_set, _pc_del, _api_ok, _booking_lock,
     staff_required, chefe_required, pode_gerir_agendamento, bid,
-    _push_async, get_vocab, DIAS_PT, _MOEDA_MAP,
+    _push_async, _push_espera, get_vocab, DIAS_PT, _MOEDA_MAP,
     _MAX_TEL, _MAX_MOTIVO, _HISTORY_PER_PAGE, _DASHBOARD_CACHE_TTL,
     _BLOQ_CACHE_TTL, _CLEANUP_LOCK_TTL, _HORA_RE,
     _normalizar_tel,
 )
 
 
-def register(app):
+def register(app) -> None:
 
     @app.route("/")
     @staff_required
@@ -98,12 +98,95 @@ def register(app):
             "valor_esperado": sum((a.get("preco") or 0) for a in agendamentos
                                   if a["status"] in _status_ativos),
         }
+        # ── Stats semanais (só chefe, cache 5min) ──────────────────
+        stats_dashboard = None
+        if session.get("role") == "chefe":
+            _ck_sd = f"stats_dash:{barbearia_id}"
+            stats_dashboard = _pc_get(_ck_sd)
+            if stats_dashboard is None:
+                _ini_sem  = (_agora_dt - timedelta(days=_agora_dt.weekday())).strftime("%Y-%m-%d")
+                _ini_ant  = (_agora_dt - timedelta(days=_agora_dt.weekday() + 7)).strftime("%Y-%m-%d")
+                _fim_ant  = (_agora_dt - timedelta(days=_agora_dt.weekday() + 1)).strftime("%Y-%m-%d")
+                _30d      = (_agora_dt - timedelta(days=30)).strftime("%Y-%m-%d")
+                with db._read() as _sc:
+                    _rs = _sc.execute(
+                        "SELECT COALESCE(SUM(valor),0) AS v FROM agendamentos "
+                        "WHERE barbearia_id=? AND status='concluido' AND data_hora>=?",
+                        (barbearia_id, _ini_sem + " 00:00:00")).fetchone()
+                    rec_sem = (_rs["v"] if _rs else 0) or 0
+                    _ra = _sc.execute(
+                        "SELECT COALESCE(SUM(valor),0) AS v FROM agendamentos "
+                        "WHERE barbearia_id=? AND status='concluido' "
+                        "AND data_hora BETWEEN ? AND ?",
+                        (barbearia_id, _ini_ant + " 00:00:00", _fim_ant + " 23:59:59")).fetchone()
+                    rec_ant = (_ra["v"] if _ra else 0) or 0
+                    _rp = _sc.execute(
+                        "SELECT s.nome, COUNT(*) AS n FROM agendamentos a "
+                        "JOIN servicos s ON s.id=a.servico_id "
+                        "WHERE a.barbearia_id=? AND a.status='concluido' AND a.data_hora>=? "
+                        "GROUP BY a.servico_id ORDER BY n DESC LIMIT 1",
+                        (barbearia_id, _30d + " 00:00:00")).fetchone()
+                    _rh = _sc.execute(
+                        "SELECT SUBSTR(data_hora,12,2) AS hora, COUNT(*) AS n FROM agendamentos "
+                        "WHERE barbearia_id=? AND status='concluido' AND data_hora>=? "
+                        "GROUP BY hora ORDER BY n DESC LIMIT 1",
+                        (barbearia_id, _30d + " 00:00:00")).fetchone()
+                    # Receita diária últimos 7 dias
+                    _7d_ini = (_agora_dt - timedelta(days=6)).strftime("%Y-%m-%d")
+                    _rows_d = _sc.execute(
+                        "SELECT DATE(data_hora) AS dia, COALESCE(SUM(valor),0) AS v "
+                        "FROM agendamentos WHERE barbearia_id=? AND status='concluido' "
+                        "AND DATE(data_hora) >= ? GROUP BY dia",
+                        (barbearia_id, _7d_ini)).fetchall()
+                _dias_dict = {r["dia"]: r["v"] for r in _rows_d}
+                _DIAS_PT_ABREV = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"]
+                _hoje_str = _agora_dt.strftime("%Y-%m-%d")
+                _dias_semana = []
+                for _i in range(7):
+                    _d = (_agora_dt - timedelta(days=6 - _i)).date()
+                    _ds = _d.strftime("%Y-%m-%d")
+                    _dias_semana.append({
+                        "dia": _ds,
+                        "label": _DIAS_PT_ABREV[_d.weekday()],
+                        "v": _dias_dict.get(_ds, 0),
+                        "hoje": _ds == _hoje_str,
+                    })
+                _max_d = max((x["v"] for x in _dias_semana), default=0) or 1
+                for _dx in _dias_semana:
+                    _dx["pct"] = round(_dx["v"] / _max_d * 100)
+                _pct = round((rec_sem - rec_ant) / rec_ant * 100) if rec_ant else None
+                stats_dashboard = {
+                    "rec_sem":         rec_sem,
+                    "rec_ant":         rec_ant,
+                    "rec_diff":        rec_sem - rec_ant,
+                    "rec_pct":         _pct,
+                    "rec_pct_abs":     abs(_pct) if _pct is not None else None,
+                    "servico_popular": dict(_rp) if _rp and _rp["n"] else None,
+                    "hora_pico":       dict(_rh) if _rh and _rh["n"] else None,
+                    "dias_semana":     _dias_semana,
+                }
+                _pc_set(_ck_sd, stats_dashboard, 300)
+        # Agendamentos nas próximas 2h sem confirmação do cliente (alerta ao chefe)
+        if session.get("role") == "chefe":
+            _2h_str    = (_agora_dt + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+            _agora_str = _agora_dt.strftime("%Y-%m-%d %H:%M:%S")
+            nao_confirmados_ids = {
+                a["id"] for a in agendamentos
+                if (a.get("status") == ST_AGENDADO
+                    and not a.get("confirmado")
+                    and a.get("token_confirmar")
+                    and _agora_str <= a["data_hora"] <= _2h_str)
+            }
+        else:
+            nao_confirmados_ids = set()
         return render_template("index.html", agendamentos=agendamentos, em_andamento=em_andamento,
                                barbeiros=barbeiros, barbeiro_id_sel=filtro_bid,
                                resumo=resumo,
                                resumo_extra=resumo_extra,
                                bloqueios=bloqueios,
                                resumo_fim_dia=resumo_fim_dia,
+                               stats_dashboard=stats_dashboard,
+                               nao_confirmados_ids=nao_confirmados_ids,
                                agora=_agora_dt.strftime("%H:%M"),
                                agora_iso=_agora_dt.strftime("%Y-%m-%dT%H:%M:%S"),
                                tz_barbearia=db.get_barbearia_tz(barbearia_id))
@@ -131,9 +214,9 @@ def register(app):
             if not erro:
                 with _booking_lock:
                     if bid_:
-                        livre, conflito = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
+                        livre, hora_conf = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
                         if not livre:
-                            erro = f"Conflito às {conflito['data_hora'][11:16]}. Escolhe outro horário."
+                            erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                     if not erro:
                         db.criar_agendamento(nome, sid, dh, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas)
                         _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
@@ -227,22 +310,27 @@ def register(app):
     @staff_required
     def iniciar(id):
         ag = db.get_agendamento(id)
-        if ag and pode_gerir_agendamento(ag):
-            if ag.get("barbeiro_id") and db.barbeiro_tem_em_andamento(ag["barbeiro_id"]):
-                _bb = db.get_barbearia(ag["barbearia_id"]) or {}
-                _bv = get_vocab(_bb.get("tipo"), _bb.get("vocab_custom"))
-                flash(f"Este {_bv.get('profissional','Barbeiro').lower()} já tem um {_bv.get('servico','serviço').lower()} em curso. Termina-o primeiro.", "erro")
-                return redirect(url_for("index"))
-            if not db.iniciar_trabalho(id):
-                flash("⚠️ Não foi possível iniciar — verifica se já está em curso.", "erro")
-            else:
-                _invalidar_idx(ag["barbearia_id"])
-                if ag.get("barbeiro_id") and ag["barbeiro_id"] != session.get("user_id"):
-                    cliente = ag.get("cliente", "Cliente")
-                    _push_async(ag["barbearia_id"],
-                                "✂️ Atendimento iniciado",
-                                f"{cliente} está a ser atendido",
-                                barbeiro_id=ag["barbeiro_id"])
+        if not ag:
+            flash("⚠️ Marcação não encontrada.", "erro")
+            return redirect(url_for("index"))
+        if not pode_gerir_agendamento(ag):
+            flash("⚠️ Sem permissão para gerir esta marcação.", "erro")
+            return redirect(url_for("index"))
+        if ag.get("barbeiro_id") and db.barbeiro_tem_em_andamento(ag["barbeiro_id"]):
+            _bb = db.get_barbearia(ag["barbearia_id"]) or {}
+            _bv = get_vocab(_bb.get("tipo"), _bb.get("vocab_custom"))
+            flash(f"Este {_bv.get('profissional','Barbeiro').lower()} já tem um {_bv.get('servico','serviço').lower()} em curso. Termina-o primeiro.", "erro")
+            return redirect(url_for("index"))
+        if not db.iniciar_trabalho(id):
+            flash("⚠️ Não foi possível iniciar — verifica se já está em curso.", "erro")
+        else:
+            _invalidar_idx(ag["barbearia_id"])
+            if ag.get("barbeiro_id") and ag["barbeiro_id"] != session.get("user_id"):
+                cliente = ag.get("cliente", "Cliente")
+                _push_async(ag["barbearia_id"],
+                            "✂️ Atendimento iniciado",
+                            f"{cliente} está a ser atendido",
+                            barbeiro_id=ag["barbeiro_id"])
         return redirect(url_for("index"))
 
 
@@ -250,24 +338,29 @@ def register(app):
     @staff_required
     def terminar(id):
         ag = db.get_agendamento(id)
-        if ag and pode_gerir_agendamento(ag):
-            try:
-                valor = int(request.form.get("valor") or 0)
-                valor = max(0, min(valor, 999_999))
-            except (ValueError, TypeError):
-                valor = 0
-            db.terminar_trabalho(id, valor)
-            _blog("TERMINAR", bid=ag["barbearia_id"], ag_id=id, valor=valor)
-            _invalidar_idx(ag["barbearia_id"])
-            try:
-                nota_raw = request.form.get("avaliacao")
-                if nota_raw:
-                    nota = int(nota_raw)
-                    if nota not in (1, 2, 3, 4, 5):
-                        raise ValueError("nota fora do intervalo")
-                    db.guardar_avaliacao(id, ag["barbearia_id"], nota)
-            except (ValueError, TypeError):
-                pass
+        if not ag:
+            flash("⚠️ Marcação não encontrada.", "erro")
+            return redirect(url_for("index"))
+        if not pode_gerir_agendamento(ag):
+            flash("⚠️ Sem permissão para gerir esta marcação.", "erro")
+            return redirect(url_for("index"))
+        try:
+            valor = int(request.form.get("valor") or 0)
+            valor = max(0, min(valor, 999_999))
+        except (ValueError, TypeError):
+            valor = 0
+        db.terminar_trabalho(id, valor)
+        _blog("TERMINAR", bid=ag["barbearia_id"], ag_id=id, valor=valor)
+        _invalidar_idx(ag["barbearia_id"])
+        try:
+            nota_raw = request.form.get("avaliacao")
+            if nota_raw:
+                nota = int(nota_raw)
+                if nota not in (1, 2, 3, 4, 5):
+                    raise ValueError("nota fora do intervalo")
+                db.guardar_avaliacao(id, ag["barbearia_id"], nota)
+        except (ValueError, TypeError):
+            pass
         return redirect(url_for("index"))
 
 
@@ -363,12 +456,14 @@ def register(app):
             db.cancelar_agendamento(id, incluir_em_andamento=True)
             _blog("CANCELAR", bid=ag["barbearia_id"], ag_id=id, uid=session.get("user_id"))
             _invalidar_idx(ag["barbearia_id"])
-            # Notificar fila de espera
+            # Notificar fila de espera — push ao próximo cliente se tiver subscrição
             try:
                 data_cancelada = ag["data_hora"][:10]
-                db.espera_notificar_proximo(ag["barbearia_id"], data_cancelada, ag.get("barbeiro_id"))
-            except Exception:
-                pass
+                _entrada = db.espera_notificar_proximo(ag["barbearia_id"], data_cancelada, ag.get("barbeiro_id"))
+                if _entrada:
+                    _push_espera(_entrada, ag["barbearia_id"])
+            except Exception as _e:
+                _log(f"ESPERA_NOTIF_ERR ag={id} err={_e}")
         return redirect(url_for("index"))
 
 
@@ -427,10 +522,10 @@ def register(app):
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro {_vprof_r.lower()} ou data."
                 if not erro:
                     with _booking_lock:
-                        livre, conflito = db.verificar_disponibilidade(
+                        livre, hora_conf = db.verificar_disponibilidade(
                             bid_, dh, dur, barbearia_id, excluir_id=id)
                         if not livre:
-                            erro = f"Conflito às {conflito['data_hora'][11:16]}. Escolhe outro horário."
+                            erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
                             db.reagendar_agendamento(id, dh, bid_, sid)
                             db.invalidar_cache_slots(barbearia_id)
@@ -612,3 +707,34 @@ def register(app):
             mimetype="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{nome}"'}
         )
+
+
+    # ── Fila de espera — painel staff ─────────────────────────────────────────
+
+    @app.route("/fila-espera")
+    @chefe_required
+    def fila_espera():
+        barbearia_id = bid()
+        resultado    = db.espera_listar_activa(barbearia_id, limit=100)
+        barbearia    = db.get_barbearia(barbearia_id)
+        vocab        = get_vocab(barbearia.get("tipo") if barbearia else None,
+                                 barbearia.get("vocab_custom") if barbearia else None)
+        # Agrupar por data
+        from collections import defaultdict as _dd
+        por_data = _dd(list)
+        for e in resultado["items"]:
+            por_data[e["data_preferida"]].append(e)
+        grupos = sorted(por_data.items())
+        return render_template("fila_espera.html",
+                               grupos=grupos,
+                               total=resultado["total"],
+                               vocab=vocab)
+
+
+    @app.route("/fila-espera/<int:id>/remover", methods=["POST"])
+    @chefe_required
+    def fila_espera_remover(id):
+        barbearia_id = bid()
+        db.espera_remover(id, barbearia_id)
+        flash("Entrada removida da fila de espera.", "sucesso")
+        return redirect(url_for("fila_espera"))

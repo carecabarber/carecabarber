@@ -40,7 +40,7 @@ _TEL_RE   = re.compile(r'^[\d\s\+\-\(\)]{7,20}$')
 
 # ── Sessão ──────────────────────────────────────────────────────
 
-def bid():
+def bid() -> int | None:
     return session.get("barbearia_id")
 
 
@@ -76,7 +76,7 @@ def _val_hora(v: str) -> bool:
     return bool(v and _HORA_RE.match(v))
 
 
-def _no_passado(data: str, hora: str, barbearia_id=None) -> bool:
+def _no_passado(data: str, hora: str, barbearia_id: int | None = None) -> bool:
     try:
         alvo = datetime.strptime(f"{data} {hora}:00", "%Y-%m-%d %H:%M:%S")
         return alvo < _agora(barbearia_id)
@@ -92,7 +92,7 @@ def _limpar(v: str, maxlen: int = _MAX_NOME) -> str:
     return (v or "").strip()[:maxlen]
 
 
-def _dentro_horario(data: str, hora: str, duracao_min: int, barbearia_id: int) -> tuple:
+def _dentro_horario(data: str, hora: str, duracao_min: int, barbearia_id: int) -> tuple[bool, str | None]:
     try:
         weekday = datetime.strptime(data, "%Y-%m-%d").weekday()
     except (ValueError, TypeError):
@@ -114,49 +114,101 @@ def _dentro_horario(data: str, hora: str, duracao_min: int, barbearia_id: int) -
         return False, f"A barbearia abre às {horario['hora_abertura']}. Escolhe um horário a partir dessa hora."
     if slot_ini >= fecho:
         return False, f"A barbearia fecha às {horario['hora_fecho']}. Escolhe um horário anterior."
+    if slot_fim > fecho:
+        return False, f"O serviço ultrapassaria o horário de fecho ({horario['hora_fecho']}). Escolhe um horário mais cedo."
     return True, None
 
 
-# ── Cache em memória ────────────────────────────────────────────
+# ── Cache em memória ─────────────────────────────────────────────────────────
+# Cada entrada: (val, exp_monotonic, bust_ts)
+#   bust_ts — mtime do ficheiro /tmp/ccb_bust_{bid} no momento do set.
+#   Se outro worker invalidar a cache (toca no ficheiro), o mtime muda e a
+#   entrada é tratada como miss mesmo que ainda não tenha expirado.
+#   Funciona porque o PythonAnywhere usa tmpfs em /tmp (ramdisk) — getmtime é
+#   uma lookup de inode em memória, praticamente gratuito.
 
 _pcache: dict = {}
 _pcache_lock  = threading.Lock()
 _PCACHE_MAX   = 500
 
+def _bust_path(bid: int) -> str:
+    return f"/tmp/ccb_bust_{bid}"
 
-def _pc_get(key):
-    with _pcache_lock:
-        e = _pcache.get(key)
-        if e and time.monotonic() < e[1]:
-            return e[0]
+def _bust_mtime(bid: int) -> float:
+    """Devolve o mtime do ficheiro de bust — 0.0 se não existir."""
+    try:
+        return os.path.getmtime(_bust_path(bid))
+    except OSError:
+        return 0.0
+
+def _bust_touch(bid: int) -> None:
+    """Toca no ficheiro de bust — sinaliza invalidação a todos os workers."""
+    try:
+        with open(_bust_path(bid), 'w') as _f:
+            _f.write(str(time.time()))
+    except OSError:
+        pass
+
+def _bust_bid_from_key(key: str) -> int | None:
+    """Extrai barbearia_id de uma chave de cache com escopo de barbearia.
+
+    Estrutura das chaves:
+      idx_ag:{bid}:{data}        resumo:{bid}:{data}
+      bloq:{bid}:{data}          novos:{bid}:{data}   lemb:{bid}:{data}
+      estado:{role}:{bid}:{data}  ← barbearia_id na posição 2
+    """
+    parts = key.split(':', 2)
+    prefix = parts[0] if parts else ''
+    if prefix in ('idx_ag', 'resumo', 'bloq', 'novos', 'lemb'):
+        return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+    if prefix == 'estado' and len(parts) > 2:
+        mid = parts[1]  # 'chefe' | 'barb' | 'cli'
+        rest = parts[2].split(':', 1)
+        return int(rest[0]) if rest and rest[0].isdigit() else None
     return None
 
 
-def _pc_set(key, val, ttl):
+def _pc_get(key: str) -> object | None:
+    with _pcache_lock:
+        e = _pcache.get(key)
+        if not e:
+            return None
+        val, exp, bust_at_set = e
+        if time.monotonic() >= exp:
+            return None
+        bid = _bust_bid_from_key(key)
+        if bid is not None and _bust_mtime(bid) > bust_at_set:
+            return None   # outro worker invalidou entretanto
+        return val
+
+
+def _pc_set(key: str, val: object, ttl: int | float) -> None:
+    bid = _bust_bid_from_key(key)
+    bust_at_set = _bust_mtime(bid) if bid is not None else 0.0
     with _pcache_lock:
         if len(_pcache) >= _PCACHE_MAX:
             oldest = sorted(_pcache, key=lambda k: _pcache[k][1])[:100]
             for k in oldest:
                 del _pcache[k]
-        _pcache[key] = (val, time.monotonic() + ttl)
+        _pcache[key] = (val, time.monotonic() + ttl, bust_at_set)
 
 
-def _pc_del(prefix):
+def _pc_del(prefix: str) -> None:
     with _pcache_lock:
         keys = [k for k in _pcache if k.startswith(prefix)]
         for k in keys:
             del _pcache[k]
 
 
-def _pc_evict():
+def _pc_evict() -> None:
     now = time.monotonic()
     with _pcache_lock:
-        expired = [k for k, (_, exp) in _pcache.items() if now >= exp]
+        expired = [k for k, e in _pcache.items() if now >= e[1]]
         for k in expired:
             del _pcache[k]
 
 
-def _invalidar_idx(barbearia_id):
+def _invalidar_idx(barbearia_id: int) -> None:
     _pc_del(f"idx_ag:{barbearia_id}:")
     _pc_del(f"resumo:{barbearia_id}:")
     _pc_del(f"bloq:{barbearia_id}:")
@@ -165,6 +217,7 @@ def _invalidar_idx(barbearia_id):
     _pc_del(f"estado:cli:{barbearia_id}:")
     _pc_del(f"novos:{barbearia_id}:")
     _pc_del(f"lemb:{barbearia_id}:")
+    _bust_touch(barbearia_id)   # sinaliza invalidação a todos os workers via /tmp
     db.invalidar_cache_slots(barbearia_id)
 
 
@@ -175,7 +228,7 @@ _booking_lock = threading.Lock()
 
 # ── Helpers de booking ──────────────────────────────────────────
 
-def _parse_booking_form(barbearia_id, barbearia=None, default_sid=None, default_bid=None):
+def _parse_booking_form(barbearia_id: int, barbearia: dict | None = None, default_sid: int | None = None, default_bid: int | None = None) -> tuple:
     try:
         sid = int(request.form.get("servico_id") or default_sid or 0)
     except (ValueError, TypeError):
@@ -208,7 +261,7 @@ def _parse_booking_form(barbearia_id, barbearia=None, default_sid=None, default_
     return sid, bid_, data, hora, dh, s, None
 
 
-def _enriquecer_row(row: dict, servico=None, barbeiro=None, num_visitas=0) -> dict:
+def _enriquecer_row(row: dict, servico: dict | None = None, barbeiro: dict | None = None, num_visitas: int = 0) -> dict:
     s = servico
     b = barbeiro
     row["servico_nome"]     = s["nome"]         if s else "Desconhecido"
@@ -249,7 +302,7 @@ def _enriquecer_row(row: dict, servico=None, barbeiro=None, num_visitas=0) -> di
     return row
 
 
-def enriquecer_lista(agendamentos):
+def enriquecer_lista(agendamentos: list) -> list[dict]:
     if not agendamentos:
         return []
     rows = [dict(a) for a in agendamentos]
@@ -275,7 +328,7 @@ def enriquecer_lista(agendamentos):
     ]
 
 
-def enriquecer(agendamento):
+def enriquecer(agendamento: dict | None) -> dict | None:
     return enriquecer_lista([agendamento])[0] if agendamento else None
 
 

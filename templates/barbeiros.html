@@ -15,6 +15,11 @@
             <input type="text" name="nome" placeholder="Ex: Carlos"
                    required autocapitalize="words" autocomplete="off">
         </div>
+        <div class="field">
+            <label>Telefone (WhatsApp) — opcional</label>
+            <input type="tel" name="telefone" placeholder="ex: 991 23 45 6"
+                   autocomplete="tel" inputmode="tel">
+        </div>
         <div style="display:flex;align-items:flex-end">
             <button type="submit" class="btn btn-primary" style="white-space:nowrap">+ Adicionar</button>
         </div>
@@ -52,6 +57,12 @@
                         · <span style="{{ 'color:var(--green)' if b.ativo else 'color:var(--red)' }}">
                             {{ 'Ativo' if b.ativo else 'Inativo' }}
                         </span>
+                        {% if b.telefone %}
+                        · <a href="https://wa.me/{{ '238' if b.telefone|replace(' ','')|length == 7 else '' }}{{ b.telefone|replace(' ','') }}"
+                             target="_blank" style="color:var(--accent);font-size:0.72rem;text-decoration:none">
+                            📱 {{ b.telefone | tel }}
+                        </a>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -67,10 +78,11 @@
                 {% if b.mesa_token %}
                 <button class="btn btn-outline-small js-toggle-panel" data-panel="qr-{{ b.id }}">QR Mesa</button>
                 {% endif %}
-                <form action="{{ url_for('toggle_barbeiro', id=b.id) }}" method="post" style="margin:0">
+                <form action="{{ url_for('toggle_barbeiro', id=b.id) }}" method="post" style="margin:0"
+                      title="{{ 'Desativar' if b.ativo else 'Ativar' }} {{ b.nome }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn {{ 'btn-cancel' if b.ativo else 'btn-iniciar' }}" style="padding:7px 10px">
-                        {{ '⏸' if b.ativo else '▶' }}
+                    <button type="submit" class="srv-toggle {{ 'srv-toggle-on' if b.ativo else 'srv-toggle-off' }}">
+                        <span class="srv-toggle-knob"></span>
                     </button>
                 </form>
                 {% if b.id != session.get('user_id') %}
@@ -85,9 +97,9 @@
             </div>
         </div>
 
-        <!-- Painel: Editar nome -->
+        <!-- Painel: Editar nome + telefone -->
         <div id="edit-{{ b.id }}" class="barb-panel" style="display:none">
-            <div class="barb-panel-titulo">Editar nome</div>
+            <div class="barb-panel-titulo">Editar</div>
             <form action="{{ url_for('editar_barbeiro', id=b.id) }}" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="field-row">
@@ -96,8 +108,14 @@
                         <input type="text" name="nome" value="{{ b.nome }}"
                                required autocapitalize="words" autocomplete="off">
                     </div>
+                    <div class="field">
+                        <label>Telefone (WhatsApp)</label>
+                        <input type="tel" name="telefone" value="{{ b.telefone or '' }}"
+                               placeholder="ex: 991 23 45 6"
+                               autocomplete="tel" inputmode="tel">
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">Guardar nome</button>
+                <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">Guardar</button>
             </form>
         </div>
 

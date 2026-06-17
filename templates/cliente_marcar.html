@@ -149,6 +149,23 @@
     const horaBadge   = document.getElementById("hora-badge");
     const btnMarcar   = document.getElementById("btn-marcar");
 
+    // ── Auto-selecção de serviço via ?s=<id> (vindo do botão "Repetir") ──────
+    (function() {
+        const sid = new URLSearchParams(window.location.search).get("s");
+        if (sid && selServico) {
+            const opt = selServico.querySelector('option[value="' + sid + '"]');
+            if (opt) {
+                selServico.value = sid;
+                durLabel.textContent = (duracoes[sid] || 0) + " min";
+                // Scroll suave para o campo de data (próximo passo natural)
+                setTimeout(function() {
+                    const el = document.getElementById("data");
+                    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                }, 300);
+            }
+        }
+    })();
+
     selServico.addEventListener("change", () => {
         durLabel.textContent = (duracoes[selServico.value] || 0) + " min";
         carregarSlots();

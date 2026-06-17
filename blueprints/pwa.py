@@ -4,7 +4,7 @@ import database as db
 from helpers import _log
 
 
-def register(app, app_start_ref, indices_prontos_ref):
+def register(app, app_start_ref: float, indices_prontos_ref: object) -> None:
     """
     app_start_ref: reference to _APP_START float
     indices_prontos_ref: reference to _indices_prontos threading.Event

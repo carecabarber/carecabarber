@@ -78,7 +78,11 @@ def ctx():
         db_module.terminar_trabalho(ag_id)
 
     # Um agendamento activo (futuro) para slots
-    amanha = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    # Usar o próximo dia aberto (excluir domingo=6) — o teste falha se "amanhã" for domingo
+    _offset = 1
+    while (datetime.now() + timedelta(days=_offset)).weekday() == 6:
+        _offset += 1
+    amanha = (datetime.now() + timedelta(days=_offset)).strftime("%Y-%m-%d")
     ag_futuro = db_module.criar_agendamento(
         "Cliente Futuro", svc_id,
         f"{amanha} 10:00:00",

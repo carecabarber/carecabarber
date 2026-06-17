@@ -75,6 +75,52 @@
             </div>
         </div>
 
+        {% if fidelidade %}
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;
+                    padding:14px 16px;margin-bottom:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <span style="font-size:0.78rem;font-weight:700;color:var(--accent);letter-spacing:.04em">🎁 FIDELIDADE</span>
+                <span style="font-size:0.72rem;color:var(--text2)">{{ fidelidade.visitas }} visita{{ 's' if fidelidade.visitas != 1 else '' }}</span>
+            </div>
+            {% if fidelidade.ciclo == 0 and fidelidade.visitas > 0 %}
+            {# Acabou de completar um ciclo — CTA directa para nova marcação #}
+            <div style="text-align:center;padding:6px 0 10px">
+                <div style="font-size:1rem;font-weight:800;color:var(--green);margin-bottom:8px">
+                    🎉 Prémio disponível!
+                </div>
+                <div style="font-size:0.82rem;color:var(--text2);margin-bottom:12px">
+                    {{ fidelidade.premio }}
+                </div>
+                <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
+                   class="btn btn-primary btn-full"
+                   style="display:flex;justify-content:center;padding:12px;font-size:0.9rem;
+                          background:var(--green);border-color:var(--green)">
+                    Nova marcação →
+                </a>
+            </div>
+            {% else %}
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
+                {% for i in range(fidelidade.target) %}
+                <div style="width:28px;height:28px;border-radius:50%;
+                            background:{% if i < fidelidade.ciclo %}var(--accent){% else %}var(--surface3){% endif %};
+                            border:2px solid {% if i < fidelidade.ciclo %}var(--accent){% else %}var(--border){% endif %};
+                            display:flex;align-items:center;justify-content:center;font-size:0.65rem">
+                    {% if i < fidelidade.ciclo %}✓{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <div style="font-size:0.78rem;color:var(--text2)">
+                Faltam <strong style="color:var(--text)">{{ fidelidade.proximo_em }}</strong> visita{{ 's' if fidelidade.proximo_em != 1 else '' }} para: <em>{{ fidelidade.premio }}</em>
+            </div>
+            {% endif %}
+            {% if fidelidade.ganhos > 0 %}
+            <div style="font-size:0.7rem;color:var(--text2);margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+                Já ganhaste {{ fidelidade.ganhos }} prémio{{ 's' if fidelidade.ganhos != 1 else '' }} 🏆
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div style="display:flex;gap:10px;margin-bottom:20px">
             <a href="{{ url_for('cliente_marcar', slug=barbearia.slug) }}"
                class="btn btn-primary btn-full" style="flex:1;justify-content:center;display:flex">
@@ -103,76 +149,58 @@
                     <div class="item-servico">
                         {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}Qualquer {{ vocab.profissional | lower }}{% endif %}
                         · {{ a.duracao_estimada }} min est.
+                        {% if a.preco %} · {{ a.preco | moeda }} {{ moeda_simbolo }}{% endif %}
                     </div>
+                    {% if a.status == 'em_andamento' %}
+                    <div style="font-size:0.78rem;font-weight:700;margin-top:3px;color:var(--accent)">
+                        {% if a.valor %}
+                        💳 A pagar: {{ a.valor | moeda }} {{ moeda_simbolo }}
+                        {% elif a.preco %}
+                        💳 Preço: ~{{ a.preco | moeda }} {{ moeda_simbolo }}
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if a.barbeiro_telefone %}
+                    <div style="margin-top:4px">
+                        <a href="https://wa.me/{{ '238' if a.barbeiro_telefone|replace(' ','')|length == 7 else '' }}{{ a.barbeiro_telefone|replace(' ','') }}"
+                           target="_blank"
+                           style="font-size:0.72rem;color:var(--green);text-decoration:none;font-weight:600">
+                            💬 WhatsApp {{ a.barbeiro_nome }}
+                        </a>
+                    </div>
+                    {% endif %}
                     {% if a.minutos_ate is defined and a.minutos_ate >= 0 and a.minutos_ate <= 30 %}
                     <div class="lembrete-badge">⏰ Em {{ a.minutos_ate }} min</div>
                     {% endif %}
                 </div>
-                <div class="item-acoes" style="flex-direction:column;gap:5px;align-items:stretch;min-width:90px">
+                <div class="item-acoes" style="min-width:110px">
                     {% if a.status == 'em_andamento' %}
-                    <!-- Terminar via QR -->
+                    <!-- Terminar via QR (único método — preço definido pelo serviço) -->
                     <button class="btn btn-qr-scan btn-terminar-qr"
                             data-ag-id="{{ a.id }}" data-acao="terminar"
-                            title="Escanear QR para terminar"
+                            title="Escanear QR da mesa para terminar"
                             style="width:100%">
-
-                    </button>
-                    <!-- Terminar direto -->
-                    <button class="btn btn-terminar-qr js-terminar-direto"
-                            data-ag-id="{{ a.id }}"
-                            data-preco="{{ a.preco or 0 }}"
-                            data-url="{{ url_for('cliente_terminar_servico', slug=barbearia.slug, id=a.id) }}"
-                            style="width:100%;font-size:0.8rem">
-                        Terminar
+                        📷 Terminar
                     </button>
                     {% else %}
-                    <!-- Linha 1: QR + Iniciar -->
-                    <div style="display:flex;gap:5px">
-                        <button class="btn btn-qr-scan"
-                                data-ag-id="{{ a.id }}" data-acao="iniciar"
-                                title="Escanear QR para iniciar">
-
-                        </button>
-                        <form action="{{ url_for('cliente_iniciar_servico', slug=barbearia.slug, id=a.id) }}"
-                              method="post" style="flex:1"
-                              data-confirm="Iniciar serviço de {{ a.servico_nome | e }} agora?">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-primary"
-                                    style="width:100%;font-size:0.78rem;padding:6px 10px">
-                                Iniciar
-                            </button>
-                        </form>
-                    </div>
-                    <!-- Linha 2: Reagendar + Cancelar -->
-                    <div style="display:flex;gap:5px">
-                        <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
-                           class="btn btn-reagendar" style="flex:1;text-align:center"></a>
-                        <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
-                              method="post" style="flex:1"
-                              data-confirm="Cancelar marcação de {{ a.servico_nome | e }}?">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-cancel" style="width:100%">✕ Cancelar</button>
-                        </form>
-                    </div>
+                    <!-- QR para iniciar -->
+                    <button class="btn btn-qr-scan"
+                            data-ag-id="{{ a.id }}" data-acao="iniciar"
+                            title="Escanear QR da mesa para iniciar"
+                            style="width:100%">
+                        📷 Iniciar
+                    </button>
+                    <!-- Reagendar + Cancelar -->
+                    <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
+                       class="btn btn-reagendar" style="width:100%;text-align:center">✏️ Reagendar</a>
+                    <form action="{{ url_for('cliente_cancelar', slug=barbearia.slug, id=a.id) }}"
+                          method="post" style="width:100%"
+                          data-confirm="Cancelar marcação de {{ a.servico_nome | e }}?">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-cancel" style="width:100%">✕ Cancelar</button>
+                    </form>
                     {% endif %}
                 </div>
-                {% if a.status == 'em_andamento' %}
-                <!-- Valor em destaque — visível antes do QR; editável se necessário -->
-                <div style="flex-basis:100%;padding:10px 14px 10px;
-                            border-top:1px solid var(--border);
-                            display:flex;align-items:center;gap:12px">
-                    <span style="font-size:0.85rem;color:var(--text2);font-weight:600;white-space:nowrap">
-                        Valor cobrado
-                    </span>
-                    <input type="number" class="valor-card-input" data-ag-id="{{ a.id }}"
-                           value="{{ a.preco or '' }}" min="0" max="999999" placeholder="0"
-                           style="flex:1;max-width:120px;font-size:1.2rem;font-weight:800;
-                                  text-align:center;padding:7px 10px;border-radius:8px;
-                                  border:2px solid var(--accent);background:var(--surface3);
-                                  color:var(--text)">
-                    <span style="font-size:0.85rem;color:var(--text2)">{{ moeda_simbolo }}</span>
-                </div>
-                {% endif %}
             </li>
             {% endfor %}
         </ul>
@@ -192,16 +220,23 @@
                     <div class="item-servico">
                         {% if a.barbeiro_nome != '—' %}{{ a.barbeiro_nome }}{% else %}—{% endif %}
                     </div>
+                    {% if a.status == 'concluido' and a.valor %}
+                    <div style="font-size:0.8rem;font-weight:700;color:var(--accent);margin-top:3px">
+                        💳 Pago: {{ a.valor | moeda }} {{ moeda_simbolo }}
+                    </div>
+                    {% endif %}
                 </div>
+                {% if a.status != 'concluido' %}
                 <div class="item-acoes">
-                    {% if a.status == 'concluido' %}
-                    <span class="badge badge-done">✓</span>
-                    {% elif a.status == 'cancelado' %}
+                    {% if a.status == 'cancelado' %}
                     <span class="badge badge-cancel">Cancelado</span>
                     {% elif a.status == 'em_andamento' %}
                     <span class="badge badge-active">A decorrer</span>
+                    {% elif a.status == 'nao_compareceu' %}
+                    <span class="badge badge-noshow">FALTA</span>
                     {% endif %}
                 </div>
+                {% endif %}
             </li>
             {% endfor %}
         </ul>
@@ -213,35 +248,6 @@
         </div>
         {% endif %}
     </main>
-
-    <!-- Modal: Terminar serviço directo (com valor) -->
-    <div id="terminar-direto-modal" style="display:none;position:fixed;inset:0;z-index:10000;
-         background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:16px">
-        <div style="background:var(--surface2);border-radius:16px;padding:24px 20px;
-                    width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
-            <div style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Terminar serviço</div>
-            <div style="font-size:0.82rem;color:var(--text2);margin-bottom:18px">
-                Indica o valor cobrado ao cliente.
-            </div>
-            <div class="field" style="margin-bottom:20px">
-                <label>Valor cobrado ({{ moeda_simbolo }})</label>
-                <input type="number" id="terminar-direto-valor" min="0" max="999999"
-                       placeholder="0" style="font-size:1.1rem;text-align:center">
-            </div>
-            <form id="terminar-direto-form" method="post" style="margin:0">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="valor" id="terminar-direto-form-valor" value="0">
-                <button type="submit" class="btn btn-primary btn-full" style="margin-bottom:10px">
-                    Confirmar e terminar
-                </button>
-            </form>
-            <button id="terminar-direto-cancelar" style="width:100%;background:none;
-                    border:1px solid var(--border);color:var(--text2);padding:10px;
-                    border-radius:10px;font-size:0.88rem;cursor:pointer">
-                Cancelar
-            </button>
-        </div>
-    </div>
 
     <!-- Modal Scanner QR -->
     <div id="qr-modal" style="display:none;position:fixed;inset:0;z-index:9999;
@@ -346,13 +352,7 @@
                         msg.textContent = _acao === "terminar"
                             ? "QR lido! A terminar…"
                             : "QR lido! A processar…";
-                        // Ler valor do campo visível no cartão (para terminar)
-                        let valor = 0;
-                        if (_acao === "terminar") {
-                            const cardInput = document.querySelector('.valor-card-input[data-ag-id="' + _agId + '"]');
-                            valor = cardInput ? Math.max(0, parseInt(cardInput.value || "0") || 0) : 0;
-                        }
-                        chamarAPI(match[1], valor).catch(() => {
+                        chamarAPI(match[1]).catch(() => {
                             msg.textContent = "Erro inesperado. Tenta novamente.";
                             _processando = false;
                         });
@@ -366,10 +366,9 @@
             _rafId = requestAnimationFrame(scanFrame);
         }
 
-        async function chamarAPI(mesaToken, valor) {
+        async function chamarAPI(mesaToken) {
             const endpoint = "/mesa/" + mesaToken + "/" + _acao;
             const body = { ag_id: _agId };
-            if (_acao === "terminar") body.valor = valor;
             try {
                 const resp = await fetch(endpoint, {
                     method: "POST",
@@ -398,34 +397,6 @@
             const btn = e.target.closest(".btn-qr-scan[data-ag-id]");
             if (!btn) return;
             iniciarScanner(parseInt(btn.dataset.agId), btn.dataset.acao);
-        });
-    })();
-
-    // ── Terminar direto (modal com valor) ────────────────────
-    (function() {
-        const modal      = document.getElementById("terminar-direto-modal");
-        const form       = document.getElementById("terminar-direto-form");
-        const valorInput = document.getElementById("terminar-direto-valor");
-        const hiddenValor= document.getElementById("terminar-direto-form-valor");
-        document.getElementById("terminar-direto-cancelar").addEventListener("click", function() {
-            modal.style.display = "none";
-        });
-        document.addEventListener("click", function(e) {
-            const btn = e.target.closest(".js-terminar-direto[data-url]");
-            if (!btn) return;
-            form.action = btn.dataset.url;
-            // Ler valor do campo visível no cartão
-            const agId = btn.dataset.agId;
-            const cardInput = agId ? document.querySelector('.valor-card-input[data-ag-id="' + agId + '"]') : null;
-            const cardVal = cardInput ? cardInput.value : null;
-            valorInput.value = (cardVal !== null && cardVal !== "")
-                ? cardVal
-                : (btn.dataset.preco && btn.dataset.preco !== "0" ? btn.dataset.preco : "");
-            modal.style.display = "flex";
-            setTimeout(() => valorInput.focus(), 100);
-        });
-        form.addEventListener("submit", function() {
-            hiddenValor.value = Math.max(0, parseInt(valorInput.value || "0") || 0);
         });
     })();
 
@@ -520,13 +491,7 @@
                 <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:6px">{{ vocab.servico }} em curso</div>
                 <div style="font-size:0.85rem;color:var(--text2);margin-bottom:6px" id="wi-ativo-info"></div>
                 <div style="font-size:0.78rem;color:var(--text2);margin-bottom:16px">
-                    Quando acabar, indica o valor e escaneia o QR para terminar.
-                </div>
-                <div class="field" style="margin-bottom:16px;text-align:left">
-                    <label>Valor cobrado ({{ moeda_simbolo }})</label>
-                    <input type="number" id="wi-ativo-valor" min="0" max="999999"
-                           placeholder="0" autocomplete="off"
-                           style="font-size:1rem;text-align:center">
+                    Quando o teu atendimento acabar, escaneia o QR para confirmar.
                 </div>
                 <button id="wi-btn-terminar-ativo" class="btn btn-full"
                         style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:var(--red);padding:14px">
@@ -628,42 +593,34 @@
                 })).json();
                 if (r.ok) {
                     _agId = r.ag_id;
-                    const selEl = document.getElementById("wi-servico");
-                    const selOpt = selEl ? selEl.options[selEl.selectedIndex] : null;
-                    const preco = selOpt ? parseFloat(selOpt.dataset.preco || "0") || 0 : 0;
-                    localStorage.setItem(LS_KEY, JSON.stringify({ agId: _agId, mesaToken: _mesaToken, nome: r.cliente, servico: r.servico_nome, preco: preco }));
-                    mostrarAtivo(r.cliente, r.servico_nome, preco);
+                    localStorage.setItem(LS_KEY, JSON.stringify({ agId: _agId, mesaToken: _mesaToken, nome: r.cliente, servico: r.servico_nome }));
+                    mostrarAtivo(r.cliente, r.servico_nome);
                 } else { formMsg.textContent = r.error || "Erro."; formMsg.style.display = "block"; }
             } catch(e) { formMsg.textContent = "Erro de ligação."; formMsg.style.display = "block"; }
             this.disabled = false; this.textContent = "Começar agora";
         });
-        function mostrarAtivo(nome, servico, preco) {
+        function mostrarAtivo(nome, servico) {
             document.getElementById("wi-ativo-info").textContent = nome + " · " + servico;
-            const valorInp = document.getElementById("wi-ativo-valor");
-            if (valorInp) valorInp.value = preco > 0 ? preco : "";
             ativoMsg.textContent = ""; mostrarEcrã(ecrãAtivo);
         }
         document.getElementById("wi-btn-terminar-ativo").addEventListener("click", function() {
             _modoTerminar = true; mostrarEcrã(ecrãScan); abrirCamera();
         });
         async function terminarServico() {
-            const valorInp = document.getElementById("wi-ativo-valor");
-            const valor = valorInp ? Math.max(0, parseInt(valorInp.value || "0") || 0) : 0;
+            // Não enviar valor — preço definido pelo serviço no servidor (anti-fraude)
             ativoMsg.textContent = "QR lido! A terminar…"; mostrarEcrã(ecrãAtivo);
             try {
                 const r = await (await fetch("/mesa/" + _mesaToken + "/terminar", {
                     method: "POST", headers: {"Content-Type":"application/json"},
-                    body: JSON.stringify({ ag_id: _agId, valor })
+                    body: JSON.stringify({ ag_id: _agId })
                 })).json();
                 if (r.ok) {
                     localStorage.removeItem(LS_KEY);
                     ativoMsg.textContent = "Concluído! Obrigado.";
                     setTimeout(fecharModal, 2000);
                 } else {
-                    // Se serviço já não está em andamento, limpar sessão
-                    if (r.error && (r.error.includes("não encontrado") || r.error.includes("em andamento"))) {
-                        localStorage.removeItem(LS_KEY);
-                    }
+                    // Limpar sessão sempre em caso de erro — evitar sessão órfã no browser
+                    localStorage.removeItem(LS_KEY);
                     ativoMsg.textContent = "" + (r.error || "Erro ao terminar.");
                 }
             } catch(e) { ativoMsg.textContent = "Erro de ligação."; }
@@ -676,7 +633,7 @@
                 // Se o serviço já não existir, terminarServico() retorna erro e limpa a sessão.
                 if (s && s.agId && s.mesaToken) {
                     _agId = s.agId; _mesaToken = s.mesaToken;
-                    mostrarAtivo(s.nome, s.servico, s.preco || 0); return;
+                    mostrarAtivo(s.nome, s.servico); return;
                 }
             } catch(e) {}
             _modoTerminar = false; mostrarEcrã(ecrãScan); abrirCamera();

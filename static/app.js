@@ -13,6 +13,17 @@ function abrirModal(id, cliente, duracaoEstimada, servicoNome, precoServico) {
     // Pré-preencher valor com o preço do serviço (editável pelo barbeiro)
     const inp = document.getElementById("modalValor");
     inp.value = (precoServico && precoServico > 0) ? precoServico : "";
+    // Mostrar preço base do serviço
+    const _refBox = document.getElementById("modalPrecoRef");
+    const _refVal = document.getElementById("modalPrecoVal");
+    if (_refBox && _refVal) {
+        if (precoServico > 0) {
+            _refVal.textContent = precoServico.toLocaleString("pt-PT") + " " + (window._MOEDA_SIM || "");
+            _refBox.style.display = "flex";
+        } else {
+            _refBox.style.display = "none";
+        }
+    }
     // Limpar avaliação anterior
     setStar(0);
     document.getElementById("modalOverlay").classList.add("open");
@@ -62,7 +73,8 @@ function confirmarTerminar() {
     }
     valorInput.value = document.getElementById("modalValor").value || "0";
     // Incluir avaliação no form se preenchida e válida (1-5)
-    const avVal = document.getElementById("modalAvaliacao")?.value;
+    const _avEl = document.getElementById("modalAvaliacao");
+    const avVal = _avEl ? _avEl.value : "";
     const avSafe = avVal && /^[1-5]$/.test(avVal) ? avVal : "";
     let avInp = form.querySelector('[name="avaliacao"]');
     if (!avInp) {
@@ -86,8 +98,8 @@ function toggleFab() {
 document.addEventListener("click", e => {
     const group = document.querySelector(".fab-group");
     if (group && !group.contains(e.target)) {
-        document.getElementById("fabBtn")?.classList.remove("open");
-        document.getElementById("fabMenu")?.classList.remove("open");
+        var _fb = document.getElementById("fabBtn"); if (_fb) _fb.classList.remove("open");
+        var _fm = document.getElementById("fabMenu"); if (_fm) _fm.classList.remove("open");
     }
 });
 
@@ -381,12 +393,19 @@ document.addEventListener("DOMContentLoaded", () => {
             return segundosBase + Math.floor((Date.now() - initMs) / 1000);
         }
 
+        const barEl = document.getElementById("bar-" + id);
+
         function atualizar() {
             const s = segundosDecorridos();
             el.textContent = formatar(s);
             const emAtraso = estimado > 0 && s > estimado;
             el.classList.toggle("em-atraso", emAtraso);
             if (alertaEl) alertaEl.style.display = emAtraso ? "block" : "none";
+            if (barEl && estimado > 0) {
+                const pct = Math.min(100, Math.round(s / estimado * 100));
+                barEl.style.width = pct + "%";
+                barEl.style.background = emAtraso ? "var(--red, #ef4444)" : "var(--accent)";
+            }
             if (emAtraso && !atrasoNotificado.has(id)) {
                 atrasoNotificado.add(id);
                 _persistirAtrasos();
@@ -520,12 +539,12 @@ window.addEventListener("pageshow", e => {
     function box()     { return document.querySelector(".modal-box"); }
 
     document.addEventListener("touchstart", e => {
-        if (overlay()?.classList.contains("open"))
+        var _ov = overlay(); if (_ov && _ov.classList.contains("open"))
             _ty0 = e.touches[0].clientY;
     }, { passive: true });
 
     document.addEventListener("touchmove", e => {
-        if (!overlay()?.classList.contains("open")) return;
+        var _ov = overlay(); if (!_ov || !_ov.classList.contains("open")) return;
         const dy = e.touches[0].clientY - _ty0;
         if (dy > 0) {
             const b = box();
@@ -534,7 +553,7 @@ window.addEventListener("pageshow", e => {
     }, { passive: true });
 
     document.addEventListener("touchend", e => {
-        if (!overlay()?.classList.contains("open")) return;
+        var _ov = overlay(); if (!_ov || !_ov.classList.contains("open")) return;
         const dy = e.changedTouches[0].clientY - _ty0;
         const b = box();
         if (dy > 90) {
@@ -562,7 +581,8 @@ function injetarLinhaAgora() {
 
     let pontoInsercao = null;
     for (const item of items) {
-        const txt = item.querySelector(".item-hora")?.textContent?.trim()?.match(/^\d{2}:\d{2}/);
+        var _ih = item.querySelector(".item-hora");
+        const txt = _ih ? (_ih.textContent || "").trim().match(/^\d{2}:\d{2}/) : null;
         if (!txt) continue;
         const [h, m] = txt[0].split(":").map(Number);
         if (h * 60 + m > minAtual) { pontoInsercao = item; break; }
@@ -599,3 +619,65 @@ function setSlotLoading(listEl, wrapEl) {
     wrapEl.style.display = "block";
     listEl.innerHTML = `<div class="slots-loading"><div class="spinner"></div> A verificar horários…</div>`;
 }
+
+// ── Toggle tema claro/escuro ─────────────────────────────────
+(function() {
+    var html = document.documentElement;
+
+    // Aplicar tema guardado (executado imediatamente, antes do paint)
+    if (localStorage.getItem('cb-theme') === 'light') {
+        html.setAttribute('data-theme', 'light');
+    }
+
+    function _aplicarTema() {
+        var isLight = html.getAttribute('data-theme') === 'light';
+        var label   = document.getElementById('tema-label');
+        var btn     = document.getElementById('btn-tema');
+        if (label) label.textContent = isLight ? '☀ Claro' : '🌙 Escuro';
+        if (btn) {
+            btn.style.background = isLight ? '#f0b429' : '';
+            btn.style.color      = isLight ? '#000'    : '';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        _aplicarTema();
+        var btn = document.getElementById('btn-tema');
+        if (btn) {
+            btn.addEventListener('click', function() {
+                var isLight = html.getAttribute('data-theme') === 'light';
+                if (isLight) {
+                    html.removeAttribute('data-theme');
+                    localStorage.setItem('cb-theme', 'dark');
+                } else {
+                    html.setAttribute('data-theme', 'light');
+                    localStorage.setItem('cb-theme', 'light');
+                }
+                _aplicarTema();
+            });
+        }
+    });
+})();
+
+// ── Loading state global — form submits ───────────────────────────────────────
+// Quando um form é submetido, o botão de submit fica desactivado e ganha um
+// spinner inline. Excepções: forms hidden (modais, form-terminar-*) e forms
+// cujo botão já tem a classe btn-loading (submissões em curso / modais próprios).
+// Guard de 10 s: re-activa o botão caso a página não recarregue (erro de rede).
+(function () {
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        // Ignorar forms hidden — forma-terminar-* e outros geridos por JS
+        if (form.style.display === 'none' || form.hidden) return;
+        // Encontrar botão submit (não optado-fora com data-no-load)
+        var btn = form.querySelector('button[type="submit"]:not([data-no-load])');
+        if (!btn || btn.disabled) return;
+        btn.classList.add('btn-loading');
+        btn.disabled = true;
+        // Re-activar após 10 s (guard contra erros de rede sem redirect)
+        setTimeout(function () {
+            btn.classList.remove('btn-loading');
+            btn.disabled = false;
+        }, 10000);
+    });
+})();

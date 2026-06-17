@@ -4,6 +4,7 @@
 import sqlite3
 import os
 import secrets
+import logging
 import unicodedata
 import re
 import threading
@@ -19,14 +20,14 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim"
+_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
 _slots_cache: dict = {}
 _slots_cache_lock = threading.Lock()
 
-def _slots_cache_get(key):
+def _slots_cache_get(key: str) -> list | None:
     with _slots_cache_lock:
         entry = _slots_cache.get(key)
         if entry and time.monotonic() < entry["exp"]:
@@ -35,7 +36,7 @@ def _slots_cache_get(key):
 
 _SLOTS_CACHE_MAX = 300   # máximo de entradas — evita OOM em PythonAnywhere
 
-def _slots_cache_set(key, data, ttl):
+def _slots_cache_set(key: str, data: list, ttl: int | float) -> None:
     with _slots_cache_lock:
         # Se cache cheio, apagar primeiro as entradas já expiradas; depois as mais antigas
         if len(_slots_cache) >= _SLOTS_CACHE_MAX:
@@ -61,7 +62,7 @@ ST_NAO_COMP     = "nao_compareceu"
 ST_WALKIN       = "walk-in"
 
 
-def invalidar_cache_slots(barbearia_id=None):
+def invalidar_cache_slots(barbearia_id: int | str | None = None) -> None:
     """Invalida toda a cache de slots (ou apenas de uma barbearia).
     Sem argumentos: limpa entradas expiradas (GC periódico)."""
     with _slots_cache_lock:
@@ -78,7 +79,7 @@ def invalidar_cache_slots(barbearia_id=None):
                 del _slots_cache[k]
 
 
-def invalidar_cache_slots_completo():
+def invalidar_cache_slots_completo() -> None:
     """Limpa completamente a cache de slots (usar com cuidado)."""
     with _slots_cache_lock:
         _slots_cache.clear()
@@ -88,11 +89,11 @@ def invalidar_cache_slots_completo():
 # Assim cada thread usa o fuso do dispositivo que fez o pedido.
 _tz_local = threading.local()
 
-def set_request_tz(tz_name: str | None):
+def set_request_tz(tz_name: str | None) -> None:
     """Guarda o nome do fuso horário para este pedido/thread."""
     _tz_local.tz_name = (tz_name or "").strip()
 
-def _agora(barbearia_id=None) -> datetime:
+def _agora(barbearia_id: int | None = None) -> datetime:
     """Hora actual no fuso da barbearia (default: Atlantic/Cape_Verde).
     Independente do fuso do servidor."""
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -115,7 +116,14 @@ _TZ_CACHE_TTL = 300    # 5 minutos
 
 _tz_cache_lock = threading.Lock()
 
-def get_barbearia_tz(barbearia_id) -> str:
+# ── Cache de configurações por barbearia ─────────────────────────────────────
+# get_config() é chamado em cada request por context processors (moeda, vocab, etc.).
+# Cache com TTL de 60 s elimina round-trips NFS repetidos para dados que raramente mudam.
+_config_cache: dict = {}   # {(barbearia_id, chave): (valor, expires_monotonic)}
+_config_cache_lock = threading.Lock()
+_CONFIG_CACHE_TTL = 60  # segundos
+
+def get_barbearia_tz(barbearia_id: int) -> str:
     """Devolve o nome do fuso horário configurado para esta barbearia.
     Default: Atlantic/Cape_Verde.  Lê config 'timezone'."""
     with _tz_cache_lock:
@@ -128,7 +136,7 @@ def get_barbearia_tz(barbearia_id) -> str:
     return val
 
 
-def set_barbearia_tz(barbearia_id, tz_name: str):
+def set_barbearia_tz(barbearia_id: int, tz_name: str) -> None:
     """Guarda o fuso horário da barbearia e limpa o cache."""
     set_config("timezone", tz_name, barbearia_id)
     with _tz_cache_lock:
@@ -152,8 +160,20 @@ _HORARIO_PADRAO = [
 # arranque do processo e reutilizá-la em todos os pedidos HTTP.
 # check_same_thread=False: uWSGI single-worker — só um thread activo de cada vez.
 _CONN: sqlite3.Connection | None = None
-_CONN_LOCK = threading.RLock()   # serializa leituras/escritas (_read/_write)
-_INIT_LOCK = threading.Lock()    # serializa APENAS a inicialização da conexão
+_CONN_LOCK = threading.RLock()   # serializa escritas (_write/_write_exclusive)
+_INIT_LOCK = threading.Lock()    # serializa APENAS a inicialização da write conn
+
+# Conexão dedicada a leituras — lock próprio, independente de _CONN_LOCK.
+# Resultado: reads de request handlers e writes do _thread_limpeza não se
+# bloqueiam mutuamente; SQLite resolve conflitos a nível de ficheiro via busy_timeout.
+_READ_CONN: sqlite3.Connection | None = None
+_READ_LOCK = threading.RLock()   # serializa leituras (_read)
+_READ_INIT_LOCK = threading.Lock()
+
+# ── Monitorização de contenção no lock ──────────────────────
+_LOCK_WAIT_WARN_S = 1.0
+_lock_wait_total  = 0.0
+_lock_wait_log    = logging.getLogger("db.conn")
 
 
 def _connect() -> sqlite3.Connection:
@@ -168,14 +188,19 @@ def _connect() -> sqlite3.Connection:
     c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=60000")
-    c.execute("PRAGMA synchronous=OFF")  # sem fsync em NFS → commits instantâneos → _CONN_LOCK libertado rapidamente
+    # NORMAL: fsync 1× por commit (antes de apagar o journal) — protege contra
+    # crash do OS. Seguro em NFS com conexão persistente: sem locking_mode=EXCLUSIVE
+    # e sem reconexões, a latência do fsync NFS é < 50ms → aceitável.
+    # OFF foi necessário quando havia reconexões frequentes + EXCLUSIVE; já não se aplica.
+    c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA temp_store=MEMORY")  # ficheiros temp em RAM, nunca no NFS
+    c.execute("PRAGMA mmap_size=0")        # mmap desativado — inseguro em NFS
+    c.execute("PRAGMA cache_size=-4096")   # 4 MB page cache em processo
     return c
 
 
 def get_conn() -> sqlite3.Connection:
-    """Devolve conexão persistente — aberta uma vez por processo, reutilizada sempre.
-    Usa _INIT_LOCK (separado de _CONN_LOCK) para que a inicialização não bloqueie
-    os context managers _read()/_write() que dependem de _CONN_LOCK."""
+    """Devolve conexão de escrita — aberta uma vez por processo."""
     global _CONN
     if _CONN is None:
         with _INIT_LOCK:
@@ -184,32 +209,102 @@ def get_conn() -> sqlite3.Connection:
     return _CONN
 
 
-def _reset_conn():
-    """Fecha e anula a conexão global — usar nos teardowns de testes.
-    Evita ResourceWarning: unclosed database (o GC não precisa fechar)."""
-    global _CONN
-    if _CONN is not None:
-        try:
-            _CONN.close()
-        except Exception:
-            pass
-        _CONN = None
+def _connect_read() -> sqlite3.Connection:
+    """Conexão de leitura em autocommit (isolation_level=None).
+    Cada SELECT vê imediatamente os dados committed pela write conn.
+    Sem isolation_level=None, a conn poderia manter snapshot antigo entre calls."""
+    c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30,
+                        isolation_level=None)
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=60000")
+    c.execute("PRAGMA synchronous=OFF")
+    c.execute("PRAGMA temp_store=MEMORY")
+    c.execute("PRAGMA mmap_size=0")
+    c.execute("PRAGMA cache_size=-4096")
+    c.execute("PRAGMA query_only=ON")   # segurança: bloqueia escritas acidentais
+    return c
 
 
-def _acquire_lock(timeout_por_tentativa: int = 8, tentativas: int = 3, pausa: float = 2.0) -> bool:
-    """Tenta adquirir _CONN_LOCK com retry para absorver picos de NFS lento.
+def _get_read_conn() -> sqlite3.Connection:
+    """Devolve conexão dedicada a leituras — independente da write conn.
 
-    Estratégia:
-    - 3 tentativas × 8s timeout = 24s de janela total
-    - 2s de pausa entre tentativas para dar ao NFS tempo de recuperar
-    - Devolve True se conseguiu, False se esgotou todas as tentativas
+    Detecta automaticamente mudanças em DB_PATH (comum em fixtures de teste)
+    e reconecta quando o path mudou.
     """
+    global _READ_CONN
+    if _READ_CONN is None:
+        with _READ_INIT_LOCK:
+            if _READ_CONN is None:
+                _READ_CONN = _connect_read()
+        return _READ_CONN
+    # Verificar se DB_PATH mudou (fixtures de teste podem alterar DB_PATH)
+    try:
+        current = _READ_CONN.execute(
+            "PRAGMA database_list").fetchone()[2]
+        if current and current != DB_PATH:
+            with _READ_INIT_LOCK:
+                try:
+                    _READ_CONN.close()
+                except Exception:
+                    pass
+                _READ_CONN = _connect_read()
+    except Exception:
+        # Conexão inválida — reconectar
+        with _READ_INIT_LOCK:
+            _READ_CONN = _connect_read()
+    return _READ_CONN
+
+
+def _reset_conn() -> None:
+    """Fecha e anula ambas as conexões — usar nos teardowns de testes."""
+    global _CONN, _READ_CONN
+    for c in (_CONN, _READ_CONN):
+        if c is not None:
+            try:
+                c.close()
+            except Exception:
+                pass
+    _CONN = None
+    _READ_CONN = None
+
+
+def _acquire_rlock(lock: threading.RLock, nome: str,
+                   timeout_por_tentativa: int = 8, tentativas: int = 3,
+                   pausa: float = 2.0) -> bool:
+    """Adquire um RLock com retry e monitorização de espera."""
+    global _lock_wait_total
+    t0 = time.monotonic()
     for _t in range(tentativas):
-        if _CONN_LOCK.acquire(timeout=timeout_por_tentativa):
+        if lock.acquire(timeout=timeout_por_tentativa):
+            espera = time.monotonic() - t0
+            _lock_wait_total += espera
+            if espera >= _LOCK_WAIT_WARN_S:
+                _lock_wait_log.warning(
+                    "DB %s lock: espera %.2fs (total acumulado %.1fs) — "
+                    "considerar optimização de queries ou separação de tenants",
+                    nome, espera, _lock_wait_total)
             return True
         if _t < tentativas - 1:
             time.sleep(pausa)
+    _lock_wait_log.error("DB %s lock: timeout após %d tentativas × %ds",
+                         nome, tentativas, timeout_por_tentativa)
     return False
+
+
+def _acquire_lock(timeout_por_tentativa: int = 8, tentativas: int = 3, pausa: float = 2.0) -> bool:
+    """Adquire o lock de escrita (_CONN_LOCK)."""
+    return _acquire_rlock(_CONN_LOCK, "write", timeout_por_tentativa, tentativas, pausa)
+
+
+def _acquire_read_lock(timeout_por_tentativa: int = 8, tentativas: int = 3, pausa: float = 2.0) -> bool:
+    """Adquire o lock de leitura (_READ_LOCK)."""
+    return _acquire_rlock(_READ_LOCK, "read", timeout_por_tentativa, tentativas, pausa)
+
+
+def _is_nfs_io_error(e: Exception) -> bool:
+    """Detecta erros de I/O do NFS (disk I/O error, unable to open database)."""
+    msg = str(e).lower()
+    return any(k in msg for k in ("disk i/o error", "unable to open database", "database disk image is malformed"))
 
 
 @contextmanager
@@ -217,11 +312,19 @@ def _write():
     # Retry automático: NFS pode estar lento por <5s; 3 tentativas absorvem isso
     if not _acquire_lock():
         raise RuntimeError("DB_TIMEOUT")
+    global _CONN
     conn = get_conn()
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as e:
+        if _is_nfs_io_error(e):
+            # NFS I/O error — forçar reconexão no próximo pedido
+            try:
+                _CONN.close()
+            except Exception:
+                pass
+            _CONN = None
         try:
             conn.rollback()
         except Exception:
@@ -236,12 +339,19 @@ def _write_exclusive():
     """Transação com BEGIN IMMEDIATE — impede race conditions em criação de agendamentos."""
     if not _acquire_lock():
         raise RuntimeError("DB_TIMEOUT")
+    global _CONN
     conn = get_conn()
     try:
         conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as e:
+        if _is_nfs_io_error(e):
+            try:
+                _CONN.close()
+            except Exception:
+                pass
+            _CONN = None
         try:
             conn.rollback()
         except Exception:
@@ -253,33 +363,46 @@ def _write_exclusive():
 
 @contextmanager
 def _read():
-    # Retry automático: absorve picos de NFS lento sem 503 para o utilizador
-    if not _acquire_lock():
+    # Usa _READ_CONN + _READ_LOCK — independente da write conn.
+    # Reads e writes podem progredir sem se bloquear mutuamente;
+    # conflitos SQLite são absorvidos por busy_timeout=60000.
+    if not _acquire_read_lock():
         raise RuntimeError("DB_TIMEOUT")
-    conn = get_conn()
+    global _READ_CONN
+    conn = _get_read_conn()
     try:
         yield conn
+    except Exception as e:
+        if _is_nfs_io_error(e):
+            try:
+                _READ_CONN.close()
+            except Exception:
+                pass
+            _READ_CONN = None
+        raise
     finally:
-        _CONN_LOCK.release()
+        _READ_LOCK.release()
 
 
 # ── Normalização de telemóvel ──────────────────────────────
 
-def normalizar_tel(tel: str) -> str:
-    """Remove espaços, traços e parênteses; elimina prefixo +238/238 de Cabo Verde.
+def normalizar_tel(tel: str | None) -> str:
+    """Remove espaços, traços e parênteses; elimina prefixo +238/00238/238 de Cabo Verde.
     Devolve string com dígitos limpos (ex: '9911234') ou '' se vazio."""
     if not tel:
         return ""
     digits = re.sub(r'[\s\-\(\)\+]', '', tel)
-    # Prefixo Cabo Verde +238 ou 238 antes de 7 dígitos
-    if len(digits) == 10 and digits.startswith("238"):
+    # Prefixo internacional 00238 (12 dígitos) ou +238/238 (10 dígitos) antes de 7 dígitos
+    if len(digits) == 12 and digits.startswith("00238"):
+        digits = digits[5:]
+    elif len(digits) == 10 and digits.startswith("238"):
         digits = digits[3:]
     return digits
 
 
 # ── Slug helpers ───────────────────────────────────────────
 
-def gerar_slug(nome):
+def gerar_slug(nome: str) -> str:
     """Converte nome da barbearia para slug URL-amigável."""
     s = unicodedata.normalize('NFKD', nome).encode('ascii', 'ignore').decode('ascii')
     s = s.lower().strip()
@@ -288,7 +411,7 @@ def gerar_slug(nome):
     return s.strip('-') or 'barbearia'
 
 
-def slug_unico(nome, excluir_id=None):
+def slug_unico(nome: str, excluir_id: int | None = None) -> str:
     """Garante que o slug é único na tabela barbearias."""
     base = gerar_slug(nome)
     slug = base
@@ -307,7 +430,7 @@ def slug_unico(nome, excluir_id=None):
         i += 1
 
 
-def backup_db(dest_path: str):
+def backup_db(dest_path: str) -> None:
     """Backup seguro com locking_mode=EXCLUSIVE.
 
     Porquê é rápido e não bloqueia pedidos:
@@ -344,9 +467,9 @@ def backup_db(dest_path: str):
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 20   # versão actual do schema
+_SCHEMA_VERSION = 25   # versão actual do schema
 
-def _run_migrations(conn: sqlite3.Connection):
+def _run_migrations(conn: sqlite3.Connection) -> None:
     """Aplica todas as migrações pendentes de forma idempotente."""
 
     # Tabela de controlo — criada se não existir
@@ -559,13 +682,69 @@ def _run_migrations(conn: sqlite3.Connection):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_espera_barbearia ON lista_espera(barbearia_id, data_preferida, slot_livre)")
             _done(20)
 
+        elif _v == 21:
+            # clientes_bloqueados: impede clientes problemáticos de marcar
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS clientes_bloqueados (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    barbearia_id INTEGER NOT NULL,
+                    telefone     TEXT    NOT NULL,
+                    motivo       TEXT    DEFAULT '',
+                    bloqueado_em TEXT    NOT NULL,
+                    UNIQUE (barbearia_id, telefone)
+                )""")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cli_bloq ON clientes_bloqueados(barbearia_id)")
+            _done(21)
+
+        elif _v == 22:
+            # rate_limit: tabelas para o rate limiter persistente (SQLite dedicado, não aqui)
+            # Migração vazia — o ficheiro rate_limit.db é gerido por db/rate_limit.py
+            _done(22)
+
+        elif _v == 23:
+            # barbeiros: telefone para contacto via WhatsApp entre cliente e profissional
+            try:
+                conn.execute("ALTER TABLE barbeiros ADD COLUMN telefone TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass   # coluna já existe
+            _done(23)
+
+        elif _v == 24:
+            # servicos: coluna ordem para reordenação manual
+            try:
+                conn.execute("ALTER TABLE servicos ADD COLUMN ordem INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # Inicializar ordem pela ordenação actual (alfabética por nome)
+            try:
+                _rows_srv = conn.execute(
+                    "SELECT id FROM servicos ORDER BY nome, id").fetchall()
+                for _i, _r in enumerate(_rows_srv):
+                    conn.execute("UPDATE servicos SET ordem=? WHERE id=?", (_i * 10, _r["id"]))
+            except sqlite3.OperationalError:
+                pass
+            _done(24)
+
+        elif _v == 25:
+            # agendamentos: confirmação de presença pelo cliente
+            try:
+                conn.execute("ALTER TABLE agendamentos ADD COLUMN confirmado INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE agendamentos ADD COLUMN token_confirmar TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            _done(25)
+
         conn.commit()
         _done(_v)
 
 
 # ── Inicialização ──────────────────────────────────────────
 
-def init_db():
+def init_db() -> None:
     conn = get_conn()
     try:
         # Durante a transição de deploy, o worker antigo pode ainda segurar um lock
@@ -699,6 +878,10 @@ def init_db():
         # Migrações numeradas — cada uma corre exactamente uma vez
         _run_migrations(conn)
 
+        # Migrações declarativas (db/migrations.py) — motor independente
+        from db.migrations import migrate as _migrate_declarative
+        _migrate_declarative(conn)
+
         # Seed root (só se não existir)
         _root_row = c.execute("SELECT id, password_hash FROM barbeiros WHERE role='root' LIMIT 1").fetchone()
         _pw_file  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".root_init_password")
@@ -737,19 +920,30 @@ def init_db():
 
 # ── Configurações (aqui para evitar dependência circular) ──────────────────
 
-def get_config(chave, barbearia_id, default=None):
+def get_config(chave: str, barbearia_id: int, default: str | None = None) -> str | None:
+    key = (barbearia_id, chave)
+    with _config_cache_lock:
+        entry = _config_cache.get(key)
+        if entry and time.monotonic() < entry[1]:
+            return entry[0]
     with _read() as conn:
         row = conn.execute(
             "SELECT valor FROM configuracoes WHERE barbearia_id=? AND chave=?",
             (barbearia_id, chave)).fetchone()
-    return row["valor"] if row else default
+    val = row["valor"] if row else default
+    with _config_cache_lock:
+        _config_cache[key] = (val, time.monotonic() + _CONFIG_CACHE_TTL)
+    return val
 
 
-def set_config(chave, valor, barbearia_id):
+def set_config(chave: str, valor: str | int, barbearia_id: int) -> None:
     with _write() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO configuracoes (barbearia_id,chave,valor) VALUES (?,?,?)",
             (barbearia_id, chave, str(valor)))
+    # Invalidar config cache para a chave alterada
+    with _config_cache_lock:
+        _config_cache.pop((barbearia_id, chave), None)
     # Invalidar cache de slots quando configurações que afectam disponibilidade mudam
     if chave in ("buffer_minutos", "max_por_dia"):
         invalidar_cache_slots(barbearia_id)
@@ -759,7 +953,7 @@ def set_config(chave, valor, barbearia_id):
             _tz_cache.pop(barbearia_id, None)
 
 
-def get_todas_configs(barbearia_id):
+def get_todas_configs(barbearia_id: int) -> dict[str, str | None]:
     with _read() as conn:
         rows = conn.execute(
             "SELECT chave, valor FROM configuracoes WHERE barbearia_id=?",

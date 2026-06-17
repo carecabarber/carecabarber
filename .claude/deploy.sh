@@ -42,69 +42,43 @@ fi
 
 echo "$NOW" > "$LOCK_FILE"
 
-# ── Lista completa de ficheiros a enviar ─────────────────────
-FILES=(
-  app.py
-  database.py
-  wsgi.py
-  helpers.py
-  helpers_booking.py
-  helpers_security.py
-  blueprints/__init__.py
-  blueprints/agendamentos.py
-  blueprints/api.py
-  blueprints/auth.py
-  blueprints/barbeiros.py
-  blueprints/cliente.py
-  blueprints/mesa.py
-  blueprints/pwa.py
-  blueprints/relatorios.py
-  blueprints/root.py
-  blueprints/servicos.py
-  db/__init__.py
-  db/_conn.py
-  db/agendamentos.py
-  db/barbearia.py
-  db/barbeiros.py
-  db/push.py
-  db/relatorios.py
-  db/servicos.py
-  static/sw.js
-  static/app.js
-  templates/404.html
-  templates/500.html
-  templates/ag_acao.html
-  templates/avaliar_link.html
-  templates/barbeiros.html
-  templates/base.html
-  templates/cancelar_link.html
-  templates/cancelar_link_ok.html
-  templates/cliente_confirmacao.html
-  templates/cliente_entrada.html
-  templates/cliente_home.html
-  templates/cliente_marcar.html
-  templates/configuracoes.html
-  templates/conta_suspensa.html
-  templates/erro_simples.html
-  templates/estatisticas.html
-  templates/estatisticas_barbeiro.html
-  templates/historico.html
-  templates/index.html
-  templates/login.html
-  templates/mesa.html
-  templates/mesa_entrar.html
-  templates/minhas_marcacoes.html
-  templates/novo.html
-  templates/offline.html
-  templates/perfil.html
-  templates/reagendar.html
-  templates/reagendar_link_ok.html
-  templates/root.html
-  templates/root_planos.html
-  templates/root_precos.html
-  templates/servicos.html
-  templates/walkin.html
+# ── Gate: testes rápidos antes de enviar qualquer coisa ──────
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] A correr testes (gate pre-deploy)..." | tee -a "$LOG_FILE"
+if cd "$LOCAL" && python3 -m pytest tests/ \
+    --ignore=tests/test_e2e.py \
+    --ignore=tests/test_load.py \
+    -q --tb=short -x 2>&1 | tee -a "$LOG_FILE"; then
+  echo "  Gate OK — testes passaram" | tee -a "$LOG_FILE"
+else
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] GATE FALHOU — deploy cancelado" | tee -a "$LOG_FILE"
+  rm -f "$LOCK_FILE"
+  exit 2
+fi
+
+# ── Incrementar versão de deploy (só após gate passar) ───────
+VERSION_FILE="$LOCAL/version.txt"
+CURRENT_VER=$(cat "$VERSION_FILE" 2>/dev/null | tr -d '[:space:]' || echo "0")
+NEW_VER=$(( CURRENT_VER + 1 ))
+echo "$NEW_VER" > "$VERSION_FILE"
+echo "Deploy #$NEW_VER" | tee -a "$LOG_FILE"
+
+# ── Lista de ficheiros a enviar — auto-descoberta ─────────────
+# Python, DB, helpers, static — lista fixa (mais seguro)
+_FIXED=(
+  app.py database.py wsgi.py helpers.py helpers_booking.py helpers_security.py
+  blueprints/__init__.py blueprints/agendamentos.py blueprints/api.py
+  blueprints/auth.py blueprints/barbeiros.py blueprints/cliente.py
+  blueprints/mesa.py blueprints/pwa.py blueprints/relatorios.py
+  blueprints/root.py blueprints/servicos.py
+  db/__init__.py db/_conn.py db/agendamentos.py db/barbearia.py
+  db/barbeiros.py db/migrations.py db/push.py db/rate_limit.py
+  db/relatorios.py db/servicos.py
+  version.txt static/sw.js static/app.js
 )
+# Templates — auto-descoberta: nunca esquece ficheiros novos
+mapfile -t _TEMPLATES < <(cd "$LOCAL" && find templates/ -name '*.html' | sort)
+
+FILES=("${_FIXED[@]}" "${_TEMPLATES[@]}")
 
 # ── Upload de todos os ficheiros ─────────────────────────────
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Inicio deploy (${#FILES[@]} ficheiros)" | tee -a "$LOG_FILE"
@@ -117,8 +91,8 @@ for REL in "${FILES[@]}"; do
     continue
   fi
 
-  # Upload com retry em 429 (rate limit — backoff 10/20/30s)
-  for TENTATIVA in 10 20 30; do
+  # Upload com retry em 429 (rate limit — backoff 15/30/60/90s)
+  for TENTATIVA in 15 30 60 90; do
     HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
       -X POST \
       -H "Authorization: Token $TOKEN" \
@@ -147,6 +121,14 @@ if (( ERROS > 0 )); then
   rm -f "$LOCK_FILE"
   exit 1
 fi
+
+# ── Snapshot local para rollback ─────────────────────────────
+ROLLBACK_DIR="/tmp/carecabarber_rollback_$(date +%s)"
+mkdir -p "$ROLLBACK_DIR"
+for REL in app.py database.py wsgi.py; do
+  cp "$LOCAL/$REL" "$ROLLBACK_DIR/$REL" 2>/dev/null || true
+done
+echo "Snapshot para rollback em $ROLLBACK_DIR" | tee -a "$LOG_FILE"
 
 # ── Verificação: confirmar tamanho mínimo do remote app.py ───
 # (evitar download completo do ficheiro grande — basta ver se tem conteúdo)
@@ -185,10 +167,32 @@ sleep 5
 HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
   "https://$DOMAIN/login" 2>/dev/null || echo "timeout")
 
+_rollback() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] A fazer rollback para snapshot $ROLLBACK_DIR..." | tee -a "$LOG_FILE"
+  for REL in app.py database.py wsgi.py; do
+    [[ -f "$ROLLBACK_DIR/$REL" ]] || continue
+    curl -s -o /dev/null \
+      -X POST \
+      -H "Authorization: Token $TOKEN" \
+      -F "content=@$ROLLBACK_DIR/$REL" \
+      "$API/files/path$REMOTE/$REL"
+  done
+  curl -s -o /dev/null -X POST \
+    -H "Authorization: Token $TOKEN" \
+    "$API/webapps/$DOMAIN/reload/"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Rollback concluído" | tee -a "$LOG_FILE"
+}
+
 case "$HEALTH" in
   200|302|303)
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Deploy completo — app OK (health: $HEALTH)" | tee -a "$LOG_FILE"
     echo "Deploy OK — ${#FILES[@]} ficheiros enviados, app a responder ($HEALTH)"
+    ;;
+  5*)
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERRO: app retornou $HEALTH — a fazer rollback automático" | tee -a "$LOG_FILE"
+    _rollback
+    rm -f "$LOCK_FILE"
+    exit 3
     ;;
   timeout|000)
     # Timeout de rede desta máquina — não significa que o servidor falhou

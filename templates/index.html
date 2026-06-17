@@ -34,7 +34,69 @@
     {% endif %}
 </div>
 
-{% if session.get('role') == 'chefe' %}
+{# ── Painel de lembretes — próximas marcações (30 min) ── #}
+<div id="lembretes-bar" style="display:none;background:rgba(232,196,106,0.10);border:1px solid rgba(232,196,106,0.28);
+     border-radius:12px;padding:10px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:0.72rem;font-weight:700;color:var(--accent);letter-spacing:.04em">⏰ PRÓXIMOS (30 MIN)</span>
+        <span id="lembretes-ts" style="font-size:0.65rem;color:var(--text2)"></span>
+    </div>
+    <div id="lembretes-lista" style="display:flex;flex-direction:column;gap:5px"></div>
+</div>
+
+{% if stats_dashboard %}
+<div class="stats-dashboard">
+    {# Receita esta semana #}
+    <div class="stat-card">
+        <div class="stat-label">Esta semana</div>
+        <div class="stat-val">{{ stats_dashboard.rec_sem | moeda }} <small>{{ moeda_simbolo }}</small></div>
+        {% if stats_dashboard.rec_pct is not none %}
+        <div class="stat-vs {% if stats_dashboard.rec_diff >= 0 %}stat-up{% else %}stat-down{% endif %}">
+            {% if stats_dashboard.rec_diff >= 0 %}▲{% else %}▼{% endif %}
+            {{ stats_dashboard.rec_pct_abs }}% vs semana ant.
+        </div>
+        {% elif stats_dashboard.rec_sem > 0 %}
+        <div class="stat-vs" style="color:var(--text2)">semana ant. sem dados</div>
+        {% endif %}
+    </div>
+    {# Serviço mais popular #}
+    {% if stats_dashboard.servico_popular %}
+    <div class="stat-card">
+        <div class="stat-label">Serviço popular <small style="color:var(--text2)">(30 dias)</small></div>
+        <div class="stat-val" style="font-size:0.95rem">{{ stats_dashboard.servico_popular.nome }}</div>
+        <div class="stat-vs" style="color:var(--text2)">{{ stats_dashboard.servico_popular.n }}× concluído</div>
+    </div>
+    {% endif %}
+    {# Hora de pico #}
+    {% if stats_dashboard.hora_pico %}
+    <div class="stat-card">
+        <div class="stat-label">Hora de pico <small style="color:var(--text2)">(30 dias)</small></div>
+        <div class="stat-val">{{ stats_dashboard.hora_pico.hora }}h</div>
+        <div class="stat-vs" style="color:var(--text2)">{{ stats_dashboard.hora_pico.n }} serviços</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if stats_dashboard and stats_dashboard.dias_semana %}
+<div class="semana-barras-card">
+    <div class="stat-label" style="margin-bottom:10px">Receita últimos 7 dias</div>
+    <div class="semana-barras">
+        {% for d in stats_dashboard.dias_semana %}
+        <div class="semana-bar-col">
+            <div class="semana-bar-track">
+                <div class="semana-bar-fill {{ 'hoje' if d.hoje else '' }}"
+                     style="height:{{ d.pct if d.pct > 0 else 0 }}%"
+                     title="{{ d.dia }}: {{ d.v | moeda }} {{ moeda_simbolo }}"></div>
+            </div>
+            <div class="semana-bar-label {{ 'hoje' if d.hoje else '' }}">{{ d.label }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if session.get('role') == 'chefe' and pdf_ok %}
 <div style="text-align:right;margin:-4px 0 10px">
     <a href="{{ url_for('estatisticas') }}?pdf=1&amp;mes={{ agora_iso[:7] }}"
        style="font-size:0.75rem;font-weight:600;color:var(--accent-dark,#b8922a);
@@ -80,6 +142,9 @@
              data-id="{{ a.id }}"
              data-segundos="{{ a.segundos_decorridos }}"
              data-estimado="{{ a.duracao_estimada * 60 }}">00:00</div>
+        <div class="cron-barra-wrap">
+            <div class="cron-barra" id="bar-{{ a.id }}"></div>
+        </div>
         <div class="estimativa" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <span>Estimado: {{ a.duracao_estimada }} min</span>
             {% if a.hora_fim_estimada %}
@@ -233,6 +298,9 @@
                         {{- _vn -}}ª v.
                     </span>
                     {% endif %}
+                    {% if nao_confirmados_ids and a.id in nao_confirmados_ids %}
+                    <span class="badge-nao-confirmado" title="Cliente não confirmou presença">? não confirmou</span>
+                    {% endif %}
                 </div>
                 <div class="item-servico">
                     {{ a.servico_nome }}
@@ -257,10 +325,10 @@
                 {% endif %}
             </div>
             <div class="item-acoes">
-                {% if a.status == 'agendado' %}
+                {% if a.status in ('agendado', 'walk-in') %}
                 <form action="{{ url_for('iniciar', id=a.id) }}" method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-iniciar" title="Iniciar atendimento">▶</button>
+                    <button type="submit" class="btn btn-iniciar" title="Iniciar atendimento">▶ Iniciar</button>
                 </form>
                 <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">↺</a>
                 {% if a.link_reagendar and a.telefone %}
@@ -276,12 +344,12 @@
                 <form action="{{ url_for('nao_compareceu', id=a.id) }}" method="post"
                       data-confirm="Marcar {{ a.cliente | e }} como não compareceu?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-noshow" title="Não compareceu">NC</button>
+                    <button type="submit" class="btn btn-noshow" title="Não compareceu">Faltou</button>
                 </form>
                 {% elif a.status == 'em_andamento' %}
                 <span class="badge badge-active">Ativo</span>
                 {% elif a.status == 'concluido' %}
-                <span class="badge badge-done">✓</span>
+                <span class="badge badge-done">✓ {{ a.valor | moeda }} {{ moeda_simbolo }}</span>
                 {% elif a.status == 'cancelado' %}
                 <span class="badge badge-cancel">✕</span>
                 {% elif a.status == 'nao_compareceu' %}
@@ -507,7 +575,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     // Botão "⏱ Agora" — preenche hora_inicio com a hora actual do servidor
-    document.getElementById('btn-agora-inicio')?.addEventListener('click', () => {
+    var _btnAgora = document.getElementById('btn-agora-inicio');
+    if (_btnAgora) _btnAgora.addEventListener('click', function() {
         const d   = _horaServidor();
         const hh  = String(d.getHours()).padStart(2, '0');
         const mm  = String(d.getMinutes()).padStart(2, '0');
@@ -522,5 +591,115 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
+
+
+<script nonce="{{ csp_nonce }}">
+// ── Lembretes — próximos 30 min ──────────────────────────────────────────────
+(function() {
+    var _bar   = document.getElementById('lembretes-bar');
+    var _lista = document.getElementById('lembretes-lista');
+    var _ts    = document.getElementById('lembretes-ts');
+    if (!_bar) return;
+
+    // Estado local: ids já marcados nesta sessão (evita duplo clique)
+    var _enviados = {};
+
+    function _waBase(tel) {
+        if (!tel) return null;
+        var t = tel.replace(/\s/g,'');
+        return 'https://wa.me/' + (t.length === 7 ? '238' : '') + t;
+    }
+
+    function _waLembrete(a) {
+        // Mensagem pré-preenchida com nome, hora, serviço e link de confirmação
+        var base = _waBase(a.telefone);
+        if (!base) return null;
+        var msg = 'Olá ' + a.cliente + '! 👋 Lembrete da sua marcação hoje às ' +
+                  a.hora + ' para ' + a.servico + '.';
+        if (a.token_confirmar) {
+            msg += ' Confirme a sua presença: ' +
+                   window.location.origin + '/confirmar/' + a.token_confirmar;
+        }
+        msg += ' Até logo! ✂️';
+        return base + '?text=' + encodeURIComponent(msg);
+    }
+
+    function _marcarEnviado(id) {
+        fetch('/api/marcar-lembrete/' + id, {method:'POST',
+            headers:{'X-Requested-With':'XMLHttpRequest'}})
+            .then(function(r){ return r.json(); })
+            .then(function(d){ if(d.ok) _enviados[id] = true; })
+            .catch(function(){});
+    }
+
+    function _labelEnviado(lembrete_wa_em) {
+        // "✓ enviado 14:32" — usa timestamp do servidor
+        if (!lembrete_wa_em) return null;
+        var hm = lembrete_wa_em.length >= 16 ? lembrete_wa_em.substring(11,16) : lembrete_wa_em;
+        return '✓ ' + hm;
+    }
+
+    function carregar() {
+        fetch('/api/lembretes?minutos=30')
+            .then(function(r){ return r.json(); })
+            .then(function(data) {
+                if (!data || !data.length) { _bar.style.display = 'none'; return; }
+                var html = '';
+                data.forEach(function(a) {
+                    var min      = a.minutos_ate;
+                    var minLabel = min <= 0 ? 'já!' : min + ' min';
+                    var urgente  = min <= 5;
+                    var jaEnv    = _enviados[a.id] || !!a.lembrete_wa_em;
+                    var envLabel = jaEnv ? _labelEnviado(a.lembrete_wa_em) || '✓ enviado' : null;
+                    var waLink   = _waLembrete(a);
+
+                    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;' +
+                        'padding:5px 8px;background:var(--card);border-radius:8px;border:1px solid var(--border)">' +
+                        '<span style="font-size:0.78rem;font-weight:700;color:var(--text);min-width:0;flex:1;' +
+                        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+                        escHtml(a.cliente) +
+                        ' <span style="font-weight:400;color:var(--text2);font-size:0.72rem">· ' + escHtml(a.servico) + '</span></span>' +
+                        '<span style="font-size:0.75rem;font-weight:700;color:' + (urgente ? 'var(--red,#ef4444)' : 'var(--accent)') + ';white-space:nowrap">' +
+                        escHtml(a.hora) + ' · ' + minLabel + '</span>';
+
+                    if (waLink) {
+                        if (jaEnv) {
+                            // Já enviado — badge discreto
+                            html += '<span style="font-size:0.68rem;padding:2px 7px;border-radius:6px;' +
+                                'background:rgba(37,211,102,0.10);color:#25d366;border:1px solid rgba(37,211,102,0.25);' +
+                                'white-space:nowrap;font-weight:600">' + escHtml(envLabel) + '</span>';
+                        } else {
+                            // Botão "💬 WA" — abre WA + marca como enviado
+                            html += '<a href="' + waLink + '" target="_blank" rel="noopener" ' +
+                                'data-lid="' + a.id + '" ' +
+                                'onclick="(function(el){' +
+                                'var id=el.getAttribute(\'data-lid\');' +
+                                'fetch(\'/api/marcar-lembrete/\'+id,{method:\'POST\',headers:{\'X-Requested-With\':\'XMLHttpRequest\'}}).catch(function(){});' +
+                                '})(this)" ' +
+                                'style="font-size:0.7rem;padding:2px 8px;border-radius:6px;' +
+                                'background:rgba(37,211,102,0.15);color:#25d366;border:1px solid rgba(37,211,102,0.3);' +
+                                'text-decoration:none;white-space:nowrap;font-weight:600">💬 WA</a>';
+                        }
+                    } else if (a.telefone) {
+                        // Sem token mas tem tel — link WA simples
+                        html += '<a href="' + _waBase(a.telefone) + '" target="_blank" rel="noopener" ' +
+                            'style="font-size:0.7rem;padding:2px 8px;border-radius:6px;' +
+                            'background:rgba(37,211,102,0.15);color:#25d366;border:1px solid rgba(37,211,102,0.3);' +
+                            'text-decoration:none;white-space:nowrap;font-weight:600">WA</a>';
+                    }
+                    html += '</div>';
+                });
+                _lista.innerHTML = html;
+                var h = new Date();
+                _ts.textContent = 'actualizado ' + String(h.getHours()).padStart(2,'0') + ':' + String(h.getMinutes()).padStart(2,'0');
+                _bar.style.display = 'block';
+            })
+            .catch(function() { _bar.style.display = 'none'; });
+    }
+
+    carregar();
+    setInterval(carregar, 90000);  // refresh a cada 90s
+})();
+</script>
 
 {% endblock %}

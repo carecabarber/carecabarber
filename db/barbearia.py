@@ -10,7 +10,7 @@ from db._conn import (
 )
 
 
-def listar_barbearias(apenas_ativas=False):
+def listar_barbearias(apenas_ativas: bool = False) -> list[dict]:
     with _read() as conn:
         q = "SELECT * FROM barbearias"
         if apenas_ativas:
@@ -19,13 +19,13 @@ def listar_barbearias(apenas_ativas=False):
     return [dict(r) for r in rows]
 
 
-def get_barbearia(id):
+def get_barbearia(id: int) -> dict | None:
     with _read() as conn:
         row = conn.execute("SELECT * FROM barbearias WHERE id=?", (id,)).fetchone()
     return dict(row) if row else None
 
 
-def get_barbearia_por_slug(slug):
+def get_barbearia_por_slug(slug: str) -> dict | None:
     with _read() as conn:
         row = conn.execute("SELECT * FROM barbearias WHERE slug=?", (slug,)).fetchone()
     return dict(row) if row else None
@@ -33,7 +33,7 @@ def get_barbearia_por_slug(slug):
 
 _TIPOS_VALIDOS = {'barbearia', 'salao_estetica', 'spa', 'clinica', 'outro'}
 
-def criar_barbearia(nome, tipo='barbearia', vocab_custom_json=None):
+def criar_barbearia(nome: str, tipo: str = 'barbearia', vocab_custom_json: str | None = None) -> int:
     tipo = tipo if tipo in _TIPOS_VALIDOS else 'barbearia'
     if tipo != 'outro':
         vocab_custom_json = None  # só faz sentido para 'outro'
@@ -56,14 +56,14 @@ def criar_barbearia(nome, tipo='barbearia', vocab_custom_json=None):
     return bid
 
 
-def set_tipo_barbearia(barbearia_id, tipo):
+def set_tipo_barbearia(barbearia_id: int, tipo: str) -> None:
     """Actualiza o tipo de negócio de um estabelecimento."""
     tipo = tipo if tipo in _TIPOS_VALIDOS else 'barbearia'
     with _write() as conn:
         conn.execute("UPDATE barbearias SET tipo=? WHERE id=?", (tipo, barbearia_id))
 
 
-def set_vocab_custom(barbearia_id, vocab_custom_json):
+def set_vocab_custom(barbearia_id: int, vocab_custom_json: str | None) -> None:
     """Guarda (ou apaga) o vocabulário personalizado de um estabelecimento 'outro'."""
     with _write() as conn:
         conn.execute(
@@ -87,7 +87,7 @@ PLANO_EXP = ("exp", "Experiência", 15)   # (codigo, nome, dias)
 _PLANO_BID = 0   # barbearia_id=0 → config global do root
 
 
-def get_planos_precos():
+def get_planos_precos() -> dict[str, int]:
     """Devolve dict {codigo: preco_inteiro} para os 4 planos."""
     with _read() as conn:
         rows = conn.execute(
@@ -99,7 +99,7 @@ def get_planos_precos():
     return {cod: precos.get(cod, 0) for cod in PLANOS}
 
 
-def set_plano_preco(codigo, preco):
+def set_plano_preco(codigo: str, preco: int) -> bool:
     """Define o preço de um plano (inteiro). Retorna False se código inválido."""
     if codigo not in PLANOS:
         return False
@@ -110,7 +110,7 @@ def set_plano_preco(codigo, preco):
     return True
 
 
-def get_planos_precos_barbearia(barbearia_id):
+def get_planos_precos_barbearia(barbearia_id: int) -> tuple[dict[str, dict], str]:
     """Preços específicos de uma barbearia. Devolve dict {codigo: {preco, moeda}}.
     Se a barbearia não tiver preço definido para um plano, usa o global."""
     globais = get_planos_precos()
@@ -138,7 +138,7 @@ def get_planos_precos_barbearia(barbearia_id):
     return resultado, moeda_padrao
 
 
-def set_plano_preco_barbearia(barbearia_id, codigo, preco, moeda="ECV"):
+def set_plano_preco_barbearia(barbearia_id: int, codigo: str, preco: int, moeda: str = "ECV") -> bool:
     """Define preço e moeda de um plano para uma barbearia específica."""
     if codigo not in PLANOS:
         return False
@@ -152,7 +152,7 @@ def set_plano_preco_barbearia(barbearia_id, codigo, preco, moeda="ECV"):
     return True
 
 
-def _plano_info(codigo):
+def _plano_info(codigo: str) -> tuple[str, int] | None:
     """Devolve (nome, dias) para qualquer código válido (inclui plano exp)."""
     if codigo in PLANOS:
         return PLANOS[codigo]
@@ -161,7 +161,7 @@ def _plano_info(codigo):
     return None
 
 
-def registar_pagamento(barbearia_id, codigo_plano="1m"):
+def registar_pagamento(barbearia_id: int, codigo_plano: str = "1m") -> dict | bool:
     """Regista pagamento pelo código do plano ('1m','3m','6m','1y','exp').
     Reactiva a barbearia se estava inactiva.
     Devolve dict com {ok, nome_plano, dias, expira_em} ou False se inválido.
@@ -219,7 +219,7 @@ def registar_pagamento(barbearia_id, codigo_plano="1m"):
     return {"ok": True, "nome_plano": nome_plano, "dias": dias, "expira_em": nova_expiracao_pg}
 
 
-def _codigo_plano_atual(conn, barbearia_id):
+def _codigo_plano_atual(conn, barbearia_id: int) -> str | None:
     """Devolve o codigo_plano do pagamento mais recente, ou None."""
     r = conn.execute(
         "SELECT codigo_plano FROM pagamentos WHERE barbearia_id=? "
@@ -227,7 +227,7 @@ def _codigo_plano_atual(conn, barbearia_id):
     return r["codigo_plano"] if r else None
 
 
-def verificar_plano(barbearia_id):
+def verificar_plano(barbearia_id: int) -> dict | None:
     """Retorna dict com estado do plano: ativo, dias_restantes, expira_em, codigo_plano.
     None se barbearia não existe. plano_expira_em=NULL → sem limite."""
     from datetime import date
@@ -256,7 +256,7 @@ def verificar_plano(barbearia_id):
     }
 
 
-def listar_pagamentos(barbearia_id):
+def listar_pagamentos(barbearia_id: int) -> list[dict]:
     """Histórico de pagamentos de uma barbearia, do mais recente para o mais antigo."""
     with _read() as conn:
         rows = conn.execute(
@@ -265,7 +265,7 @@ def listar_pagamentos(barbearia_id):
     return [dict(r) for r in rows]
 
 
-def verificar_todos_planos():
+def verificar_todos_planos() -> dict[int, dict]:
     """Devolve dict {barbearia_id: plano_info} para TODAS as barbearias.
     Uma única query em vez de N queries — evita busy_timeout stack no dashboard root.
     Inclui codigo_plano do pagamento mais recente para distinguir trial de pago."""
@@ -302,7 +302,7 @@ def verificar_todos_planos():
     return resultado
 
 
-def listar_todos_pagamentos():
+def listar_todos_pagamentos() -> dict[int, list[dict]]:
     """Devolve dict {barbearia_id: [pagamentos]} para TODAS as barbearias.
     Uma única query em vez de N queries — evita busy_timeout stack no dashboard root."""
     with _read() as conn:
@@ -317,7 +317,7 @@ def listar_todos_pagamentos():
     return resultado
 
 
-def cancelar_plano(barbearia_id):
+def cancelar_plano(barbearia_id: int) -> bool:
     """Cancela o plano activo: expira ontem e desactiva a barbearia imediatamente.
     Usar ontem (não hoje) para que registar_pagamento permita novo plano no mesmo dia."""
     from datetime import date, timedelta
@@ -329,7 +329,7 @@ def cancelar_plano(barbearia_id):
     return True
 
 
-def desativar_planos_expirados():
+def desativar_planos_expirados() -> None:
     """Desactiva barbearias cujo plano_expira_em já passou. Chamado 1×/dia pela thread de limpeza."""
     from datetime import date
     hoje = date.today().isoformat()
@@ -340,18 +340,18 @@ def desativar_planos_expirados():
             (hoje,))
 
 
-def toggle_barbearia(id):
+def toggle_barbearia(id: int) -> None:
     with _write() as conn:
         conn.execute("UPDATE barbearias SET ativa = 1 - ativa WHERE id=?", (id,))
 
 
-def editar_barbearia(id, nome):
+def editar_barbearia(id: int, nome: str) -> None:
     novo_slug = slug_unico(nome, excluir_id=id)
     with _write() as conn:
         conn.execute("UPDATE barbearias SET nome=?, slug=? WHERE id=?", (nome, novo_slug, id))
 
 
-def set_logo(barbearia_id, filename):
+def set_logo(barbearia_id: int, filename: str) -> None:
     with _write() as conn:
         conn.execute("UPDATE barbearias SET logo=? WHERE id=?", (filename, barbearia_id))
 
@@ -363,7 +363,7 @@ def set_logo(barbearia_id, filename):
 
 # ── Horário de funcionamento ───────────────────────────────
 
-def get_horario(barbearia_id):
+def get_horario(barbearia_id: int) -> list[dict]:
     with _read() as conn:
         rows = conn.execute(
             "SELECT * FROM horario_funcionamento WHERE barbearia_id=? ORDER BY dia_semana",
@@ -371,7 +371,7 @@ def get_horario(barbearia_id):
     return [dict(r) for r in rows]
 
 
-def set_horario_dia(dia_semana, hora_abertura, hora_fecho, fechado, barbearia_id):
+def set_horario_dia(dia_semana: int, hora_abertura: str, hora_fecho: str, fechado: bool | int, barbearia_id: int) -> None:
     with _write() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO horario_funcionamento "
@@ -380,7 +380,7 @@ def set_horario_dia(dia_semana, hora_abertura, hora_fecho, fechado, barbearia_id
     invalidar_cache_slots(barbearia_id)
 
 
-def get_horario_dia(dia_semana, barbearia_id):
+def get_horario_dia(dia_semana: int, barbearia_id: int) -> dict:
     with _read() as conn:
         row = conn.execute(
             "SELECT * FROM horario_funcionamento WHERE barbearia_id=? AND dia_semana=?",
@@ -390,7 +390,7 @@ def get_horario_dia(dia_semana, barbearia_id):
 
 # ── Dias fechados ──────────────────────────────────────────
 
-def listar_dias_fechados(barbearia_id):
+def listar_dias_fechados(barbearia_id: int) -> list[dict]:
     with _read() as conn:
         rows = conn.execute(
             "SELECT * FROM dias_fechados WHERE barbearia_id=? ORDER BY data",
@@ -398,7 +398,7 @@ def listar_dias_fechados(barbearia_id):
     return [dict(r) for r in rows]
 
 
-def adicionar_dia_fechado(data, motivo, barbearia_id):
+def adicionar_dia_fechado(data: str, motivo: str, barbearia_id: int) -> None:
     try:
         with _write() as conn:
             conn.execute(
@@ -409,7 +409,7 @@ def adicionar_dia_fechado(data, motivo, barbearia_id):
         pass  # dia já fechado (UNIQUE constraint)
 
 
-def remover_dia_fechado(id):
+def remover_dia_fechado(id: int) -> None:
     with _write() as conn:
         row = conn.execute("SELECT barbearia_id FROM dias_fechados WHERE id=?", (id,)).fetchone()
         bid = row["barbearia_id"] if row else None
@@ -418,7 +418,7 @@ def remover_dia_fechado(id):
         invalidar_cache_slots(bid)
 
 
-def dia_esta_fechado(data_str, barbearia_id):
+def dia_esta_fechado(data_str: str, barbearia_id: int) -> bool:
     with _read() as conn:
         row = conn.execute(
             "SELECT id FROM dias_fechados WHERE barbearia_id=? AND data=?",
@@ -428,7 +428,7 @@ def dia_esta_fechado(data_str, barbearia_id):
 
 # ── Ausências de barbeiros ─────────────────────────────────
 
-def listar_ausencias(barbearia_id, barbeiro_id=None):
+def listar_ausencias(barbearia_id: int, barbeiro_id: int | None = None) -> list[dict]:
     with _read() as conn:
         if barbeiro_id:
             rows = conn.execute(
@@ -445,7 +445,8 @@ def listar_ausencias(barbearia_id, barbeiro_id=None):
     return [dict(r) for r in rows]
 
 
-def criar_ausencia(barbeiro_id, data_inicio, data_fim, tipo, motivo="", hora_inicio=None, hora_fim=None):
+def criar_ausencia(barbeiro_id: int, data_inicio: str, data_fim: str, tipo: str,
+                   motivo: str = "", hora_inicio: str | None = None, hora_fim: str | None = None) -> None:
     with _write() as conn:
         conn.execute(
             "INSERT INTO ausencias (barbeiro_id,data_inicio,data_fim,tipo,motivo,hora_inicio,hora_fim) VALUES (?,?,?,?,?,?,?)",
@@ -456,7 +457,7 @@ def criar_ausencia(barbeiro_id, data_inicio, data_fim, tipo, motivo="", hora_ini
         invalidar_cache_slots(bid)
 
 
-def apagar_ausencia(id):
+def apagar_ausencia(id: int) -> None:
     with _write() as conn:
         row = conn.execute(
             "SELECT b.barbearia_id FROM ausencias a "
@@ -467,7 +468,7 @@ def apagar_ausencia(id):
         invalidar_cache_slots(bid)
 
 
-def ausencia_ativa(barbeiro_id, data_str, hora_str=None):
+def ausencia_ativa(barbeiro_id: int, data_str: str, hora_str: str | None = None) -> dict | None:
     with _read() as conn:
         rows = conn.execute(
             "SELECT a.*, b.nome as barbeiro_nome FROM ausencias a "
@@ -498,6 +499,41 @@ def ausencia_ativa(barbeiro_id, data_str, hora_str=None):
     return None
 
 
-def barbeiro_ausente(barbeiro_id, data_str, hora_str=None):
+def barbeiro_ausente(barbeiro_id: int, data_str: str, hora_str: str | None = None) -> bool:
     return ausencia_ativa(barbeiro_id, data_str, hora_str) is not None
+
+
+# ── Bloqueio de clientes ──────────────────────────────────────
+
+def cliente_bloquear(barbearia_id: int, telefone: str, motivo: str = "") -> None:
+    from db._conn import normalizar_tel, _agora, FMT
+    tel = normalizar_tel(telefone) or telefone
+    with _write() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO clientes_bloqueados "
+            "(barbearia_id, telefone, motivo, bloqueado_em) VALUES (?, ?, ?, ?)",
+            (barbearia_id, tel, (motivo or "")[:200], _agora().strftime(FMT)))
+
+
+def cliente_desbloquear(id: int) -> None:
+    with _write() as conn:
+        conn.execute("DELETE FROM clientes_bloqueados WHERE id=?", (id,))
+
+
+def cliente_bloqueado(barbearia_id, telefone) -> bool:
+    from db._conn import normalizar_tel
+    tel = normalizar_tel(telefone) or telefone
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT id FROM clientes_bloqueados WHERE barbearia_id=? AND telefone=?",
+            (barbearia_id, tel)).fetchone()
+    return row is not None
+
+
+def clientes_bloqueados_listar(barbearia_id: int) -> list[dict]:
+    with _read() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clientes_bloqueados WHERE barbearia_id=? ORDER BY bloqueado_em DESC",
+            (barbearia_id,)).fetchall()
+    return [dict(r) for r in rows]
 
