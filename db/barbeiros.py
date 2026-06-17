@@ -263,16 +263,19 @@ def get_barbeiro_por_mesa_token(token: str | None) -> dict | None:
 
 
 def get_agendamentos_mesa(barbeiro_id: int, barbearia_id: int, data: str) -> list[dict]:
-    """Agendamentos de hoje para a mesa: agendado, walk-in e em_andamento."""
+    """Agendamentos para a mesa: hoje (activos) + em_andamento de qualquer dia (serviços presos).
+    em_andamento fica sempre no topo para que o barbeiro possa terminar imediatamente."""
     with _read() as conn:
         rows = conn.execute(
             "SELECT a.*, s.nome AS servico_nome, s.duracao_min, s.preco "
             "FROM agendamentos a "
             "LEFT JOIN servicos s ON s.id=a.servico_id "
             "WHERE a.barbeiro_id=? AND a.barbearia_id=? "
-            "AND date(a.data_hora)=? "
+            "AND (date(a.data_hora)=? OR a.status='em_andamento') "
             "AND a.status IN ('agendado','walk-in','em_andamento') "
-            "ORDER BY a.data_hora",
+            "ORDER BY "
+            "  CASE WHEN a.status='em_andamento' THEN 0 ELSE 1 END, "
+            "  a.data_hora",
             (barbeiro_id, barbearia_id, data)).fetchall()
     return [dict(r) for r in rows]
 

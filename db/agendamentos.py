@@ -253,6 +253,19 @@ def barbeiro_tem_em_andamento(barbeiro_id) -> bool:
     return row is not None
 
 
+def get_servico_em_andamento(barbeiro_id) -> dict | None:
+    """Devolve o agendamento em_andamento actual do barbeiro (ou None).
+    Usado para mostrar qual serviço preso está a bloquear novas iniciações."""
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT a.*, s.nome AS servico_nome "
+            "FROM agendamentos a "
+            "LEFT JOIN servicos s ON s.id=a.servico_id "
+            f"WHERE a.barbeiro_id=? AND a.status={_S_EM} LIMIT 1",
+            (barbeiro_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def barbeiro_proxima_marcacao_minutos(barbeiro_id, barbearia_id) -> int:
     """Devolve em quantos minutos é a próxima marcação agendada do barbeiro.
     Devolve 9999 se não houver nenhuma hoje."""

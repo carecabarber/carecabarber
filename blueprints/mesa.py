@@ -4,6 +4,7 @@ from database import ST_AGENDADO, ST_EM_ANDAMENTO, ST_WALKIN
 from helpers import (
     _log, _blog, _agora, _limpar, _api_ok, _invalidar_idx, _booking_lock,
     get_vocab, _MOEDA_MAP,
+    _pc_get, _pc_set, _CLEANUP_LOCK_TTL,
 )
 
 
@@ -37,6 +38,11 @@ def register(app) -> None:
         barbearia = db.get_barbearia(barb["barbearia_id"])
         if not barbearia or not barbearia["ativa"]:
             return render_template("404.html"), 404
+        # Limpar serviços presos (throttled 5 min) — resolve bloqueios cross-day
+        _lck = f"limpeza_mesa:{barb['barbearia_id']}"
+        if _pc_get(_lck) is None:
+            db.limpar_em_andamento_presos(barb["barbearia_id"])
+            _pc_set(_lck, 1, _CLEANUP_LOCK_TTL)
         hoje = _agora(barb["barbearia_id"]).strftime("%Y-%m-%d")
         ags  = db.get_agendamentos_mesa(barb["id"], barb["barbearia_id"], hoje)
         servicos = db.listar_servicos(barb["barbearia_id"])
@@ -69,8 +75,13 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "Agendamento não pertence a este barbeiro"}), 403
         if ag["status"] not in (ST_AGENDADO, ST_WALKIN):
             return jsonify({"ok": False, "error": "Já iniciado ou concluído"}), 400
-        if db.barbeiro_tem_em_andamento(barb["id"]):
-            return jsonify({"ok": False, "error": "Já tens um serviço em curso. Termina-o primeiro."}), 400
+        ag_preso = db.get_servico_em_andamento(barb["id"])
+        if ag_preso:
+            return jsonify({
+                "ok": False,
+                "error": "Já tens um serviço em curso. Termina-o primeiro.",
+                "ag_em_curso_id": ag_preso["id"],
+            }), 400
         try:
             ok = db.iniciar_trabalho(ag_id)
         except Exception:
@@ -171,9 +182,11 @@ def register(app) -> None:
             if _bloq:
                 return jsonify({"ok": False,
                                 "error": f"Barbeiro em pausa até {_bloq.get('hora_fim','?')}"}), 400
-            if db.barbeiro_tem_em_andamento(barb["id"]):
+            _ag_preso = db.get_servico_em_andamento(barb["id"])
+            if _ag_preso:
                 return jsonify({"ok": False,
-                                "error": "Já tens um serviço em curso. Termina-o primeiro."}), 400
+                                "error": "Já tens um serviço em curso. Termina-o primeiro.",
+                                "ag_em_curso_id": _ag_preso["id"]}), 400
             duracao_servico = s.get("duracao_min") or 30
             buffer = int(db.get_config("buffer_minutos", barb["barbearia_id"]) or 10)
             minutos_ate_proxima = db.barbeiro_proxima_marcacao_minutos(barb["id"], barb["barbearia_id"])

@@ -78,23 +78,6 @@
 </div>
 {% endif %}
 
-{% if stats_dashboard and stats_dashboard.dias_semana %}
-<div class="semana-barras-card">
-    <div class="stat-label" style="margin-bottom:10px">Receita últimos 7 dias</div>
-    <div class="semana-barras">
-        {% for d in stats_dashboard.dias_semana %}
-        <div class="semana-bar-col">
-            <div class="semana-bar-track">
-                <div class="semana-bar-fill {{ 'hoje' if d.hoje else '' }}"
-                     style="height:{{ d.pct if d.pct > 0 else 0 }}%"
-                     title="{{ d.dia }}: {{ d.v | moeda }} {{ moeda_simbolo }}"></div>
-            </div>
-            <div class="semana-bar-label {{ 'hoje' if d.hoje else '' }}">{{ d.label }}</div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
 
 {% if session.get('role') == 'chefe' and pdf_ok %}
 <div style="text-align:right;margin:-4px 0 10px">

@@ -224,8 +224,25 @@ async function iniciarAg(id, btn) {
             }
         } else {
             const erroEl = document.getElementById("ag-erro");
-            erroEl.textContent = "Erro: " + (d.error || "desconhecido");
+            erroEl.textContent = "⚠️ " + (d.error || "Erro desconhecido");
             erroEl.style.display = "block";
+            // Se há serviço preso a bloquear, destacar esse card e oferecer scroll
+            if (d.ag_em_curso_id) {
+                const cardPreso = document.getElementById("ag-" + d.ag_em_curso_id);
+                if (cardPreso) {
+                    cardPreso.scrollIntoView({ behavior: "smooth", block: "center" });
+                    cardPreso.style.outline = "2px solid var(--accent)";
+                    cardPreso.style.boxShadow = "0 0 0 6px rgba(245,200,66,0.2)";
+                    setTimeout(() => {
+                        cardPreso.style.outline = "";
+                        cardPreso.style.boxShadow = "";
+                    }, 4000);
+                    erroEl.textContent += " — termina o serviço destacado primeiro.";
+                } else {
+                    // Serviço preso não está visível (ex: cross-day antes do cleanup)
+                    erroEl.textContent += " Recarrega a página para ver o serviço em curso.";
+                }
+            }
             erroEl.scrollIntoView({behavior: "smooth", block: "nearest"});
             btn.disabled = false;
             btn.textContent = textoOriginal;

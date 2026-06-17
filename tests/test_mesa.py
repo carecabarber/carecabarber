@@ -250,9 +250,9 @@ class TestMesaIniciar:
         assert data["ok"] is False
 
     def test_iniciar_barbeiro_tem_em_andamento(self, client):
-        """Line 73: barbeiro_tem_em_andamento returns True → 400."""
+        """get_servico_em_andamento returns a service → 400 com ag_em_curso_id."""
         c, ctx = client
-        with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=True):
+        with patch("blueprints.mesa.db.get_servico_em_andamento", return_value={"id": 99}):
             r = c.post(
                 f"/mesa/{ctx['mesa_token']}/iniciar",
                 data=json.dumps({"ag_id": ctx["ag_id"]}),
@@ -260,11 +260,12 @@ class TestMesaIniciar:
         assert r.status_code == 400
         data = json.loads(r.data)
         assert "curso" in data["error"].lower()
+        assert data.get("ag_em_curso_id") == 99
 
     def test_iniciar_exception(self, client):
-        """Lines 76-77: iniciar_trabalho raises Exception → 500."""
+        """iniciar_trabalho raises Exception → 500."""
         c, ctx = client
-        with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+        with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
             with patch("blueprints.mesa.db.iniciar_trabalho", side_effect=Exception("erro simulado")):
                 r = c.post(
                     f"/mesa/{ctx['mesa_token']}/iniciar",
@@ -275,9 +276,9 @@ class TestMesaIniciar:
         assert data["ok"] is False
 
     def test_iniciar_returns_false(self, client):
-        """Line 79: iniciar_trabalho returns False → 400."""
+        """iniciar_trabalho returns False → 400."""
         c, ctx = client
-        with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+        with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
             with patch("blueprints.mesa.db.iniciar_trabalho", return_value=False):
                 r = c.post(
                     f"/mesa/{ctx['mesa_token']}/iniciar",
@@ -288,11 +289,9 @@ class TestMesaIniciar:
         assert data["ok"] is False
 
     def test_iniciar_success(self, client):
-        """Iniciar com ag status=agendado → 200 ok.
-        Mock barbeiro_tem_em_andamento=False and iniciar_trabalho=True to avoid
-        collision with ag_em_andamento_id (same barbeiro already has em_andamento at DB level)."""
+        """Iniciar com ag status=agendado → 200 ok."""
         c, ctx = client
-        with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+        with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
             with patch("blueprints.mesa.db.iniciar_trabalho", return_value=True):
                 r = c.post(
                     f"/mesa/{ctx['mesa_token']}/iniciar",
@@ -469,10 +468,10 @@ class TestMesaWalkin:
         assert "pausa" in data["error"].lower()
 
     def test_walkin_barbeiro_tem_em_andamento(self, client):
-        """Lines 167-168: barbeiro_tem_em_andamento inside lock → 400."""
+        """get_servico_em_andamento inside lock → 400 com ag_em_curso_id."""
         c, ctx = client
         with patch("blueprints.mesa.db.ausencia_ativa", return_value=None):
-            with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=True):
+            with patch("blueprints.mesa.db.get_servico_em_andamento", return_value={"id": 77}):
                 r = c.post(
                     f"/mesa/{ctx['mesa_token']}/walkin",
                     data=json.dumps({"nome": "Cliente Teste", "servico_id": ctx["svc_id"]}),
@@ -480,12 +479,13 @@ class TestMesaWalkin:
         assert r.status_code == 400
         data = json.loads(r.data)
         assert data["ok"] is False
+        assert data.get("ag_em_curso_id") == 77
 
     def test_walkin_proxima_marcacao_insuficiente(self, client):
-        """Lines 173-175: barbeiro_proxima_marcacao_minutos < duracao+buffer → 400."""
+        """barbeiro_proxima_marcacao_minutos < duracao+buffer → 400."""
         c, ctx = client
         with patch("blueprints.mesa.db.ausencia_ativa", return_value=None):
-            with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+            with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
                 with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=5):
                     r = c.post(
                         f"/mesa/{ctx['mesa_token']}/walkin",
@@ -497,10 +497,10 @@ class TestMesaWalkin:
         assert "tempo" in data["error"].lower()
 
     def test_walkin_valor_invalido(self, client):
-        """Lines 178-179: valor='abc' → ValueError → valor=0 (continues to success path)."""
+        """valor='abc' → ValueError → valor=0 (continues to success path)."""
         c, ctx = client
         with patch("blueprints.mesa.db.ausencia_ativa", return_value=None):
-            with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+            with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
                 with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
                     with patch("blueprints.mesa.db.iniciar_trabalho", return_value=True):
                         with patch("blueprints.mesa.db.get_agendamento", return_value={"token_avaliar": "tkn123"}):
@@ -512,10 +512,10 @@ class TestMesaWalkin:
         assert r.status_code in (200, 400)
 
     def test_walkin_iniciar_trabalho_fails(self, client):
-        """Lines 185-187: iniciar_trabalho returns False → 400."""
+        """iniciar_trabalho returns False → 400."""
         c, ctx = client
         with patch("blueprints.mesa.db.ausencia_ativa", return_value=None):
-            with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+            with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
                 with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
                     with patch("blueprints.mesa.db.iniciar_trabalho", return_value=False):
                         r = c.post(
@@ -530,7 +530,7 @@ class TestMesaWalkin:
         """Walkin com todos os mocks a passar → 200 ok."""
         c, ctx = client
         with patch("blueprints.mesa.db.ausencia_ativa", return_value=None):
-            with patch("blueprints.mesa.db.barbeiro_tem_em_andamento", return_value=False):
+            with patch("blueprints.mesa.db.get_servico_em_andamento", return_value=None):
                 with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
                     r = c.post(
                         f"/mesa/{ctx['mesa_token']}/walkin",

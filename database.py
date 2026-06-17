@@ -77,7 +77,7 @@ from db.agendamentos import (
     listar_hoje, listar_proximas_barbeiro,
     listar_todos, contar_ativos_dia, contar_todos,
     listar_datas_historico, listar_por_telefone,
-    get_agendamento, barbeiro_tem_em_andamento,
+    get_agendamento, barbeiro_tem_em_andamento, get_servico_em_andamento,
     barbeiro_proxima_marcacao_minutos,
     iniciar_trabalho, terminar_trabalho,
     _estado_hash, estado_hoje, estado_cliente,
