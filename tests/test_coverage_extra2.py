@@ -575,21 +575,40 @@ class TestEnviarLembretePushCliente:
     def test_envia_push_para_subs_cliente(self, ctx):
         """Com subscrições activas, chama _push_notif_sub para cada uma."""
         import app as app_module
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock as _MM
 
         bid_ = ctx["bid"]
         agora = datetime.now()
         hora_alvo = agora + timedelta(hours=24)
         data_hora = hora_alvo.strftime("%Y-%m-%d %H:%M:%S")
-        ag_id = ctx["db"].criar_agendamento(
-            "Cliente 24h Push", ctx["svc_id"], data_hora, bid_,
-            barbeiro_id=ctx["barb_id"], telefone="913000003")
 
         sub_fake = {"endpoint": "https://ep/cli", "p256dh": "p", "auth": "a"}
+
+        # Linha fake que simula um agendamento na janela 24h.
+        # Usa dict para que ag["campo"] funcione tal como sqlite3.Row.
+        fake_row = {
+            "id": 9001,
+            "cliente": "Cliente 24h Push",
+            "telefone": "913000003",
+            "data_hora": data_hora,
+            "servico_nome": "Corte",
+            "barbeiro_nome": "Barbeiro",
+        }
+        fake_cursor = _MM()
+        fake_cursor.fetchall.return_value = [fake_row]
+        fake_conn = _MM()
+        fake_conn.execute.return_value = fake_cursor
+
+        @contextmanager
+        def fake_read():
+            yield fake_conn
 
         with patch("helpers._PUSH_OK", True), \
              patch("helpers._VAPID_PRIVATE_KEY", "key"), \
              patch.object(app_module.db, "listar_barbearias",
                           return_value=[{"id": bid_}]), \
+             patch.object(app_module.db, "_read", fake_read), \
              patch.object(app_module.db, "cliente_push_listar_por_tel",
                           return_value=[sub_fake]), \
              patch("app._push_notif_sub") as mock_push:
