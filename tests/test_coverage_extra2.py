@@ -31,6 +31,7 @@ def ctx():
     tmp_db  = os.path.join(tmp_dir, "test_extra2.db")
     orig    = _db_conn.DB_PATH
 
+    _db_conn._reset_conn()          # garante _READ_CONN=None antes de mudar DB_PATH
     _db_conn.DB_PATH  = tmp_db
     db_module.DB_PATH = tmp_db
     _db_conn._CONN    = None
