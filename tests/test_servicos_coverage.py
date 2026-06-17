@@ -172,6 +172,54 @@ class TestDbServicos:
         s = svc.servico_por_id(tmp_id)
         assert s["ativo"] == 0
 
+    def test_toggle_servico_ativo(self, _ctx):
+        """toggle_servico_ativo desactiva e reactiva (linhas 77-80)."""
+        import db.servicos as svc
+        import database as db_mod
+        ctx = _ctx
+        db_mod.criar_servico("TmpToggle", 20, ctx["bid"], preco=40)
+        with db_mod._read() as c:
+            tid = c.execute(
+                "SELECT id FROM servicos WHERE nome='TmpToggle' AND barbearia_id=?",
+                (ctx["bid"],)).fetchone()["id"]
+        svc.toggle_servico_ativo(tid, ctx["bid"], 0)
+        assert svc.servico_por_id(tid)["ativo"] == 0
+        svc.toggle_servico_ativo(tid, ctx["bid"], 1)
+        assert svc.servico_por_id(tid)["ativo"] == 1
+
+    def test_mover_servico_id_inexistente(self, _ctx):
+        """mover_servico com id fora da barbearia → return sem erro (linhas 60-61)."""
+        import db.servicos as svc
+        # Não deve crashar nem alterar nada
+        svc.mover_servico(999999, "up", _ctx["bid"])
+
+    def test_mover_servico_fora_limites(self, _ctx):
+        """mover 1º 'up' e último 'down' → return sem efeito (linhas 64-65)."""
+        import db.servicos as svc
+        import database as db_mod
+        ctx = _ctx
+        rows = db_mod.listar_servicos(ctx["bid"], apenas_ativos=False)
+        primeiro, ultimo = rows[0]["id"], rows[-1]["id"]
+        svc.mover_servico(primeiro, "up", ctx["bid"])
+        svc.mover_servico(ultimo, "down", ctx["bid"])
+        rows2 = db_mod.listar_servicos(ctx["bid"], apenas_ativos=False)
+        assert rows2[0]["id"] == primeiro
+        assert rows2[-1]["id"] == ultimo
+
+    def test_mover_servico_troca(self, _ctx):
+        """mover_servico troca ordem com adjacente (linhas 66-72)."""
+        import db.servicos as svc
+        import database as db_mod
+        ctx = _ctx
+        db_mod.criar_servico("MovA", 15, ctx["bid"], preco=10)
+        db_mod.criar_servico("MovB", 15, ctx["bid"], preco=10)
+        rows = db_mod.listar_servicos(ctx["bid"], apenas_ativos=False)
+        alvo = rows[-1]["id"]            # último da lista
+        svc.mover_servico(alvo, "up", ctx["bid"])
+        rows2 = db_mod.listar_servicos(ctx["bid"], apenas_ativos=False)
+        # O alvo subiu → já não é o último
+        assert rows2[-1]["id"] != alvo
+
 
 # ══════════════════════════════════════════════════════════════
 #  blueprints/servicos.py — clientes bloqueados + config TZ inválido
