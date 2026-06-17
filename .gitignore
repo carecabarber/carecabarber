@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .secret_key
 barbearia.db
+rate_limit.db
+version.txt
 .env
 .pythonanywhere
 .root_init_password
