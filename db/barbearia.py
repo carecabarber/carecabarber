@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime, timedelta, date
 from db._conn import (
     _read, _write, _agora, FMT, invalidar_cache_slots, slug_unico,
+    normalizar_dominio,
     _HORARIO_PADRAO,
     get_config, set_config,
     _tz_cache, _tz_cache_lock,
@@ -29,6 +30,55 @@ def get_barbearia_por_slug(slug: str) -> dict | None:
     with _read() as conn:
         row = conn.execute("SELECT * FROM barbearias WHERE slug=?", (slug,)).fetchone()
     return dict(row) if row else None
+
+
+def get_barbearia_por_dominio(dominio: str | None) -> dict | None:
+    """Resolve um estabelecimento pelo seu domínio próprio.
+
+    Só devolve resultado se o domínio estiver VERIFICADO (dominio_verificado=1) —
+    segurança: um domínio por confirmar nunca encaminha tráfego.
+    """
+    dom = normalizar_dominio(dominio)
+    if not dom:
+        return None
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT * FROM barbearias WHERE dominio=? AND dominio_verificado=1", (dom,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_dominio(barbearia_id: int, dominio: str | None) -> str | None:
+    """Define (ou limpa, com None) o domínio próprio de um estabelecimento.
+
+    Ao alterar o domínio a verificação é sempre reposta a 0 — tem de ser
+    re-confirmado pelo root. Devolve o domínio normalizado guardado (ou None).
+    Levanta ValueError se o domínio já pertencer a outro estabelecimento.
+    """
+    dom = normalizar_dominio(dominio)
+    with _write() as conn:
+        if dom:
+            existe = conn.execute(
+                "SELECT id FROM barbearias WHERE dominio=? AND id!=?",
+                (dom, barbearia_id)).fetchone()
+            if existe:
+                raise ValueError(
+                    f"O domínio '{dom}' já está associado a outro estabelecimento.")
+        conn.execute(
+            "UPDATE barbearias SET dominio=?, dominio_verificado=0 WHERE id=?",
+            (dom, barbearia_id))
+    return dom
+
+
+def verificar_dominio(barbearia_id: int, verificado: bool = True) -> None:
+    """Marca (ou desmarca) o domínio de um estabelecimento como verificado.
+
+    Acção do root, após confirmar que o DNS aponta correctamente para o serviço.
+    """
+    with _write() as conn:
+        conn.execute(
+            "UPDATE barbearias SET dominio_verificado=? WHERE id=?",
+            (1 if verificado else 0, barbearia_id))
 
 
 _TIPOS_VALIDOS = {'barbearia', 'salao_estetica', 'spa', 'clinica', 'outro'}

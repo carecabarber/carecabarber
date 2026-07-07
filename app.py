@@ -135,6 +135,37 @@ def _gerar_csp_nonce():
 
 
 @app.before_request
+def _resolver_dominio_proprio():
+    """Encaminha domínios próprios de estabelecimentos para a sua entrada de cliente.
+
+    Se o pedido chegar por um domínio próprio VERIFICADO (ex.: joao.com), a raiz
+    "/" redirecciona para a entrada de cliente desse estabelecimento. Quando o
+    Host é o domínio principal (ou qualquer domínio sem correspondência), esta
+    função é inerte — o comportamento actual mantém-se inalterado.
+
+    A resolução Host→estabelecimento é cacheada por worker (TTL 300s, negativos
+    incluídos) para não fazer uma query à BD em cada pedido do domínio principal.
+    """
+    from flask import g
+    g.tenant = None
+    host = db.normalizar_dominio(request.host)
+    if not host:
+        return
+    _ck = f"dom:{host}"
+    barbearia = _pc_get(_ck)
+    if barbearia is None:                       # ausente do cache → resolver
+        barbearia = db.get_barbearia_por_dominio(host) or False
+        _pc_set(_ck, barbearia, 300)
+    if not barbearia:                           # domínio principal/desconhecido
+        return
+    g.tenant = barbearia
+    # Só a raiz é redireccionada; restantes caminhos (/cliente/..., /static, API)
+    # continuam a funcionar normalmente sob o domínio próprio.
+    if request.path == "/" and request.method == "GET":
+        return redirect(url_for("cliente_entrada", slug=barbearia["slug"]))
+
+
+@app.before_request
 def _verificar_plano():
     """Bloqueia staff de barbearias com plano expirado."""
     from flask import g

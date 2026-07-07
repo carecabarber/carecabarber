@@ -478,6 +478,26 @@ def slug_unico(nome: str, excluir_id: int | None = None) -> str:
         i += 1
 
 
+def normalizar_dominio(dominio: str | None) -> str | None:
+    """Normaliza um domínio próprio para armazenamento e comparação.
+
+    Minúsculas, sem esquema (http/https), sem porta, sem caminho e sem 'www.'
+    inicial — para que 'https://www.joao.com/' e 'joao.com' resolvam ao mesmo
+    estabelecimento. Devolve None se ficar vazio.
+    """
+    if not dominio:
+        return None
+    d = dominio.strip().lower()
+    if "://" in d:
+        d = d.split("://", 1)[1]
+    d = d.split("/", 1)[0]      # remove caminho
+    d = d.split(":", 1)[0]      # remove porta
+    if d.startswith("www."):
+        d = d[4:]
+    d = d.strip(".")
+    return d or None
+
+
 def backup_db(dest_path: str) -> None:
     """Backup seguro com locking_mode=EXCLUSIVE.
 
@@ -515,7 +535,7 @@ def backup_db(dest_path: str) -> None:
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 25   # versão actual do schema
+_SCHEMA_VERSION = 26   # versão actual do schema
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Aplica todas as migrações pendentes de forma idempotente."""
@@ -785,6 +805,26 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             except sqlite3.OperationalError:
                 pass
             _done(25)
+
+        elif _v == 26:
+            # barbearias: domínio próprio por estabelecimento.
+            # dominio_verificado=0 até o root confirmar a propriedade (verificação
+            # manual). O routing por domínio só activa quando verificado=1.
+            try:
+                conn.execute("ALTER TABLE barbearias ADD COLUMN dominio TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE barbearias ADD COLUMN dominio_verificado INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            # Índice único parcial — dois estabelecimentos nunca partilham domínio.
+            try:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_barbearias_dominio "
+                             "ON barbearias(dominio) WHERE dominio IS NOT NULL")
+            except sqlite3.OperationalError:
+                pass
+            _done(26)
 
         conn.commit()
         _done(_v)

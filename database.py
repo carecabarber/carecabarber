@@ -25,7 +25,7 @@ from db._conn import (
     _tz_local, _tz_cache, _tz_cache_lock, _TZ_CACHE_TTL,
     set_request_tz, _agora, get_barbearia_tz, set_barbearia_tz,
     _CONN, _connect, get_conn, _write, _write_exclusive, _read,
-    normalizar_tel, gerar_slug, slug_unico,
+    normalizar_tel, gerar_slug, slug_unico, normalizar_dominio,
     backup_db, _run_migrations, init_db,
     get_config, set_config, get_todas_configs,
 )
@@ -34,6 +34,7 @@ from db._conn import (
 from db.barbearia import (
     _TIPOS_VALIDOS, PLANOS, PLANO_EXP, _PLANO_BID,
     listar_barbearias, get_barbearia, get_barbearia_por_slug,
+    get_barbearia_por_dominio, set_dominio, verificar_dominio,
     criar_barbearia, set_tipo_barbearia, set_vocab_custom,
     get_planos_precos, set_plano_preco,
     get_planos_precos_barbearia, set_plano_preco_barbearia,
