@@ -35,8 +35,11 @@ def register(app) -> None:
         _agora_dt = _agora()
         hoje_str  = _agora_dt.strftime("%Y-%m-%d")
         # ── Cache de agendamentos de hoje ──────────────────────────
+        # fresh=1 força leitura fresca da BD (após iniciar/terminar/etc.),
+        # evitando que o cache por-worker faça a ação parecer que falhou.
+        _fresh = request.args.get("fresh")
         _ck_ag = f"idx_ag:{barbearia_id}:{filtro_bid}"
-        agendamentos = _pc_get(_ck_ag)
+        agendamentos = None if _fresh else _pc_get(_ck_ag)
         if agendamentos is None:
             agendamentos = enriquecer_lista(db.listar_hoje(barbearia_id, filtro_bid))
             _pc_set(_ck_ag, agendamentos, _DASHBOARD_CACHE_TTL)
@@ -221,7 +224,7 @@ def register(app) -> None:
                         db.criar_agendamento(nome, sid, dh, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas)
                         _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
                         _invalidar_idx(barbearia_id)
-                        return redirect(url_for("index"))
+                        return redirect(url_for("index", fresh=1))
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("novo.html", servicos=db.listar_servicos(barbearia_id),
                                barbeiros=db.listar_barbeiros(barbearia_id, incluir_chefe=True),
@@ -288,7 +291,7 @@ def register(app) -> None:
                             return redirect(url_for("walkin"))
                         _blog("WALKIN", bid=barbearia_id, barb=bid_, sid=sid, ag_id=novo_id)
                     _invalidar_idx(barbearia_id)
-                    return redirect(url_for("index"))
+                    return redirect(url_for("index", fresh=1))
         _agora_dt   = _agora()
         _weekday    = _agora_dt.weekday()
         _horario    = db.get_horario_dia(_weekday, barbearia_id)
@@ -331,7 +334,7 @@ def register(app) -> None:
                             "✂️ Atendimento iniciado",
                             f"{cliente} está a ser atendido",
                             barbeiro_id=ag["barbeiro_id"])
-        return redirect(url_for("index"))
+        return redirect(url_for("index", fresh=1))
 
 
     @app.route("/terminar/<int:id>", methods=["POST"])
@@ -361,7 +364,7 @@ def register(app) -> None:
                 db.guardar_avaliacao(id, ag["barbearia_id"], nota)
         except (ValueError, TypeError):
             pass
-        return redirect(url_for("index"))
+        return redirect(url_for("index", fresh=1))
 
 
     @app.route("/avaliar/<int:id>", methods=["POST"])
@@ -389,7 +392,7 @@ def register(app) -> None:
         if ag and pode_gerir_agendamento(ag) and ag["status"] == ST_AGENDADO:
             if db.marcar_nao_compareceu(id):
                 _invalidar_idx(ag["barbearia_id"])
-        return redirect(url_for("index"))
+        return redirect(url_for("index", fresh=1))
 
 
     @app.route("/bloquear", methods=["POST"])
@@ -464,7 +467,7 @@ def register(app) -> None:
                     _push_espera(_entrada, ag["barbearia_id"])
             except Exception as _e:
                 _log(f"ESPERA_NOTIF_ERR ag={id} err={_e}")
-        return redirect(url_for("index"))
+        return redirect(url_for("index", fresh=1))
 
 
     @app.route("/reagendar/<int:id>", methods=["GET","POST"])

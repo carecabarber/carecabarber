@@ -255,8 +255,10 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content-sem').forEach(el => el.style.display = isMes ? 'none' : '');
 }
 document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('btn-mes')?.addEventListener('click', () => switchTab('mes'));
-    document.getElementById('btn-sem')?.addEventListener('click', () => switchTab('sem'));
+    var _btnMes = document.getElementById('btn-mes');
+    var _btnSem = document.getElementById('btn-sem');
+    _btnMes && _btnMes.addEventListener('click', () => switchTab('mes'));
+    _btnSem && _btnSem.addEventListener('click', () => switchTab('sem'));
     // Linha clicável de barbeiro
     document.addEventListener('click', function(e) {
         const li = e.target.closest('.js-barb-link[data-href]');

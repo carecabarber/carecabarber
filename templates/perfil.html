@@ -109,7 +109,8 @@
 
 <script nonce="{{ csp_nonce }}">
 (function() {
-    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const _csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const CSRF = (_csrfMeta && _csrfMeta.content) || "";
     const avatarImg   = document.getElementById("avatar-img");
     const btnMenu     = document.getElementById("btn-foto-menu");
     const fotoMenu    = document.getElementById("foto-menu");
@@ -497,7 +498,8 @@ async function registarBiometria() {
 }
 
 // addEventListener (substitui onclick= inline bloqueado pelo CSP)
-document.getElementById('btn-registar-bio')?.addEventListener('click', registarBiometria);
+var _btnBioEl = document.getElementById('btn-registar-bio');
+_btnBioEl && _btnBioEl.addEventListener('click', registarBiometria);
 document.addEventListener('click', function(e) {
     const btn = e.target.closest('.js-apagar-cred[data-id]');
     if (btn) apagarCredencial(parseInt(btn.dataset.id), btn);
@@ -506,7 +508,8 @@ document.addEventListener('click', function(e) {
 async function apagarCredencial(id, btnEl) {
     if (!confirm("Remover este dispositivo biométrico?")) return;
     btnEl.disabled = true;
-    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const _csrfMeta2 = document.querySelector('meta[name="csrf-token"]');
+    const csrf = (_csrfMeta2 && _csrfMeta2.content) || "";
     try {
         const resp = await fetch(`/webauthn/credencial/apagar/${id}`, {
             method: "POST",

@@ -57,6 +57,44 @@ jobs:
       - name: Correr testes JS
         run: node --test tests/test_frontend.js
 
+  # ── 1c. Testes E2E (Selenium + Firefox headless) ───────────────
+  test-e2e:
+    name: E2E (Selenium + Firefox)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Instalar geckodriver
+        uses: browser-actions/setup-geckodriver@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Instalar dependências
+        run: |
+          pip install -r requirements.txt
+          pip install pytest selenium
+
+      - name: Correr testes E2E (headless)
+        env:
+          SECRET_KEY: ci-secret-apenas-testes
+          WTF_CSRF_ENABLED: "0"
+        run: |
+          export E2E_FIREFOX_BIN="$(command -v firefox)"
+          export E2E_GECKODRIVER="$(command -v geckodriver)"
+          echo "Firefox:     ${E2E_FIREFOX_BIN}"
+          echo "geckodriver: ${E2E_GECKODRIVER}"
+          python -m pytest tests/test_e2e.py -v --tb=short
+
   # ── 1b. Verificar se os Secrets de deploy estão configurados ───
   # Permite que o CI de testes fique sempre verde mesmo sem Secrets;
   # o deploy só activa quando PA_TOKEN existir.
@@ -81,7 +119,7 @@ jobs:
   # Corre só em push para main, se os testes passaram E os Secrets existirem
   deploy:
     name: Deploy → PythonAnywhere
-    needs: [test, test-js, check-secrets]
+    needs: [test, test-js, test-e2e, check-secrets]
     if: github.event_name == 'push' && needs.check-secrets.outputs.ready == 'true'
     runs-on: ubuntu-latest
 

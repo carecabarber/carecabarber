@@ -8,7 +8,8 @@ Domínios:
   db/barbearia.py   — Barbearias, planos, horários, ausências
   db/barbeiros.py   — Barbeiros, auth, WebAuthn, fotos
   db/servicos.py    — Serviços
-  db/agendamentos.py — Agendamentos, disponibilidade, estado, bloqueios
+  db/agendamentos.py — Agendamentos, estado, bloqueios, tokens, fila de espera
+  db/disponibilidade.py — Cálculo de slots disponíveis e conflitos (read-only)
   db/relatorios.py  — Estatísticas, tendência
   db/push.py        — Web Push subscriptions
 """
@@ -82,7 +83,6 @@ from db.agendamentos import (
     iniciar_trabalho, terminar_trabalho,
     _estado_hash, estado_hoje, estado_cliente,
     cancelar_agendamento, deletar_walkin_orfao, reagendar_agendamento,
-    verificar_disponibilidade, horarios_disponiveis,
     contar_visitas, contar_visitas_batch,
     criar_bloqueio_hora, listar_bloqueios_dia,
     agendamentos_cliente_barbeiro_dia, gerar_token_reagendar,
@@ -95,11 +95,17 @@ from db.agendamentos import (
     fidelidade_reset, fidelidade_resets_count,
 )
 
+# ── db/disponibilidade.py ─────────────────────────────────────────────────────
+from db.disponibilidade import (
+    verificar_disponibilidade, horarios_disponiveis,
+)
+
 # ── db/relatorios.py ──────────────────────────────────────────────────────────
 from db.relatorios import (
     estatisticas, estatisticas_detalhadas_barbeiro,
     tendencia_semanal, duracao_real_minutos,
     taxa_cancelamentos, top_clientes, visitas_cliente, analytics_clientes,
+    resumo_mensal,
 )
 
 # ── db/push.py ────────────────────────────────────────────────────────────────

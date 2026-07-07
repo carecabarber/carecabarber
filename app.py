@@ -19,15 +19,33 @@ from database import (ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO,
 import os, secrets
 
 # ── Sentry — activo só se SENTRY_DSN estiver definido (produção) ──────────────
+# Privacidade: send_default_pii=False (clientes reais — não enviar IPs, cookies,
+# nem corpos de pedido para o Sentry). release/environment ajudam a correlacionar
+# erros com cada deploy. O estado fica em _SENTRY_ATIVO e é exposto em /healthz
+# para confirmar a partir de produção (curl .../healthz → "sentry": true).
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
+_SENTRY_ATIVO = False
 if _sentry_dsn:
     try:
         import sentry_sdk
         from sentry_sdk.integrations.flask import FlaskIntegration
-        sentry_sdk.init(dsn=_sentry_dsn, integrations=[FlaskIntegration()],
-                        traces_sample_rate=0.05)
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "version.txt")) as _svf:
+                _sentry_release = "barbearia@" + _svf.read().strip()
+        except Exception:
+            _sentry_release = None
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=0.05,
+            send_default_pii=False,
+            environment=os.environ.get("SENTRY_ENV", "production"),
+            release=_sentry_release,
+        )
+        _SENTRY_ATIVO = True
+        logging.getLogger("sentry").info("Sentry activo (release=%s)", _sentry_release)
     except ImportError:
-        pass
+        logging.getLogger("sentry").warning("SENTRY_DSN definido mas sentry-sdk não instalado")
 
 app = Flask(__name__)
 # PythonAnywhere corre atrás de nginx (proxy reverso) — necessário para HTTPS/CSRF correcto
@@ -55,6 +73,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=14)
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
 app.config['WTF_CSRF_SSL_STRICT']     = False
 app.config['WTF_CSRF_TIME_LIMIT']     = None
+app.config['SENTRY_ATIVO']            = _SENTRY_ATIVO
 
 # ── Secret key ────────────────────────────────────────────────
 _key_file = os.path.join(os.path.dirname(__file__), ".secret_key")

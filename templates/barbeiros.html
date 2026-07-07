@@ -331,14 +331,17 @@
 
 <script nonce="{{ csp_nonce }}">
 // Validação: data_fim >= data_inicio
-document.querySelector('input[name="data_fim"]')?.addEventListener('change', function() {
-    const di = document.querySelector('input[name="data_inicio"]')?.value;
+var _dfimEl = document.querySelector('input[name="data_fim"]');
+_dfimEl && _dfimEl.addEventListener('change', function() {
+    var _diEl = document.querySelector('input[name="data_inicio"]');
+    const di = _diEl && _diEl.value;
     if (di && this.value < di) {
         alert('A data de fim não pode ser anterior à data de início.');
         this.value = di;
     }
 });
-document.querySelector('input[name="data_inicio"]')?.addEventListener('change', function() {
+var _diniEl = document.querySelector('input[name="data_inicio"]');
+_diniEl && _diniEl.addEventListener('change', function() {
     const df = document.querySelector('input[name="data_fim"]');
     if (df && df.value && df.value < this.value) df.value = this.value;
 });
@@ -373,7 +376,7 @@ function _erroInline(inp, msg) {
 // Validação do nome do novo barbeiro
 (function() {
     const f = document.querySelector('form[action="{{ url_for("barbeiros") }}"]');
-    const inp = f?.querySelector('input[name="nome"]');
+    const inp = f && f.querySelector('input[name="nome"]');
     if (!inp) return;
     inp.addEventListener("input", () => {
         const v = inp.value.trim();
@@ -390,22 +393,22 @@ document.querySelectorAll('form[action*="set_credenciais"]').forEach(f => {
     const pInp = f.querySelector('input[name="senha"]');
     const _USER_RE = /^[a-zA-Z0-9_.\-]{3,50}$/;
 
-    uInp?.addEventListener("input", () => {
+    uInp && uInp.addEventListener("input", () => {
         const v = uInp.value.trim();
         if (!v) { _erroInline(uInp, ""); return; }
         _erroInline(uInp, !_USER_RE.test(v) ? "Só letras, números, _ e . (mín. 3 caracteres)." : "");
     });
-    pInp?.addEventListener("input", () => {
+    pInp && pInp.addEventListener("input", () => {
         const v = pInp.value;
         if (!v) { _erroInline(pInp, ""); return; }
         _erroInline(pInp, v.length < 6 ? "Mínimo 6 caracteres." : "");
     });
     f.addEventListener("submit", e => {
         let ok = true;
-        if (!_USER_RE.test(uInp?.value.trim() || "")) {
+        if (!_USER_RE.test((uInp && uInp.value.trim()) || "")) {
             _erroInline(uInp, "Username inválido."); ok = false;
         }
-        if ((pInp?.value.length || 0) < 6) {
+        if (((pInp && pInp.value.length) || 0) < 6) {
             _erroInline(pInp, "Mínimo 6 caracteres."); ok = false;
         }
         if (!ok) e.preventDefault();
@@ -551,9 +554,9 @@ const _PROF = {{ vocab.profissional | tojson }};
     function refreshAvatar(id, ts) {
         const img = document.getElementById("barb-avatar-" + id);
         // avatar no topo do card (pode existir mais que um)
-        const topImg = document.querySelector(
-            '[data-panel="foto-' + id + '"]'
-        )?.closest(".barb-card")?.querySelector(".barb-avatar img");
+        const _pnl = document.querySelector('[data-panel="foto-' + id + '"]');
+        const _card = _pnl && _pnl.closest(".barb-card");
+        const topImg = _card && _card.querySelector(".barb-avatar img");
         const url = "/foto/" + id + "?t=" + (ts || Date.now());
         if (img)    img.src = url;
         if (topImg) topImg.src = url;
@@ -671,8 +674,9 @@ const _PROF = {{ vocab.profissional | tojson }};
         const btnAp = e.target.closest(".js-foto-apagar[data-id]");
         if (btnAp) {
             const id = btnAp.dataset.id;
+            const _avEl = document.getElementById("barb-avatar-" + id);
             (_confirm || function(m){ return Promise.resolve(window.confirm(m)); })(
-                "Remover a foto de " + (document.getElementById("barb-avatar-" + id)?.alt || _PROF) + "?"
+                "Remover a foto de " + ((_avEl && _avEl.alt) || _PROF) + "?"
             ).then(function(ok) {
                 if (!ok) return;
                 fetch("/barbeiros/" + id + "/foto/apagar", {method: "POST"})

@@ -142,7 +142,8 @@
 <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
 <script nonce="{{ csp_nonce }}">
 'use strict';
-const MESA_TOKEN = {{ mesa_token | tojson }};
+const MESA_TOKEN    = {{ mesa_token | tojson }};
+const MOEDA_SIMBOLO = {{ moeda_simbolo | tojson }};
 
 // ── Utilitário de escaping ───────────────────────────────────
 function escHtml(s) {
@@ -301,13 +302,23 @@ document.getElementById("btn-confirmar-terminar").addEventListener("click", asyn
         if (d.ok) {
             const card = document.getElementById("ag-" + _agTerminar);
             if (card) {
-                card.style.opacity = "0.4";
+                card.style.opacity = "0.6";
                 card.querySelector(".ag-btns").innerHTML = "";
                 const badge = card.querySelector(".ag-status-badge");
                 if (badge) {
                     badge.textContent = "Concluído";
                     badge.style.color = "var(--green)";
                     badge.style.fontWeight = "600";
+                }
+                // Mostrar ao cliente o valor a pagar (informativo)
+                if (!card.querySelector(".ag-pagar") && valor > 0) {
+                    const pagar = document.createElement("div");
+                    pagar.className = "ag-pagar";
+                    pagar.style.cssText = "margin-top:10px;padding:10px 12px;border-radius:10px;" +
+                        "background:rgba(46,204,113,0.12);border:1px solid rgba(46,204,113,0.35);" +
+                        "color:var(--green);font-weight:700;font-size:0.95rem;text-align:center";
+                    pagar.textContent = "A pagar: " + valor + " " + MOEDA_SIMBOLO;
+                    card.appendChild(pagar);
                 }
             }
             fecharModal();

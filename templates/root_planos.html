@@ -355,7 +355,8 @@
 
     <script nonce="{{ csp_nonce }}">
     (function() {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        const _meta = document.querySelector('meta[name="csrf-token"]');
+        const token = _meta && _meta.content;
         if (token) {
             document.querySelectorAll('form').forEach(function(f) {
                 if (!f.querySelector('[name="csrf_token"]')) {

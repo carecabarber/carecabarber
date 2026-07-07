@@ -84,7 +84,8 @@ if (window.PublicKeyCredential) {
         })
         .catch(() => {});
 }
-document.getElementById("btn-bio")?.addEventListener("click", loginBiometrico);
+var _btnBio = document.getElementById("btn-bio");
+_btnBio && _btnBio.addEventListener("click", loginBiometrico);
 
 function b64uToBuffer(b64u) {
     const b64 = b64u.replace(/-/g,'+').replace(/_/g,'/').padEnd(

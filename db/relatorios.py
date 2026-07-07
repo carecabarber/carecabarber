@@ -280,6 +280,61 @@ def taxa_cancelamentos(barbearia_id: int, mes: str) -> dict:
     }
 
 
+def resumo_mensal(barbearia_id: int, mes: str) -> dict:
+    """Resumo agregado de um mês (YYYY-MM) para o relatório mensal por email.
+
+    Devolve totais do estabelecimento, repartição por barbeiro e top serviços.
+    Atendidos = concluido + walkin (clientes efectivamente servidos).
+    """
+    with _read() as conn:
+        tot = conn.execute(
+            "SELECT "
+            "  SUM(CASE WHEN status IN ('concluido','walkin') THEN 1 ELSE 0 END)              AS atendidos, "
+            "  SUM(CASE WHEN status IN ('concluido','walkin') THEN COALESCE(valor,0) ELSE 0 END) AS receita, "
+            "  SUM(CASE WHEN status='walkin'         THEN 1 ELSE 0 END)                        AS walkins, "
+            "  SUM(CASE WHEN status='cancelado'      THEN 1 ELSE 0 END)                        AS cancelados, "
+            "  SUM(CASE WHEN status='nao_compareceu' THEN 1 ELSE 0 END)                        AS faltas, "
+            "  COUNT(*)                                                                        AS total "
+            "FROM agendamentos WHERE barbearia_id=? AND strftime('%Y-%m', data_hora)=?",
+            (barbearia_id, mes)).fetchone()
+
+        por_barbeiro = conn.execute(
+            "SELECT b.nome, "
+            "  SUM(CASE WHEN a.status IN ('concluido','walkin') THEN 1 ELSE 0 END)              AS atendidos, "
+            "  SUM(CASE WHEN a.status IN ('concluido','walkin') THEN COALESCE(a.valor,0) ELSE 0 END) AS receita "
+            "FROM barbeiros b "
+            "LEFT JOIN agendamentos a ON a.barbeiro_id=b.id AND a.barbearia_id=b.barbearia_id "
+            "  AND strftime('%Y-%m', a.data_hora)=? "
+            "WHERE b.barbearia_id=? AND b.role IN ('chefe','barbeiro') "
+            "GROUP BY b.id, b.nome ORDER BY receita DESC",
+            (mes, barbearia_id)).fetchall()
+
+        top_serv = conn.execute(
+            "SELECT s.nome, COUNT(*) AS n, SUM(COALESCE(a.valor,0)) AS receita "
+            "FROM agendamentos a JOIN servicos s ON s.id=a.servico_id "
+            "WHERE a.barbearia_id=? AND a.status IN ('concluido','walkin') "
+            "  AND strftime('%Y-%m', a.data_hora)=? "
+            "GROUP BY a.servico_id ORDER BY n DESC LIMIT 5",
+            (barbearia_id, mes)).fetchall()
+
+    atendidos  = (tot["atendidos"] if tot else 0) or 0
+    receita    = (tot["receita"]   if tot else 0) or 0
+    total      = (tot["total"]     if tot else 0) or 0
+    perdidos   = ((tot["cancelados"] if tot else 0) or 0) + ((tot["faltas"] if tot else 0) or 0)
+    return {
+        "mes":        mes,
+        "atendidos":  atendidos,
+        "receita":    round(receita, 2),
+        "walkins":    (tot["walkins"]    if tot else 0) or 0,
+        "cancelados": (tot["cancelados"] if tot else 0) or 0,
+        "faltas":     (tot["faltas"]     if tot else 0) or 0,
+        "ticket_medio": round(receita / atendidos, 2) if atendidos else 0,
+        "taxa_perdidos": round(perdidos / total * 100) if total else 0,
+        "por_barbeiro": [dict(r) for r in por_barbeiro],
+        "top_servicos": [dict(r) for r in top_serv],
+    }
+
+
 def top_clientes(barbearia_id: int, limite: int = 10) -> list[dict]:
     """Top N clientes por número de visitas concluídas."""
     with _read() as conn:

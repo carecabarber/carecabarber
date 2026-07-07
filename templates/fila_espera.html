@@ -51,7 +51,7 @@
         <form action="{{ url_for('fila_espera_remover', id=e.id) }}" method="post"
               data-confirm="Remover {{ e.cliente_nome | e }} da fila de espera?">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-cancel" title="Remover da fila">✕</button>
+            <button type="submit" class="btn btn-cancel" title="Remover da fila">✕ Remover</button>
         </form>
     </div>
 </li>

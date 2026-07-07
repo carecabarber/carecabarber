@@ -10,6 +10,13 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 # import da app. setdefault não sobrepõe se já estiver no ambiente do PythonAnywhere.
 os.environ.setdefault("VAPID_PRIVATE_KEY", "om_CnOBDJSLlLHSqt0S_Z6AK16rYSzwf9Ebx8D_enQM")
 
+# Sentry (observabilidade de erros em produção). Para ACTIVAR:
+#   1. Criar projecto Flask em https://sentry.io e copiar o DSN.
+#   2. Descomentar a linha abaixo e colar o DSN.
+#   3. Reload da web app no PythonAnywhere.
+# Confirmar: curl https://carecabarber.pythonanywhere.com/healthz → "sentry": true
+# os.environ.setdefault("SENTRY_DSN", "https://<chave>@<org>.ingest.sentry.io/<id>")
+
 # Caminho absoluto para a pasta do projeto
 project_home = os.path.dirname(os.path.abspath(__file__))
 if project_home not in sys.path:

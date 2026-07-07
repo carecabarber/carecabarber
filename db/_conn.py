@@ -14,7 +14,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "barbearia.db")
+# DB_PATH: por omissão fica ao lado do projecto (PythonAnywhere). No Railway
+# define-se a variável de ambiente DB_PATH=/data/barbearia.db (Volume persistente).
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "barbearia.db"
+)
 
 FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -24,19 +28,60 @@ _BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
+#
+# Invalidação cross-worker: o PythonAnywhere corre múltiplos workers, cada um
+# com a sua própria cópia de _slots_cache em memória. Quando um worker invalida
+# (booking/cancelamento), os outros não sabem — serviriam slots obsoletos até ao
+# TTL expirar (até 60 s), podendo mostrar como livre um slot já ocupado.
+# Solução: ficheiro-sentinela /tmp/ccb_bust_{bid} (mesmo usado pelo _pcache do
+# dashboard em helpers_booking). Cada entrada guarda o mtime no momento do set;
+# se o ficheiro for tocado por outro worker, o mtime muda e a entrada é miss.
+# /tmp é tmpfs (ramdisk) no PA, logo getmtime é uma lookup de inode em memória.
 _slots_cache: dict = {}
 _slots_cache_lock = threading.Lock()
+
+
+def _slots_bust_path(bid) -> str:
+    return f"/tmp/ccb_bust_{bid}"
+
+
+def _slots_bust_mtime(bid) -> float:
+    try:
+        return os.path.getmtime(_slots_bust_path(bid))
+    except OSError:
+        return 0.0
+
+
+def _slots_bust_touch(bid) -> None:
+    """Sinaliza invalidação da cache de slots a todos os workers."""
+    try:
+        with open(_slots_bust_path(bid), 'w') as _f:
+            _f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def _slots_bid_from_key(key: str):
+    """barbearia_id é sempre o primeiro segmento da chave ({bid}:{...})."""
+    head = key.split(':', 1)[0]
+    return head if head.isdigit() else None
+
 
 def _slots_cache_get(key: str) -> list | None:
     with _slots_cache_lock:
         entry = _slots_cache.get(key)
-        if entry and time.monotonic() < entry["exp"]:
-            return entry["data"]
-        return None
+        if not entry or time.monotonic() >= entry["exp"]:
+            return None
+        bid = _slots_bid_from_key(key)
+        if bid is not None and _slots_bust_mtime(bid) > entry.get("bust", 0.0):
+            return None   # outro worker invalidou entretanto
+        return entry["data"]
 
 _SLOTS_CACHE_MAX = 300   # máximo de entradas — evita OOM em PythonAnywhere
 
 def _slots_cache_set(key: str, data: list, ttl: int | float) -> None:
+    bid = _slots_bid_from_key(key)
+    bust_at_set = _slots_bust_mtime(bid) if bid is not None else 0.0
     with _slots_cache_lock:
         # Se cache cheio, apagar primeiro as entradas já expiradas; depois as mais antigas
         if len(_slots_cache) >= _SLOTS_CACHE_MAX:
@@ -50,7 +95,7 @@ def _slots_cache_set(key: str, data: list, ttl: int | float) -> None:
                 mais_antigas = sorted(_slots_cache, key=lambda k: _slots_cache[k]["exp"])[:50]
                 for k in mais_antigas:
                     del _slots_cache[k]
-        _slots_cache[key] = {"data": data, "exp": time.monotonic() + ttl}
+        _slots_cache[key] = {"data": data, "exp": time.monotonic() + ttl, "bust": bust_at_set}
 
 # ── Constantes de status ──────────────────────────────────────────────────────
 # Usar estas constantes em vez de strings literais para evitar typos silenciosos.
@@ -77,6 +122,9 @@ def invalidar_cache_slots(barbearia_id: int | str | None = None) -> None:
             chaves = [k for k in _slots_cache if k.startswith(bid_str + ":")]
             for k in chaves:
                 del _slots_cache[k]
+    # Fora do lock (I/O): sinaliza a invalidação aos outros workers do PA.
+    if barbearia_id is not None:
+        _slots_bust_touch(barbearia_id)
 
 
 def invalidar_cache_slots_completo() -> None:

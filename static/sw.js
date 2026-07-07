@@ -129,7 +129,8 @@ async function networkFirstWithOffline(req) {
         const response = await fetch(req);
 
         // Guardar em cache dinâmico apenas respostas HTML válidas
-        if (response.ok && response.headers.get('content-type')?.includes('text/html')) {
+        const _ct = response.headers.get('content-type');
+        if (response.ok && _ct && _ct.includes('text/html')) {
             const cache = await caches.open(DYNAMIC_CACHE);
             cache.put(req, response.clone());
             _trimDynamicCache();   // limpar entradas excedentes (fire-and-forget)
@@ -174,7 +175,7 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     // Validar URL: apenas caminhos relativos (começam com /) ou mesma origem — previne open redirect
-    const rawUrl = event.notification.data?.url;
+    const rawUrl = event.notification.data && event.notification.data.url;
     let target = '/';
     if (typeof rawUrl === 'string') {
         try {
@@ -202,7 +203,7 @@ self.addEventListener('notificationclick', event => {
 
 // ── Mensagens do cliente (força update manual) ───────────────
 self.addEventListener('message', event => {
-    if (event.data?.type === 'SKIP_WAITING') {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting();
     }
 });

@@ -283,7 +283,8 @@
     const _SERVC     = {{ vocab.servico | lower | tojson }};
     const _MESA_ICON = {{ vocab.mesa_icon | tojson }};
     (function() {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        const _meta = document.querySelector('meta[name="csrf-token"]');
+        const token = _meta && _meta.content;
         if (!token) return;
         document.querySelectorAll('form').forEach(function(f) {
             if (!f.querySelector('[name="csrf_token"]')) {
@@ -689,7 +690,8 @@
                     applicationServerKey: urlBase64ToUint8Array(VAPID_KEY),
                 });
                 const subJson = sub.toJSON();
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+                const _csrfMeta = document.querySelector('meta[name="csrf-token"]');
+                const csrfToken = (_csrfMeta && _csrfMeta.content) || "";
                 const resp = await fetch("/api/cliente-push/subscribe", {
                     method: "POST",
                     headers: {
@@ -698,8 +700,8 @@
                     },
                     body: JSON.stringify({
                         endpoint: subJson.endpoint,
-                        p256dh: subJson.keys?.p256dh || "",
-                        auth: subJson.keys?.auth || "",
+                        p256dh: (subJson.keys && subJson.keys.p256dh) || "",
+                        auth: (subJson.keys && subJson.keys.auth) || "",
                     }),
                 });
                 const result = await resp.json().catch(() => ({}));

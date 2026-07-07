@@ -512,6 +512,40 @@ document.addEventListener("keydown", e => {
     if (e.key === "Escape") fecharModal();
 });
 
+// ── Atalhos de teclado no dashboard ──────────────────────────
+// n = nova marcação · w = walk-in · b = bloquear horário · g = alternar vista
+// Ignora quando se está a escrever num campo ou com um modal aberto.
+document.addEventListener("keydown", function(e) {
+    if (window.location.pathname !== "/") return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target;
+    if (t) {
+        var tag = (t.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable) return;
+    }
+    var ov = document.getElementById("modalOverlay");
+    if (ov && ov.classList.contains("open")) return;
+
+    var k = (e.key || "").toLowerCase();
+    if (k === "n" || k === "w") {
+        var sel  = (k === "n") ? ".fab-item:not(.fab-walkin)" : ".fab-item.fab-walkin";
+        var link = document.querySelector(sel);
+        if (link && link.href) { e.preventDefault(); window.location.href = link.href; }
+    } else if (k === "b") {
+        var bb = document.getElementById("btn-bloquear");
+        if (bb) { e.preventDefault(); bb.click(); }
+    } else if (k === "g") {
+        var grelhaBtn = document.getElementById("btn-grelha");
+        var listaBtn  = document.getElementById("btn-lista");
+        if (grelhaBtn && listaBtn) {
+            e.preventDefault();
+            var vg = document.getElementById("vista-grelha");
+            var grelhaVisivel = vg && vg.style.display !== "none";
+            (grelhaVisivel ? listaBtn : grelhaBtn).click();
+        }
+    }
+});
+
 // ── Fechar modal ao clicar fora da box (backdrop) ────────────
 document.addEventListener("click", e => {
     const overlay = document.getElementById("modalOverlay");

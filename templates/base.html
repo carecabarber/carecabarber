@@ -139,8 +139,8 @@
     <!-- FAB -->
     <div class="fab-group">
         <div class="fab-menu" id="fabMenu">
-            <a href="{{ url_for('novo') }}"   class="fab-item">{{ vocab.agendamento }}</a>
-            <a href="{{ url_for('walkin') }}"  class="fab-item fab-walkin">Walk-in</a>
+            <a href="{{ url_for('novo') }}"   class="fab-item" title="Nova {{ vocab.agendamento | lower }} — tecla N">{{ vocab.agendamento }}</a>
+            <a href="{{ url_for('walkin') }}"  class="fab-item fab-walkin" title="Walk-in — tecla W">Walk-in</a>
         </div>
         <button class="fab" id="fabBtn">+</button>
     </div>

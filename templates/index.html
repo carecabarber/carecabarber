@@ -163,11 +163,11 @@
         <h2 class="section-title" style="margin:0">Agenda do dia</h2>
         <div style="display:flex;gap:6px;align-items:center">
             <button type="button" class="btn btn-outline-small" id="btn-bloquear" style="font-size:0.75rem;padding:5px 9px"
-                    title="Bloquear um horário (almoço, pausa…)">Bloquear</button>
+                    title="Bloquear um horário (almoço, pausa…) — tecla B">Bloquear</button>
             {% if agendamentos %}
             <div class="tab-toggle" id="view-toggle">
-                <button class="tab-btn tab-btn-active" id="btn-lista">Lista</button>
-                <button class="tab-btn" id="btn-grelha">▦ Grelha</button>
+                <button class="tab-btn tab-btn-active" id="btn-lista" title="Vista de lista — tecla G alterna">Lista</button>
+                <button class="tab-btn" id="btn-grelha" title="Vista de grelha — tecla G alterna">▦ Grelha</button>
             </div>
             {% endif %}
         </div>
@@ -227,7 +227,7 @@
                 <form action="{{ url_for('desbloquear_horario', id=b.id) }}" method="post"
                       data-confirm="Remover este bloqueio?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-cancel" title="Remover bloqueio">✕</button>
+                    <button type="submit" class="btn btn-cancel" title="Remover bloqueio">✕ Remover</button>
                 </form>
             </div>
         </li>
@@ -313,7 +313,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-iniciar" title="Iniciar atendimento">▶ Iniciar</button>
                 </form>
-                <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">↺</a>
+                <a href="{{ url_for('reagendar', id=a.id) }}" class="btn btn-reagendar" title="Reagendar">↺ Reagendar</a>
                 {% if a.link_reagendar and a.telefone %}
                 {% set _msg_wa = 'Olá ' ~ a.cliente ~ '! A tua marcação de ' ~ a.servico_nome ~ ' é no dia ' ~ a.data ~ ' às ' ~ a.hora ~ '.\nReagendar: ' ~ a.link_reagendar ~ '\nCancelar: ' ~ request.host_url ~ 'cancelar-link/' ~ a.token_reagendar %}
                 <a href="https://wa.me/{{ '238' if a.telefone|replace(' ','')|length == 7 else '' }}{{ a.telefone | replace(' ','') }}?text={{ _msg_wa | urlencode }}"
@@ -322,7 +322,7 @@
                 <form action="{{ url_for('cancelar', id=a.id) }}" method="post"
                       data-confirm="Cancelar marcação de {{ a.cliente | e }}?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-cancel" title="Cancelar">✕</button>
+                    <button type="submit" class="btn btn-cancel" title="Cancelar">✕ Cancelar</button>
                 </form>
                 <form action="{{ url_for('nao_compareceu', id=a.id) }}" method="post"
                       data-confirm="Marcar {{ a.cliente | e }} como não compareceu?">
@@ -334,9 +334,9 @@
                 {% elif a.status == 'concluido' %}
                 <span class="badge badge-done">✓ {{ a.valor | moeda }} {{ moeda_simbolo }}</span>
                 {% elif a.status == 'cancelado' %}
-                <span class="badge badge-cancel">✕</span>
+                <span class="badge badge-cancel">✕ Cancelado</span>
                 {% elif a.status == 'nao_compareceu' %}
-                <span class="badge badge-noshow">NC</span>
+                <span class="badge badge-noshow">Faltou</span>
                 {% endif %}
             </div>
         </li>

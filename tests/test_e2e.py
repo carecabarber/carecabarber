@@ -23,18 +23,36 @@ os.environ.setdefault("SECRET_KEY", "e2e-test-secret-key")
 os.environ.setdefault("WTF_CSRF_ENABLED", "0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# ── Detectar binário do Firefox snap ─────────────────────────
+# ── Detectar binário do Firefox e geckodriver ────────────────
+# Ordem de resolução (local snap → CI/PATH → Selenium Manager):
+#   1. Variável de ambiente (E2E_FIREFOX_BIN / E2E_GECKODRIVER) — usada no CI
+#   2. Snap (máquina de desenvolvimento Ubuntu)
+#   3. PATH (instalação normal / runners GitHub Actions)
 def _firefox_binary():
-    """Encontra o binário mais recente do Firefox snap."""
+    """Encontra o binário do Firefox — env > snap > PATH > '' (auto-detect)."""
+    env_bin = os.environ.get("E2E_FIREFOX_BIN")
+    if env_bin and os.path.exists(env_bin):
+        return env_bin
     candidates = sorted(glob.glob("/snap/firefox/*/usr/lib/firefox/firefox"),
                         key=lambda p: int(p.split("/")[3]) if p.split("/")[3].isdigit() else 0,
                         reverse=True)
     if candidates:
         return candidates[0]
-    return "/snap/firefox/current/usr/lib/firefox/firefox"
+    return shutil.which("firefox") or ""
+
+
+def _geckodriver_path():
+    """Encontra o geckodriver — env > snap > PATH > '' (Selenium Manager)."""
+    env_gd = os.environ.get("E2E_GECKODRIVER")
+    if env_gd and os.path.exists(env_gd):
+        return env_gd
+    if os.path.exists("/snap/bin/geckodriver"):
+        return "/snap/bin/geckodriver"
+    return shutil.which("geckodriver") or ""
+
 
 FIREFOX_BIN  = _firefox_binary()
-GECKODRIVER  = "/snap/bin/geckodriver"
+GECKODRIVER  = _geckodriver_path()
 E2E_TIMEOUT  = 8  # segundos máx de espera por elemento
 
 
@@ -43,11 +61,18 @@ E2E_TIMEOUT  = 8  # segundos máx de espera por elemento
 # ══════════════════════════════════════════════════════════════
 
 def _e2e_disponivel():
-    return os.path.exists(GECKODRIVER) and os.path.exists(FIREFOX_BIN)
+    # selenium tem de estar instalado; sem ele, saltar (não erro de coleção).
+    try:
+        import selenium  # noqa: F401
+    except ImportError:
+        return False
+    # Firefox é obrigatório; geckodriver pode ser resolvido pelo Selenium Manager
+    # (Selenium >= 4.10 descarrega-o automaticamente) quando GECKODRIVER == ''.
+    return bool(FIREFOX_BIN)
 
 pytestmark = pytest.mark.skipif(
     not _e2e_disponivel(),
-    reason="E2E requer geckodriver e Firefox headless"
+    reason="E2E requer selenium + Firefox headless"
 )
 
 
@@ -145,8 +170,10 @@ def driver():
 
     opts = Options()
     opts.add_argument("--headless")
-    opts.binary_location = FIREFOX_BIN
-    svc = Service(GECKODRIVER, log_output=os.devnull)
+    if FIREFOX_BIN:
+        opts.binary_location = FIREFOX_BIN
+    # GECKODRIVER vazio → Service() sem path → Selenium Manager resolve o driver
+    svc = Service(GECKODRIVER, log_output=os.devnull) if GECKODRIVER else Service(log_output=os.devnull)
 
     d = webdriver.Firefox(service=svc, options=opts)
     d.set_page_load_timeout(15)

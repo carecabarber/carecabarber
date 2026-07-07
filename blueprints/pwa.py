@@ -29,6 +29,7 @@ def register(app, app_start_ref: float, indices_prontos_ref: object) -> None:
             "db_msg":   db_msg,
             "indices":  indices_prontos_ref.is_set(),
             "uptime_s": int(time.monotonic() - app_start_ref),
+            "sentry":   bool(app.config.get("SENTRY_ATIVO")),
         }), 200
 
 

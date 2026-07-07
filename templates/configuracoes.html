@@ -110,12 +110,17 @@
     } catch(e) {}
 
     document.getElementById("btn-copiar-link").addEventListener("click", function() {
-        navigator.clipboard?.writeText(clienteUrl).then(() => {
-            this.textContent = "Copiado!";
-            setTimeout(() => { this.textContent = "Copiar link"; }, 2000);
-        }).catch(() => {
+        const _btn = this;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(clienteUrl).then(() => {
+                _btn.textContent = "Copiado!";
+                setTimeout(() => { _btn.textContent = "Copiar link"; }, 2000);
+            }).catch(() => {
+                prompt("Copia este link:", clienteUrl);
+            });
+        } else {
             prompt("Copia este link:", clienteUrl);
-        });
+        }
     });
 
     document.getElementById("btn-imprimir-qr-clientes").addEventListener("click", function() {
@@ -405,8 +410,10 @@ function toggleDiaCard(dia, aberto) {
 })();
 
 function copiarHorario() {
-    const ab0 = document.getElementById("ab-0")?.value;
-    const fc0 = document.getElementById("fc-0")?.value;
+    const _ab0El = document.getElementById("ab-0");
+    const _fc0El = document.getElementById("fc-0");
+    const ab0 = _ab0El && _ab0El.value;
+    const fc0 = _fc0El && _fc0El.value;
     if (!ab0 || !fc0) return;
     for (let d = 1; d < 7; d++) {
         const ab = document.getElementById("ab-" + d);
@@ -419,7 +426,8 @@ function copiarHorario() {
 }
 // addEventListener (substitui onchange/onclick inline bloqueados pelo CSP)
 document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('btn-copiar-horario')?.addEventListener('click', copiarHorario);
+    var _bchEl = document.getElementById('btn-copiar-horario');
+    _bchEl && _bchEl.addEventListener('click', copiarHorario);
     document.querySelectorAll('.js-dia-toggle').forEach(function(cb) {
         cb.addEventListener('change', function() { toggleDiaCard(parseInt(cb.dataset.dia), cb.checked); });
     });

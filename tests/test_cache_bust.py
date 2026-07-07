@@ -203,3 +203,76 @@ class TestInvalidarIdxBust:
         with patch.object(db, "invalidar_cache_slots"):
             _invalidar_idx(4)
         assert _pc_get("idx_ag:4:2024-01-15") is None
+
+
+# ─── Cache de slots (db/_conn.py) — invalidação cross-worker ─────────────────
+# A cache de slots disponíveis (caminho público de marcação) usa o MESMO
+# ficheiro-sentinela /tmp/ccb_bust_{bid} que o _pcache do dashboard. Antes
+# desta correcção, um worker B servia slots obsoletos até ao TTL (até 60 s)
+# depois de um booking num worker A — podendo mostrar como livre um slot ocupado.
+
+class TestSlotsCacheCrossWorker:
+
+    @pytest.fixture(autouse=True)
+    def limpar_slots(self):
+        import db._conn as c
+        with c._slots_cache_lock:
+            c._slots_cache.clear()
+        yield
+        with c._slots_cache_lock:
+            c._slots_cache.clear()
+
+    @pytest.fixture()
+    def tmp_slots_bust(self, tmp_path, monkeypatch):
+        import db._conn as c
+        monkeypatch.setattr(c, "_slots_bust_path",
+                            lambda bid: str(tmp_path / f"ccb_bust_{bid}"))
+        return tmp_path
+
+    def test_bid_from_key(self):
+        import db._conn as c
+        assert c._slots_bid_from_key("99:1:2030-01-01:30") == "99"
+        assert c._slots_bid_from_key("sem_bid") is None
+        assert c._slots_bid_from_key("") is None
+
+    def test_set_e_get_normal(self, tmp_slots_bust):
+        import db._conn as c
+        c._slots_cache_set("99:1:2030-01-01:30", ["A"], 60)
+        assert c._slots_cache_get("99:1:2030-01-01:30") == ["A"]
+
+    def test_miss_quando_bust_mais_recente(self, tmp_slots_bust):
+        """Outro worker invalidou → get devolve None mesmo sem expirar."""
+        import db._conn as c
+        key = "99:1:2030-01-01:30"
+        c._slots_cache_set(key, ["A"], 60)
+        time.sleep(0.02)
+        c._slots_bust_touch(99)   # outro worker
+        assert c._slots_cache_get(key) is None
+
+    def test_hit_quando_bust_anterior(self, tmp_slots_bust):
+        import db._conn as c
+        key = "99:1:2030-01-01:30"
+        c._slots_bust_touch(99)
+        time.sleep(0.02)
+        c._slots_cache_set(key, ["B"], 60)
+        assert c._slots_cache_get(key) == ["B"]
+
+    def test_barbearias_isoladas(self, tmp_slots_bust):
+        import db._conn as c
+        c._slots_cache_set("1:0:2030-01-01:30", ["barb1"], 60)
+        c._slots_bust_touch(2)   # invalidar outra barbearia
+        assert c._slots_cache_get("1:0:2030-01-01:30") == ["barb1"]
+
+    def test_invalidar_cache_slots_toca_bust(self, tmp_slots_bust):
+        """invalidar_cache_slots(bid) sinaliza os outros workers via ficheiro."""
+        import db._conn as c
+        assert c._slots_bust_mtime(7) == 0.0
+        c.invalidar_cache_slots(7)
+        assert c._slots_bust_mtime(7) > 0.0
+
+    def test_gc_sem_bid_nao_toca_bust(self, tmp_slots_bust):
+        """invalidar_cache_slots() (GC, sem bid) não cria ficheiros de bust."""
+        import db._conn as c
+        c.invalidar_cache_slots(None)
+        # nenhum ficheiro criado em tmp_path
+        assert list(tmp_slots_bust.iterdir()) == []
