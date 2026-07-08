@@ -75,7 +75,10 @@ jobs:
         uses: browser-actions/setup-firefox@v1
 
       - name: Instalar geckodriver
-        uses: browser-actions/setup-geckodriver@v1
+        # @latest é a referência recomendada pelo README desta action — o autor
+        # deixou de publicar tags versionadas (só existe v0.0.0); @v1 foi apagada
+        # e é o que bloqueava o "Set up job" do E2E.
+        uses: browser-actions/setup-geckodriver@latest
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -117,14 +120,10 @@ jobs:
 
   # ── 2. Deploy para PythonAnywhere ──────────────────────────────
   # Corre só em push para main, se os testes passaram E os Secrets existirem.
-  # NOTA: test-e2e foi TEMPORARIAMENTE retirado das dependências — a action
-  # browser-actions/setup-geckodriver@v1 deixou de existir upstream (tag apagada)
-  # e bloqueava o deploy no "Set up job". pytest (949) + JS continuam a proteger.
-  # O E2E continua a correr como job informativo. TODO: corrigir a tag e repor
-  # test-e2e aqui (opção A).
+  # test-e2e reposto no gate após corrigir a tag da setup-geckodriver (@latest).
   deploy:
     name: Deploy → PythonAnywhere
-    needs: [test, test-js, check-secrets]
+    needs: [test, test-js, test-e2e, check-secrets]
     if: github.event_name == 'push' && needs.check-secrets.outputs.ready == 'true'
     runs-on: ubuntu-latest
 
