@@ -314,10 +314,13 @@ def iniciar_trabalho(id: int) -> bool:
             (ag["barbeiro_id"],)).fetchone()
         if row:
             return False   # já tem serviço em curso
+        # `inicio` no fuso da barbearia — limpar_em_andamento_presos compara
+        # `inicio` contra um limite baseado em _agora(barbearia_id); gravar aqui
+        # no default global desfasaria essa limpeza para fusos != Cape_Verde.
         conn.execute(
             f"UPDATE agendamentos SET inicio=?, status={_S_EM} "
             f"WHERE id=? AND status IN {_ST_ATIVOS}",
-            (_agora().strftime(FMT), id))
+            (_agora(ag.get("barbearia_id")).strftime(FMT), id))
         changed = conn.execute("SELECT changes()").fetchone()[0]
         barbearia_id_cache = ag.get("barbearia_id")
     if not changed:
@@ -333,10 +336,14 @@ def terminar_trabalho(id: int, valor: int = 0) -> None:
         if not ag_row:
             return
         barbearia_id_cache = ag_row["barbearia_id"]
+        # `fim` no fuso da barbearia (não o default global) — consistente com
+        # limpar_em_andamento_presos e com a janela "recem_concluido" do cliente,
+        # que comparam contra _agora(barbearia_id). Sem isto, barbearias fora de
+        # Atlantic/Cape_Verde gravavam `fim` desfasado e o destaque "A pagar" falhava.
         conn.execute(
             f"UPDATE agendamentos SET fim=?, status={_S_CONC}, valor=? "
             f"WHERE id=? AND barbearia_id=? AND status={_S_EM}",
-            (_agora().strftime(FMT), valor or 0, id, barbearia_id_cache))
+            (_agora(barbearia_id_cache).strftime(FMT), valor or 0, id, barbearia_id_cache))
     if barbearia_id_cache:
         invalidar_cache_slots(barbearia_id_cache)
 
