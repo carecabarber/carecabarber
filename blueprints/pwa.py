@@ -1,7 +1,13 @@
+import os
+import re
 import time
-from flask import render_template, jsonify
+from flask import render_template, jsonify, Response
 import database as db
 from helpers import _log
+
+# Cache do corpo do service worker por versão de deploy (evita reler/reescrever
+# o ficheiro em cada pedido — só recompõe quando version.txt muda).
+_SW_CACHE = {"ver": None, "body": None}
 
 
 def register(app, app_start_ref: float, indices_prontos_ref: object) -> None:
@@ -44,8 +50,42 @@ def register(app, app_start_ref: float, indices_prontos_ref: object) -> None:
 
     @app.route("/sw.js")
     def service_worker():
-        """Serve o Service Worker a partir da raiz (/)."""
-        response = app.send_static_file("sw.js")
+        """Serve o Service Worker a partir da raiz (/), com APP_VERSION ligado
+        ao número de deploy (version.txt).
+
+        Porquê: o cache estático do SW tem a chave `cb-static-<APP_VERSION>` e o
+        handler `activate` só apaga caches cuja chave != versão actual. Se o
+        APP_VERSION fosse fixo ('v14'), o cache NUNCA era invalidado → após cada
+        deploy o SW servia JS/CSS obsoletos (cache-first) com HTML novo
+        (network-first) → "JS antigo + HTML novo" = freeze recorrente do PWA.
+        Injectando o nº de deploy, o SW muda a cada deploy → activate limpa o
+        cache antigo → assets sempre frescos.
+        """
+        try:
+            with open(os.path.join(app.root_path, "version.txt")) as _vf:
+                _ver = (_vf.read().strip() or "0")
+        except Exception:
+            _ver = "0"
+
+        if _SW_CACHE["ver"] != _ver or _SW_CACHE["body"] is None:
+            try:
+                with open(os.path.join(app.static_folder, "sw.js"),
+                          encoding="utf-8") as _sf:
+                    _src = _sf.read()
+                _src = re.sub(
+                    r"const APP_VERSION\s*=\s*'[^']*';",
+                    "const APP_VERSION    = 'd%s';" % _ver,
+                    _src, count=1)
+                _SW_CACHE["ver"] = _ver
+                _SW_CACHE["body"] = _src
+            except Exception:
+                # Fallback seguro: servir o ficheiro estático tal como está
+                response = app.send_static_file("sw.js")
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Service-Worker-Allowed"] = "/"
+                return response
+
+        response = Response(_SW_CACHE["body"], mimetype="application/javascript")
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Service-Worker-Allowed"] = "/"
         return response

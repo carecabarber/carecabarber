@@ -132,8 +132,30 @@
             </button>
         </div>
 
+        {# Destaque: serviço acabou de terminar → quanto pagar ao balcão #}
+        {% for a in agendamentos | selectattr('recem_concluido') | list %}
+        <div style="background:linear-gradient(135deg,rgba(34,197,94,0.12),rgba(34,197,94,0.04));
+                    border:1px solid var(--green);border-radius:16px;padding:18px 16px;
+                    margin-bottom:16px;text-align:center">
+            <div style="font-size:0.95rem;font-weight:800;color:var(--green);margin-bottom:4px">
+                ✅ Serviço terminado
+            </div>
+            <div style="font-size:0.8rem;color:var(--text2);margin-bottom:10px">
+                {{ a.servico_nome }}{% if a.barbeiro_nome != '—' %} · {{ a.barbeiro_nome }}{% endif %}
+            </div>
+            {% if a.valor %}
+            <div style="font-size:1.5rem;font-weight:900;color:var(--text)">
+                💳 A pagar: {{ a.valor | moeda }} {{ moeda_simbolo }}
+            </div>
+            <div style="font-size:0.72rem;color:var(--text2);margin-top:5px">
+                Paga ao {{ vocab.profissional | lower }} ao balcão
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
         {% set proximas = (agendamentos | selectattr('status', 'equalto', 'agendado') | list) + (agendamentos | selectattr('status', 'equalto', 'em_andamento') | list) %}
-        {% set outras   = agendamentos | rejectattr('status', 'equalto', 'agendado') | rejectattr('status', 'equalto', 'em_andamento') | list %}
+        {% set outras   = agendamentos | rejectattr('status', 'equalto', 'agendado') | rejectattr('status', 'equalto', 'em_andamento') | rejectattr('recem_concluido') | list %}
 
         {% if proximas %}
         <h2 class="section-title">Próximas</h2>

@@ -352,9 +352,18 @@
                         // recarregar a página para servir assets frescos e evitar
                         // o estado "JS antigo + SW novo" que congela a app PWA.
                         navigator.serviceWorker.addEventListener('controllerchange', function() {
-                            // Não recarregar se já estamos a navegar (evitar loop)
-                            if (window._swReloadPending) return;
-                            window._swReloadPending = true;
+                            // Recarregar NO MÁXIMO uma vez por sessão de tab.
+                            // O guard antigo (window._swReloadPending) resetava a
+                            // cada reload → não protegia ENTRE reloads → risco de
+                            // loop infinito de reload (UI totalmente congelada).
+                            // sessionStorage persiste através do reload → one-shot real.
+                            try {
+                                if (sessionStorage.getItem('sw-reloaded')) return;
+                                sessionStorage.setItem('sw-reloaded', '1');
+                            } catch (_) {
+                                if (window._swReloadPending) return;
+                                window._swReloadPending = true;
+                            }
                             window.location.reload();
                         });
 

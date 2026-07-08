@@ -1,7 +1,7 @@
 from datetime import datetime
 from flask import render_template, request, redirect, url_for, session, flash
 import database as db
-from database import ST_AGENDADO, ST_EM_ANDAMENTO
+from database import ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO
 from helpers import (
     _log, _blog, _agora, _limpar, _val_data, _val_hora, _no_passado, _dentro_horario,
     _invalidar_idx, _api_ok, _booking_lock,
@@ -64,8 +64,19 @@ def register(app) -> None:
         _raw = enriquecer_lista(db.listar_por_telefone(session.get("telefone",""), barbearia_id))
         # Enriquecer com telefone do barbeiro (para link WhatsApp) — 1 query total
         _barb_tel = {b["id"]: b.get("telefone") for b in db.listar_barbeiros(barbearia_id, incluir_chefe=True)}
+        # Destaque "a pagar" quando o serviço acabou de terminar (janela de 30 min).
+        # Tempo calculado no servidor — nunca no browser.
+        _agora_naive = _agora(barbearia_id).replace(tzinfo=None)
         for _a in _raw:
             _a["barbeiro_telefone"] = _barb_tel.get(_a.get("barbeiro_id"))
+            _a["recem_concluido"] = False
+            if _a.get("status") == ST_CONCLUIDO and _a.get("fim"):
+                try:
+                    _fim_dt = datetime.strptime(_a["fim"][:19], "%Y-%m-%d %H:%M:%S")
+                    _mins = (_agora_naive - _fim_dt).total_seconds() / 60
+                    _a["recem_concluido"] = 0 <= _mins <= 30
+                except (ValueError, TypeError):
+                    pass
         _proximas = [a for a in _raw if a.get("status") in _proximas_statuses]
         _outras   = sorted([a for a in _raw if a.get("status") not in _proximas_statuses],
                            key=lambda a: a.get("data_hora", ""), reverse=True)

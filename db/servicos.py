@@ -31,23 +31,25 @@ def get_servicos_por_ids(ids: list[int]) -> dict[int, dict]:
     return {r["id"]: dict(r) for r in rows}
 
 
-def criar_servico(nome: str, duracao_min: int, barbearia_id: int, preco: int = 0) -> None:
+def criar_servico(nome: str, duracao_min: int, barbearia_id: int, preco: int = 0,
+                  categoria: str | None = None) -> None:
     with _write() as conn:
         conn.execute(
-            "INSERT INTO servicos (barbearia_id,nome,duracao_min,preco) VALUES (?,?,?,?)",
-            (barbearia_id, nome, duracao_min, preco or 0))
+            "INSERT INTO servicos (barbearia_id,nome,duracao_min,preco,categoria) VALUES (?,?,?,?,?)",
+            (barbearia_id, nome, duracao_min, preco or 0, categoria or None))
 
 
-def atualizar_servico(id: int, nome: str, duracao_min: int, preco: int = 0, barbearia_id: int | None = None) -> None:
+def atualizar_servico(id: int, nome: str, duracao_min: int, preco: int = 0,
+                      barbearia_id: int | None = None, categoria: str | None = None) -> None:
     with _write() as conn:
         if barbearia_id:
             conn.execute(
-                "UPDATE servicos SET nome=?, duracao_min=?, preco=? WHERE id=? AND barbearia_id=?",
-                (nome, duracao_min, preco or 0, id, barbearia_id))
+                "UPDATE servicos SET nome=?, duracao_min=?, preco=?, categoria=? WHERE id=? AND barbearia_id=?",
+                (nome, duracao_min, preco or 0, categoria or None, id, barbearia_id))
         else:
             conn.execute(
-                "UPDATE servicos SET nome=?, duracao_min=?, preco=? WHERE id=?",
-                (nome, duracao_min, preco or 0, id))
+                "UPDATE servicos SET nome=?, duracao_min=?, preco=?, categoria=? WHERE id=?",
+                (nome, duracao_min, preco or 0, categoria or None, id))
 
 
 def mover_servico(id: int, direcao: str, barbearia_id: int) -> None:

@@ -127,7 +127,20 @@ class TestCicloLimpeza:
     # ── Ciclo % 288 == 0 ─────────────────────────────────────
 
     def test_ciclo_288_desativar_planos(self, app_module):
-        """ciclo=0 (% 288 == 0): desativar_planos_expirados é chamado."""
+        """ciclo=288 (>0 e % 288 == 0): desativar_planos_expirados é chamado."""
+        with patch("app._pc_evict"), \
+             patch("app._rl_evict"), \
+             patch("app.db.invalidar_cache_slots"), \
+             patch("app._enviar_lembretes_push"), \
+             patch("app.db.listar_barbearias", return_value=[]), \
+             patch("app.db.desativar_planos_expirados") as mock_desat, \
+             patch("app._invalidar_idx"):
+            app_module._ciclo_limpeza(288)
+        mock_desat.assert_called_once()
+
+    def test_ciclo_0_nao_corre_bloco_diario(self, app_module):
+        """ciclo=0 (arranque): o bloco diário pesado (integrity_check /
+        desativar_planos) NÃO corre — evita bloquear o 1.º pedido pós-deploy."""
         with patch("app._pc_evict"), \
              patch("app._rl_evict"), \
              patch("app.db.invalidar_cache_slots"), \
@@ -136,7 +149,7 @@ class TestCicloLimpeza:
              patch("app.db.desativar_planos_expirados") as mock_desat, \
              patch("app._invalidar_idx"):
             app_module._ciclo_limpeza(0)
-        mock_desat.assert_called_once()
+        mock_desat.assert_not_called()
 
     def test_ciclo_288_desativar_exception(self, app_module, caplog):
         """ciclo=288: desativar_planos_expirados lança exceção → warning logado."""

@@ -710,11 +710,16 @@ class TestCicloLimpeza:
     def test_ciclo_mod288_chama_desativar_planos(self):
         """ciclo%288==0 → chama desativar_planos_expirados e integrity_check."""
         import app as app_module
+        from contextlib import contextmanager
 
         mock_row = MagicMock()
         mock_row.__getitem__ = lambda self, i: "ok"
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        @contextmanager
+        def _fake_read():
+            yield mock_conn
 
         with patch("app._pc_evict"), \
              patch("app._rl_evict"), \
@@ -724,7 +729,7 @@ class TestCicloLimpeza:
              patch.object(app_module.db, "listar_barbearias", return_value=[]), \
              patch.object(app_module.db, "espera_limpar_expiradas"), \
              patch.object(app_module.db, "desativar_planos_expirados") as mock_dp, \
-             patch("db._conn.get_conn", return_value=mock_conn):
+             patch("db._conn._read", _fake_read):
             app_module._ciclo_limpeza(288)
 
         mock_dp.assert_called_once()
@@ -732,11 +737,16 @@ class TestCicloLimpeza:
     def test_ciclo_mod288_integrity_check_falha_alerta(self):
         """integrity_check retorna algo != 'ok' → chama alerta_critico."""
         import app as app_module
+        from contextlib import contextmanager
 
         mock_row = MagicMock()
         mock_row.__getitem__ = lambda self, i: "corruption found"
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        @contextmanager
+        def _fake_read():
+            yield mock_conn
 
         with patch("app._pc_evict"), \
              patch("app._rl_evict"), \
@@ -746,7 +756,7 @@ class TestCicloLimpeza:
              patch.object(app_module.db, "listar_barbearias", return_value=[]), \
              patch.object(app_module.db, "espera_limpar_expiradas"), \
              patch.object(app_module.db, "desativar_planos_expirados"), \
-             patch("db._conn.get_conn", return_value=mock_conn), \
+             patch("db._conn._read", _fake_read), \
              patch("helpers_security.alerta_critico") as mock_alerta:
             app_module._ciclo_limpeza(288)
 

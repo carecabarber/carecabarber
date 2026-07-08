@@ -27,6 +27,16 @@
                    min="0" inputmode="numeric">
         </div>
     </div>
+    <div class="field">
+        <label>Categoria <span style="color:var(--text2);font-weight:400">(opcional)</span></label>
+        <input type="text" name="categoria" placeholder="Ex: Cabelo, Barba"
+               list="lista-categorias" maxlength="40" autocapitalize="words" autocomplete="off">
+    </div>
+    <datalist id="lista-categorias">
+        {% for _c in servicos | map(attribute='categoria') | select | unique %}
+        <option value="{{ _c }}"></option>
+        {% endfor %}
+    </datalist>
     <button type="submit" class="btn btn-primary btn-full">+ Adicionar</button>
 </form>
 
@@ -44,7 +54,10 @@
                 {{ s.duracao_min }}<span>min</span>
             </div>
             <div class="item-body">
-                <div class="item-cliente">{{ s.nome }}</div>
+                <div class="item-cliente">
+                    {{ s.nome }}
+                    {% if s.categoria %}<span class="badge" style="background:var(--surface3);color:var(--text2);font-size:0.68rem;padding:1px 7px;border-radius:6px;margin-left:4px">{{ s.categoria }}</span>{% endif %}
+                </div>
                 <div class="item-servico">
                     {% if s.preco %}<span style="color:var(--accent);font-weight:700">{{ s.preco | moeda }} {{ moeda_simbolo }}</span> · {% endif %}
                     {% if not s.ativo %}<span style="color:var(--red)">Inativo</span>{% else %}Ativo{% endif %}
@@ -83,6 +96,12 @@
                         <input type="number" name="preco" value="{{ s.preco or 0 }}"
                                min="0" inputmode="numeric">
                     </div>
+                </div>
+                <div class="field">
+                    <label>Categoria <span style="color:var(--text2);font-weight:400">(opcional)</span></label>
+                    <input type="text" name="categoria" value="{{ s.categoria or '' }}"
+                           list="lista-categorias" maxlength="40" placeholder="Ex: Cabelo, Barba"
+                           autocapitalize="words" autocomplete="off">
                 </div>
                 <div style="display:flex;gap:8px;margin-top:10px">
                     <button type="submit" class="btn btn-primary" style="flex:1">Guardar</button>

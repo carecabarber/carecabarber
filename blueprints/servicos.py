@@ -24,8 +24,9 @@ def register(app) -> None:
                 preco = max(0, min(int(request.form.get("preco") or 0), 999_999))
             except (ValueError, TypeError):
                 dur, preco = 30, 0
+            categoria = _limpar(request.form.get("categoria", ""), 40) or None
             if nome:
-                db.criar_servico(nome, dur, barbearia_id, preco)
+                db.criar_servico(nome, dur, barbearia_id, preco, categoria=categoria)
                 db.invalidar_cache_slots(barbearia_id)
                 _invalidar_idx(barbearia_id)
                 flash(f"✓ Serviço «{nome}» criado com sucesso!", "sucesso")
@@ -45,8 +46,9 @@ def register(app) -> None:
             preco = max(0, min(int(request.form.get("preco") or 0), 999_999))
         except (ValueError, TypeError):
             dur, preco = 30, 0
+        categoria = _limpar(request.form.get("categoria", ""), 40) or None
         if nome:
-            db.atualizar_servico(id, nome, dur, preco, barbearia_id=s["barbearia_id"])
+            db.atualizar_servico(id, nome, dur, preco, barbearia_id=s["barbearia_id"], categoria=categoria)
             db.invalidar_cache_slots(s["barbearia_id"])
             _invalidar_idx(s["barbearia_id"])
             flash(f"✓ Serviço «{nome}» atualizado!", "sucesso")

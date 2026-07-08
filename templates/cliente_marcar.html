@@ -59,11 +59,29 @@
             <div class="field">
                 <label for="servico_id">{{ vocab.servico }}</label>
                 <select id="servico_id" name="servico_id" required>
-                    {% for s in servicos %}
-                    <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
-                        {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
-                    </option>
-                    {% endfor %}
+                    {% set _cats = servicos | map(attribute='categoria') | select | unique | list %}
+                    {% if _cats %}
+                        {% for s in servicos if not s.categoria %}
+                        <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
+                            {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
+                        </option>
+                        {% endfor %}
+                        {% for _cat in _cats %}
+                        <optgroup label="{{ _cat }}">
+                            {% for s in servicos if s.categoria == _cat %}
+                            <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
+                                {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </optgroup>
+                        {% endfor %}
+                    {% else %}
+                        {% for s in servicos %}
+                        <option value="{{ s.id }}" data-dur="{{ s.duracao_min }}">
+                            {{ s.nome }} — {{ s.duracao_min }} min{% if s.preco %} · {{ s.preco | moeda }} {{ moeda_simbolo }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    {% endif %}
                 </select>
             </div>
 

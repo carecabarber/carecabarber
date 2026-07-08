@@ -75,6 +75,13 @@ MIGRATIONS: list[dict] = [
             "ON fidelidade_resets(barbearia_id, telefone)",
         ],
     },
+    {
+        "version": 4,
+        "description": "Adicionar categoria a servicos — agrupamento de serviços (ex: Cabelo, Barba)",
+        "sql": [
+            "ALTER TABLE servicos ADD COLUMN categoria TEXT DEFAULT NULL",
+        ],
+    },
 ]
 
 _LATEST_VERSION: int = max(m["version"] for m in MIGRATIONS) if MIGRATIONS else 0

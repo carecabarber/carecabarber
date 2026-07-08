@@ -721,15 +721,23 @@ def _ciclo_limpeza(ciclo: int) -> None:
                     del _lembretes_enviados[c]
         except Exception as e:
             _log_lim.warning("Erro ao limpar _lembretes_enviados: %s", e)
-    if ciclo % 288 == 0:
+    # ciclo > 0: nunca corre no arranque. integrity_check(1) faz uma varredura
+    # completa da DB e segura um lock de leitura ao nível do ficheiro durante
+    # toda a duração; em modo single-worker sem WAL, o primeiro _write() pós-login
+    # bloquearia atrás dela (até busy_timeout=60s) → "travou logo no login" após
+    # cada deploy/reload. Adiado para o 1.º ciclo diário (288×5min ≈ 24h).
+    if ciclo > 0 and ciclo % 288 == 0:
         try:
             db.desativar_planos_expirados()
         except Exception as e:
             _log_lim.warning("Erro em desativar_planos_expirados: %s", e)
         try:
-            from db._conn import get_conn
+            from db._conn import _read
             from helpers_security import alerta_critico
-            row = get_conn().execute("PRAGMA integrity_check(1)").fetchone()
+            # Usa a conexão de leitura (_READ_CONN/_READ_LOCK), nunca a write conn
+            # partilhada sem _CONN_LOCK — evita uso concorrente do mesmo _CONN.
+            with _read() as _c:
+                row = _c.execute("PRAGMA integrity_check(1)").fetchone()
             ok  = row[0] if row else "error"
             if ok != "ok":
                 _log_lim.error("DB integrity_check falhou: %s", ok)
