@@ -6,18 +6,68 @@ from datetime import datetime, timedelta
 from db._conn import (
     _read, _write, _write_exclusive, _agora, FMT,
     ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO, ST_CANCELADO, ST_NAO_COMP, ST_WALKIN,
-    normalizar_tel, invalidar_cache_slots,
+    normalizar_tel, invalidar_cache_slots, get_config,
 )
+
+
+def _hora_conflito(conn, barbeiro_id: int | None, barbearia_id: int, data_hora_str: str,
+                   duracao_min: int, buffer: int, excluir_id: int | None = None) -> str | None:
+    """Verifica sobreposição do novo intervalo com agendamentos existentes, usando a
+    conexão dada (para correr DENTRO de uma transação BEGIN IMMEDIATE — check+insert atómico).
+    Mesma lógica de overlap que verificar_disponibilidade. Devolve a hora (HH:MM) do
+    conflito ou None se estiver livre."""
+    if not barbeiro_id or not data_hora_str:
+        return None
+    fmt_in = FMT if len(data_hora_str) == 19 else "%Y-%m-%d %H:%M"
+    try:
+        inicio_novo = datetime.strptime(data_hora_str, fmt_in)
+    except (ValueError, TypeError):
+        return None
+    fim_novo = inicio_novo + timedelta(minutes=duracao_min + buffer)
+    data_str = data_hora_str[:10]
+    # Comparação de string (não DATE()) para evitar drift UTC em fusos ≠ UTC
+    data_fim = (datetime.strptime(data_str, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    q = ("SELECT a.data_hora, a.inicio, a.status, "
+         "COALESCE(s.duracao_min, 30) AS dur FROM agendamentos a "
+         "LEFT JOIN servicos s ON a.servico_id = s.id "
+         "WHERE a.barbeiro_id=? AND a.barbearia_id=? "
+         "AND a.data_hora >= ? AND a.data_hora < ? "
+         f"AND a.status NOT IN {_ST_EXCLUIDOS}")
+    params = [barbeiro_id, barbearia_id, data_str, data_fim]
+    if excluir_id:
+        q += " AND a.id != ?"
+        params.append(excluir_id)
+    for row in conn.execute(q, params).fetchall():
+        dur = row["dur"] if row["dur"] else 30
+        ref = row["inicio"] if row["status"] == ST_EM_ANDAMENTO and row["inicio"] else row["data_hora"]
+        try:
+            inicio_ex = datetime.strptime(ref, FMT)
+        except (ValueError, TypeError):
+            try:
+                inicio_ex = datetime.strptime(ref, "%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                continue
+        fim_ex = inicio_ex + timedelta(minutes=dur + buffer)
+        if inicio_novo < fim_ex and fim_novo > inicio_ex:
+            return row["data_hora"][11:16]
+    return None
 
 
 def criar_agendamento(cliente_nome: str, servico_id: int, data_hora: str, barbearia_id: int,
                       barbeiro_id: int | None = None, tipo: str = ST_AGENDADO, valor: int = 0,
-                      telefone: str | None = None, notas: str | None = None) -> int:
+                      telefone: str | None = None, notas: str | None = None,
+                      duracao_min: int | None = None, verificar_conflito: bool = False) -> int:
+    """Cria um agendamento. Se verificar_conflito=True (e barbeiro_id + duracao_min dados),
+    re-verifica a sobreposição DENTRO da transação BEGIN IMMEDIATE — impede double-booking
+    entre workers/processos (o _booking_lock é só por-processo e não protege multi-worker).
+    Devolve o id criado, ou -1 se houver conflito (slot ocupado)."""
     token    = secrets.token_urlsafe(32)   # 256 bits — tokens públicos de longa duração
     token_av = secrets.token_urlsafe(32)
     token_cf = secrets.token_urlsafe(20)   # token de confirmação de presença
-    criado   = _agora().strftime(FMT)
+    criado   = _agora(barbearia_id).strftime(FMT)
     tel      = normalizar_tel(telefone) or None   # normalizar antes de guardar
+    # Buffer calculado ANTES da transação (evita read-conn aninhada dentro do BEGIN IMMEDIATE)
+    _buffer = int(get_config("buffer_minutos", barbearia_id, 10)) if verificar_conflito else 0
     # Guardar nome do barbeiro no momento da marcação — persiste se barbeiro for apagado
     barb_snap = None
     if barbeiro_id:
@@ -29,6 +79,9 @@ def criar_agendamento(cliente_nome: str, servico_id: int, data_hora: str, barbea
             pass
     # BEGIN IMMEDIATE garante atomicidade do check+insert mesmo com múltiplos workers
     with _write_exclusive() as conn:
+        if verificar_conflito and barbeiro_id and duracao_min:
+            if _hora_conflito(conn, barbeiro_id, barbearia_id, data_hora, duracao_min, _buffer):
+                return -1   # slot ocupado — abortar sem inserir (rollback automático)
         cur = conn.execute(
             "INSERT INTO agendamentos "
             "(barbearia_id,cliente,telefone,servico_id,data_hora,barbeiro_id,tipo,valor,"
@@ -415,9 +468,22 @@ def deletar_walkin_orfao(id: int) -> None:
 
 
 def reagendar_agendamento(id: int, nova_data_hora: str, novo_barbeiro_id: int | None = None,
-                          novo_servico_id: int | None = None) -> None:
+                          novo_servico_id: int | None = None,
+                          duracao_min: int | None = None, verificar_conflito: bool = False) -> bool:
+    """Reagenda uma marcação. Se verificar_conflito=True, re-verifica a sobreposição
+    DENTRO da transação BEGIN IMMEDIATE (impede double-booking multi-worker no reagendar).
+    Devolve True se aplicado, False se houver conflito (slot ocupado)."""
     ag = get_agendamento(id)
-    with _write() as conn:
+    if not ag:
+        return False
+    _barb_efetivo = novo_barbeiro_id or ag.get("barbeiro_id")
+    _buffer = int(get_config("buffer_minutos", ag.get("barbearia_id"), 10)) if verificar_conflito else 0
+    with _write_exclusive() as conn:
+        if verificar_conflito and _barb_efetivo and duracao_min:
+            # excluir o próprio agendamento do check (senão colide consigo mesmo)
+            if _hora_conflito(conn, _barb_efetivo, ag.get("barbearia_id"),
+                              nova_data_hora, duracao_min, _buffer, excluir_id=id):
+                return False   # slot ocupado — abortar
         if novo_barbeiro_id and novo_servico_id:
             conn.execute(
                 f"UPDATE agendamentos SET data_hora=?, barbeiro_id=?, servico_id=?, "
@@ -437,8 +503,8 @@ def reagendar_agendamento(id: int, nova_data_hora: str, novo_barbeiro_id: int | 
             conn.execute(
                 f"UPDATE agendamentos SET data_hora=?, status={_S_AG}, token_reagendar=NULL WHERE id=?",
                 (nova_data_hora, id))
-    if ag:
-        invalidar_cache_slots(ag.get("barbearia_id"))
+    invalidar_cache_slots(ag.get("barbearia_id"))
+    return True
 
 
 # ── Disponibilidade ────────────────────────────────────────
@@ -650,9 +716,14 @@ def media_avaliacoes(barbearia_id: int, barbeiro_id: int | None = None) -> dict:
 # ── Limpeza de atendimentos presos ────────────────────────
 
 def limpar_em_andamento_presos(barbearia_id: int, horas: int = 8) -> int:
-    """Marca como 'concluido' atendimentos em_andamento há mais de `horas` horas
-    (ficaram presos após crash do servidor ou fecho inesperado do browser).
-    Devolve o número de linhas actualizadas (0 = nada foi feito)."""
+    """Janitor periódico. Duas limpezas na mesma transação:
+      1. Marca como 'concluido' atendimentos em_andamento há mais de `horas` horas
+         (presos após crash do servidor ou fecho inesperado do browser).
+      2. Apaga walk-ins órfãos (status='walk-in' nunca iniciado) criados há mais de
+         `horas` horas — um walk-in é iniciado em milissegundos, portanto um que
+         fique preso neste estado é resíduo de um crash entre criar_agendamento e
+         iniciar_trabalho (o deletar_walkin_orfao síncrono não chegou a correr).
+    Devolve o total de linhas afectadas (0 = nada foi feito)."""
     agora_local = _agora(barbearia_id=barbearia_id)
     limite = (agora_local - timedelta(hours=horas)).strftime(FMT)
     with _write() as conn:
@@ -661,7 +732,13 @@ def limpar_em_andamento_presos(barbearia_id: int, horas: int = 8) -> int:
             f"WHERE barbearia_id=? AND status={_S_EM} "
             "AND (inicio < ? OR inicio IS NULL)",
             (agora_local.strftime(FMT), barbearia_id, limite))
-        return conn.execute("SELECT changes()").fetchone()[0]
+        afetados = conn.execute("SELECT changes()").fetchone()[0]
+        conn.execute(
+            f"DELETE FROM agendamentos WHERE barbearia_id=? AND status={_S_WK} "
+            "AND data_hora < ?",
+            (barbearia_id, limite))
+        afetados += conn.execute("SELECT changes()").fetchone()[0]
+        return afetados
 
 
 # ── Novos agendamentos (para notificações) ────────────────
@@ -805,7 +882,7 @@ def espera_limpar_expiradas() -> None:
 def marcar_lembrete_wa(id: int, barbearia_id: int) -> bool:
     """Regista o timestamp em que o lembrete WA foi enviado para este agendamento.
     Só actualiza se o agendamento pertencer à barbearia (multi-tenant safe)."""
-    agora = _agora().strftime(FMT)
+    agora = _agora(barbearia_id=barbearia_id).strftime(FMT)
     with _write() as conn:
         cur = conn.execute(
             "UPDATE agendamentos SET lembrete_wa_em=? "
@@ -818,7 +895,7 @@ def marcar_lembrete_wa(id: int, barbearia_id: int) -> bool:
 
 def fidelidade_reset(barbearia_id: int, telefone: str, obs: str | None = None) -> None:
     """Regista um reset manual do ciclo de fidelidade para um cliente."""
-    agora = _agora().strftime(FMT)
+    agora = _agora(barbearia_id=barbearia_id).strftime(FMT)
     with _write() as conn:
         conn.execute(
             "INSERT INTO fidelidade_resets (barbearia_id, telefone, resetado_em, obs) "

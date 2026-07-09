@@ -121,6 +121,16 @@ def test_security_headers(client):
     assert "Strict-Transport-Security" in r.headers
     assert "Content-Security-Policy" in r.headers
 
+
+def test_headers_isolamento_origem(client):
+    """Headers de isolamento de origem cruzada presentes e com o valor certo.
+
+    COOP tem de ser 'same-origin-allow-popups' (não 'same-origin') para não
+    partir os popups de impressão de QR abertos via window.open."""
+    r = client.get("/login")
+    assert r.headers.get("Cross-Origin-Opener-Policy") == "same-origin-allow-popups"
+    assert r.headers.get("X-Permitted-Cross-Domain-Policies") == "none"
+
 def test_sem_header_server(client):
     """Header 'Server' não deve ser exposto (esconde stack tecnológico)."""
     r = client.get("/login")

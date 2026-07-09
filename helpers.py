@@ -32,7 +32,7 @@ from helpers_security import (
     _push_notif, _push_async, _push_one, _push_espera,
     _JsonFormatter, _make_json_handler,
     _slog, _blog_logger, _elog,
-    _log, _blog,
+    _log, _blog, _audit,
     _ip_attempts, _ip_lock, _IP_MAX, _IP_WINDOW,
     _ip_backoff,
     _user_fails, _user_lock, _USER_MAX, _USER_LOCKOUT,

@@ -8,10 +8,29 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{{ barbearia.nome }} — {{ vocab.agendamento }}</title>
+    <meta name="author" content="CarecaBarber">
+    <meta name="copyright" content="© CarecaBarber — Todos os direitos reservados. Software proprietário. Reprodução, cópia ou clonagem proibidas.">
+    <meta name="robots" content="noai, noimageai">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  AVISO LEGAL — © CarecaBarber. Software e interface PROPRIETÁRIOS.
+  Este código, desenho, estrutura e conteúdo são obra original protegida
+  por direitos de autor. É PROIBIDA a reprodução, cópia, engenharia
+  inversa, clonagem total ou parcial, ou uso para treino de modelos de IA.
+  Marca de água: cb-orig-{{ barbearia.slug }}-{{ agora_iso }}
+  Infracções serão perseguidas judicialmente. Suporte: +238 989 12 22
+  ═══════════════════════════════════════════════════════════════════
+-->
 <body>
+    <span data-cb-wm="carecabarber-original" hidden aria-hidden="true"
+          style="display:none !important"></span>
+    {# (C) Honeypot: link invisível a humanos, seguido só por crawlers → ban #}
+    <a href="{{ url_for('_honeypot') }}" rel="nofollow noindex" tabindex="-1"
+       aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;
+       overflow:hidden;opacity:0;pointer-events:none">.</a>
     <div class="login-wrap">
         {% if barbearia.logo %}
         <div class="login-logo">
@@ -345,6 +364,48 @@ document.querySelectorAll(".js-logo-img").forEach(function(img) {
         mostrarEcrã(ecrãScan);
         abrirCamera();
     });
+})();
+</script>
+<!-- (D) Dissuasor anti-cópia: bloqueia menu-direito e atalhos de código-fonte.
+     Nota honesta: é apenas dissuasor — contorna-se; não impede cópia real. -->
+<script nonce="{{ csp_nonce }}">
+(function(){
+    "use strict";
+    var bloquear = function(e){ e.preventDefault(); return false; };
+    document.addEventListener("contextmenu", bloquear);
+    document.addEventListener("dragstart", bloquear);
+    document.addEventListener("selectstart", function(e){
+        // permitir seleção em campos de texto (nome/telefone); bloquear no resto
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return true;
+        e.preventDefault(); return false;
+    });
+    document.addEventListener("keydown", function(e){
+        var k = (e.key || "").toLowerCase();
+        if (e.key === "F12") return bloquear(e);
+        if ((e.ctrlKey || e.metaKey) && (k === "u" || k === "s")) return bloquear(e);
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (k === "i" || k === "j" || k === "c"))
+            return bloquear(e);
+    });
+})();
+</script>
+<!-- (E) Beacon anti-clone: só dispara se o HTML for servido fora da origem legítima. -->
+<script nonce="{{ csp_nonce }}">
+(function(){
+    "use strict";
+    var origem = "{{ cb_host }}";   // host que o NOSSO servidor viu ao renderizar
+    var atual  = location.host;
+    if (!origem || origem === atual) return;   // origem legítima → não faz nada
+    try {
+        // URL ABSOLUTO para o domínio canónico (literal obrigatório).
+        // Origem definida por CANONICAL_URL — segue automaticamente para Railway.
+        var canon = "{{ cb_canonical }}/_cb/px.gif";
+        var qs = "?h=" + encodeURIComponent(atual) +
+                 "&o=" + encodeURIComponent(origem) +
+                 "&s=" + encodeURIComponent("{{ barbearia.slug }}") +
+                 "&t=" + encodeURIComponent("{{ agora_iso }}");
+        new Image().src = canon + qs;
+    } catch (e) {}
 })();
 </script>
 </body>

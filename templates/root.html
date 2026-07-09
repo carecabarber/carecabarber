@@ -446,6 +446,28 @@
                                    style="display:none" class="js-logo-input">
                         </label>
                     </form>
+                    <!-- Eliminar definitivamente (irreversível, com backup automático) -->
+                    <details>
+                        <summary class="btn btn-sm btn-danger" style="cursor:pointer;list-style:none"
+                                 title="Eliminar definitivamente">Eliminar</summary>
+                        <form action="{{ url_for('root_apagar_barbearia', id=b.id) }}" method="post"
+                              onsubmit="return confirm('ELIMINAR «{{ b.nome }}» e TODOS os dados ligados? Esta acção é IRREVERSÍVEL. Será criado um backup automático antes.');"
+                              style="margin-top:10px;display:flex;flex-direction:column;gap:8px;max-width:280px">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div style="font-size:0.72rem;color:var(--muted);line-height:1.4">
+                                Apaga o estabelecimento e todos os dados ligados
+                                (barbeiros, agendamentos, horários, pagamentos…).
+                                <b>Irreversível.</b> Faz-se um backup automático antes.
+                                Para confirmar, escreve o nome exacto abaixo:
+                            </div>
+                            <input type="text" name="confirmar" autocomplete="off"
+                                   placeholder="{{ b.nome }}"
+                                   style="font-size:0.82rem;padding:6px 10px">
+                            <button type="submit" class="btn btn-sm btn-danger">
+                                Eliminar definitivamente
+                            </button>
+                        </form>
+                    </details>
                     </div><!-- fim linha 2 -->
                 </div><!-- fim barb-actions -->
             </div><!-- fim barb-card -->

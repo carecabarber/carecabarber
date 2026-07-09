@@ -32,7 +32,9 @@ os.chdir(project_home)
 # IMPORTANTE: NÃO usar locking_mode=EXCLUSIVE aqui — esta conexão é descartável e
 # adquirir EXCLUSIVE deixaria o ficheiro preso para o próprio import a seguir.
 # Quando todos os workers já forem não-EXCLUSIVE, este SELECT passa de imediato.
-_DB_PATH = os.path.join(project_home, "barbearia.db")
+# Railway/prod: honra DB_PATH do ambiente (volume montado, ex. /data/barbearia.db).
+# PythonAnywhere: env não definida → cai no ficheiro local de sempre (byte-idêntico).
+_DB_PATH = os.environ.get("DB_PATH") or os.path.join(project_home, "barbearia.db")
 for _i in range(45):          # max 90 s de espera (cobre os 60s de mercy + folga)
     _c = None
     try:

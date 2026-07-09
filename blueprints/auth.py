@@ -2,7 +2,7 @@ from flask import render_template, request, redirect, url_for, session, make_res
 import database as db
 from helpers import (
     _log, _ip_ok, _ip_retry_after, _record_fail, _clear_fails, _user_locked,
-    _DUMMY_HASH, _USER_RE, _blog, _limpar, _MAX_USERNAME,
+    _DUMMY_HASH, _USER_RE, _blog, _audit, _limpar, _MAX_USERNAME,
 )
 from werkzeug.security import check_password_hash
 
@@ -58,6 +58,9 @@ def register(app) -> None:
                     })
                     _blog("LOGIN_OK", bid=staff["barbearia_id"], uid=staff["id"], role=staff["role"])
                     if staff["role"] == "root":
+                        # Trilho de auditoria: o login do root é o evento mais
+                        # sensível do sistema — regista sempre (actor/ip).
+                        _audit("root-login", alvo=staff["id"])
                         return redirect(url_for("root_dashboard"))
                     return redirect(url_for("index"))
                 else:

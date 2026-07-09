@@ -18,7 +18,7 @@ from database import (ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO,
 
 # ── Constantes ─────────────────────────────────────────────────
 DIAS_PT           = ["Segunda","Terça","Quarta","Quinta","Sexta","Sábado","Domingo"]
-LOGOS_DIR         = os.path.join(os.path.dirname(__file__), "static", "logos")
+LOGOS_DIR         = os.environ.get("LOGOS_DIR") or os.path.join(os.path.dirname(__file__), "static", "logos")
 ALLOWED_LOGO_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
 
 _MAX_NOME    = 100

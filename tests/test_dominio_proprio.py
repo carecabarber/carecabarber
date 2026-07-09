@@ -153,3 +153,64 @@ class TestMiddleware:
         app_module._pcache.clear()
         r = c.get("/", base_url="http://porverificar.com")
         assert "/cliente/" not in r.headers.get("Location", "")
+
+
+# ══════════════════════════════════════════════════════════════
+#  Subdomínio wildcard por estabelecimento (preparação Railway)
+#  <slug>.TENANT_BASE_DOMAIN → entrada de cliente, sem verificação manual.
+#  Gated por _TENANT_BASE_DOMAIN: inerte em PythonAnywhere (env ausente).
+# ══════════════════════════════════════════════════════════════
+
+class TestSubdominioWildcard:
+
+    # Base domain distinto do domínio próprio registado noutros testes
+    # (carecabarber.com está reservado a bid_a como domínio próprio verificado).
+    BASE = "barbershop.app"
+
+    @pytest.fixture(autouse=True)
+    def _activar_base(self, client):
+        """Simula TENANT_BASE_DOMAIN definido (como no Railway) só durante a classe."""
+        c, ctx, app_module = client
+        orig = app_module._TENANT_BASE_DOMAIN
+        app_module._TENANT_BASE_DOMAIN = self.BASE
+        app_module._pcache.clear()
+        yield
+        app_module._TENANT_BASE_DOMAIN = orig
+        app_module._pcache.clear()
+
+    def test_subdominio_slug_redirecciona(self, client):
+        c, ctx, app_module = client
+        r = c.get("/", base_url=f"http://{ctx['slug_a']}.{self.BASE}")
+        assert r.status_code == 302
+        assert f"/cliente/{ctx['slug_a']}" in r.headers["Location"]
+
+    def test_subdominio_caminho_cliente_funciona(self, client):
+        c, ctx, app_module = client
+        r = c.get(f"/cliente/{ctx['slug_a']}",
+                  base_url=f"http://{ctx['slug_a']}.{self.BASE}")
+        assert r.status_code == 200
+
+    def test_subdominio_inexistente_nao_redirecciona(self, client):
+        c, ctx, app_module = client
+        r = c.get("/", base_url=f"http://nao-existe.{self.BASE}")
+        assert "/cliente/" not in r.headers.get("Location", "")
+
+    def test_subdominio_reservado_ignorado(self, client):
+        """www/api/app etc. nunca são tratados como estabelecimento."""
+        c, ctx, app_module = client
+        r = c.get("/", base_url=f"http://www.{self.BASE}")
+        assert "/cliente/" not in r.headers.get("Location", "")
+
+    def test_dominio_base_nu_nao_redirecciona(self, client):
+        """O domínio-mãe nu (sem subdomínio) segue o fluxo normal do staff."""
+        c, ctx, app_module = client
+        r = c.get("/", base_url=f"http://{self.BASE}")
+        assert "/cliente/" not in r.headers.get("Location", "")
+
+    def test_inerte_sem_base_domain(self, client):
+        """Sem TENANT_BASE_DOMAIN (PythonAnywhere), subdomínios não resolvem."""
+        c, ctx, app_module = client
+        app_module._TENANT_BASE_DOMAIN = ""   # simula env ausente
+        app_module._pcache.clear()
+        r = c.get("/", base_url=f"http://{ctx['slug_a']}.{self.BASE}")
+        assert "/cliente/" not in r.headers.get("Location", "")

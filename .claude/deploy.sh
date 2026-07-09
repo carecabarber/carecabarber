@@ -73,12 +73,32 @@ _FIXED=(
   db/__init__.py db/_conn.py db/agendamentos.py db/barbearia.py
   db/barbeiros.py db/migrations.py db/push.py db/rate_limit.py
   db/relatorios.py db/servicos.py
-  version.txt static/sw.js static/app.js
+  version.txt
 )
+# Static — auto-descoberta dos ficheiros de topo (exclui logos/ = uploads do utilizador)
+# Evita esquecer style.css, jsqr.js, qrcode.min.js, manifest.json, etc.
+mapfile -t _STATIC < <(cd "$LOCAL" && find static/ -maxdepth 1 -type f | sort)
 # Templates — auto-descoberta: nunca esquece ficheiros novos
 mapfile -t _TEMPLATES < <(cd "$LOCAL" && find templates/ -name '*.html' | sort)
 
-FILES=("${_FIXED[@]}" "${_TEMPLATES[@]}")
+FILES=("${_FIXED[@]}" "${_STATIC[@]}" "${_TEMPLATES[@]}")
+
+# ── (A) Minificar assets servidos (source local fica intacto) ──
+# Minifica APENAS a cópia enviada para produção. Os originais style.css/app.js
+# mantêm-se legíveis no repositório para desenvolvimento. Best-effort: se a
+# minificação falhar, envia-se o original (minify.py faz fallback).
+BUILD_DIR="$(mktemp -d /tmp/carecabarber_build_XXXXXX)"
+trap 'rm -rf "$BUILD_DIR" 2>/dev/null' EXIT
+_PY_MIN="$LOCAL/venv/bin/python"; [[ -x "$_PY_MIN" ]] || _PY_MIN="python3"
+declare -A MIN_SUBST=()
+if [[ -f "$LOCAL/static/style.css" ]] && \
+   "$_PY_MIN" "$SCRIPT_DIR/minify.py" "$LOCAL/static/style.css" "$BUILD_DIR/style.css" css; then
+  MIN_SUBST["static/style.css"]="$BUILD_DIR/style.css"
+fi
+if [[ -f "$LOCAL/static/app.js" ]] && \
+   "$_PY_MIN" "$SCRIPT_DIR/minify.py" "$LOCAL/static/app.js" "$BUILD_DIR/app.js" js; then
+  MIN_SUBST["static/app.js"]="$BUILD_DIR/app.js"
+fi
 
 # ── Upload de todos os ficheiros ─────────────────────────────
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Inicio deploy (${#FILES[@]} ficheiros)" | tee -a "$LOG_FILE"
@@ -86,6 +106,10 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Inicio deploy (${#FILES[@]} ficheiros)" | t
 ERROS=0
 for REL in "${FILES[@]}"; do
   LOCAL_PATH="$LOCAL/$REL"
+  # (A) Se houver versão minificada, enviar essa em vez do original legível
+  if [[ -n "${MIN_SUBST[$REL]:-}" && -f "${MIN_SUBST[$REL]}" ]]; then
+    LOCAL_PATH="${MIN_SUBST[$REL]}"
+  fi
   if [[ ! -f "$LOCAL_PATH" ]]; then
     echo "  AVISO: $REL não existe localmente — a saltar"
     continue
@@ -164,7 +188,10 @@ echo "Reload OK — a aguardar arranque..." | tee -a "$LOG_FILE"
 sleep 5
 
 # ── Health check (não bloqueia — timeout de rede é normal) ───
-HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+# UA de browser: o bloqueador anti-clonagem (app.py) devolve 403 a curl/bots
+# nas páginas públicas. O health check tem de se identificar como browser real.
+_UA_BROWSER="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -A "$_UA_BROWSER" \
   "https://$DOMAIN/login" 2>/dev/null || echo "timeout")
 
 _rollback() {

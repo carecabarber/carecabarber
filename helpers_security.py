@@ -295,6 +295,43 @@ def _blog(evento: str, **kwargs) -> None:
     _blog_logger.info(evento, extra=kwargs)
 
 
+# ── Trilho de auditoria (acções sensíveis) ─────────────────────────
+# Regista QUEM (uid/role), DE ONDE (ip), fez O QUÊ (acção), a QUEM (alvo).
+# Vai para o log JSON de segurança E para um ficheiro local append-only,
+# para revisão humana rápida sem depender do agregador de logs. Nunca lança.
+_AUDIT_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auditoria.log")
+
+
+def _audit(acao: str, alvo: str = "", **extra) -> None:
+    """Trilho de auditoria de acções sensíveis (login root, impersonação,
+    criar/activar/eliminar estabelecimento, mudança de senha, etc.).
+
+    O actor e o IP são deduzidos da sessão/pedido activos. Falha em silêncio."""
+    try:
+        uid  = session.get("user_id") if session else None
+        role = session.get("role") if session else None
+    except RuntimeError:
+        uid = role = None
+    try:
+        ip = (request.remote_addr or "?") if request else "?"
+    except RuntimeError:
+        ip = "?"
+    _slog.warning(f"AUDIT {acao}",
+                  extra={"ip": ip, "path": "-", "audit": True, "acao": acao,
+                         "alvo": str(alvo), "actor_uid": uid, "actor_role": role, **extra})
+    # Ficheiro local append-only (best-effort, para revisão humana directa)
+    try:
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        campos = " ".join(f"{k}={v}" for k, v in extra.items())
+        linha = (f"[{ts}] {acao} actor={uid}({role}) ip={ip} alvo={alvo}"
+                 + (f" {campos}" if campos else ""))
+        with open(_AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(linha + "\n")
+    except Exception:
+        pass
+
+
 # ══════════════════════════════════════════════════════════════
 #  RATE LIMITING
 # ══════════════════════════════════════════════════════════════

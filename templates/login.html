@@ -8,16 +8,26 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Barbearia — Login</title>
+    <meta name="author" content="CarecaBarber">
+    <meta name="copyright" content="© CarecaBarber — Todos os direitos reservados. Software proprietário. Reprodução, cópia ou clonagem proibidas.">
+    <meta name="robots" content="noai, noimageai">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+<!-- © CarecaBarber — interface proprietária. Cópia/clonagem/uso p/ treino de IA PROIBIDOS. Suporte: +238 989 12 22 -->
+
 <body>
-    <div class="login-wrap">
+    {# (C) Honeypot: link invisível a humanos, seguido só por crawlers → ban #}
+    <a href="{{ url_for('_honeypot') }}" rel="nofollow noindex" tabindex="-1"
+       aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;
+       overflow:hidden;opacity:0;pointer-events:none">.</a>
+    <div class="login-wrap login-equipa">
         <div class="login-logo">
             <img src="{{ url_for('static', filename='logo.svg') }}"
                  alt="CarecaBarber" width="320" height="134"
                  style="display:block;margin:0 auto 4px;max-width:88vw">
         </div>
+        <span class="login-badge">🔒 Área da Equipa</span>
         <p style="color:var(--text2);font-size:0.8rem;margin-bottom:28px;text-align:center;font-weight:500">
             Acesso exclusivo para a equipa
         </p>
@@ -171,5 +181,45 @@ async function loginBiometrico() {
 }
 </script>
 {% endif %}{# fim bloco biometria desativado #}
+<!-- (D) Dissuasor anti-cópia (apenas dissuasor — contorna-se; não impede cópia real). -->
+<script nonce="{{ csp_nonce }}">
+(function(){
+    "use strict";
+    var bloquear = function(e){ e.preventDefault(); return false; };
+    document.addEventListener("contextmenu", bloquear);
+    document.addEventListener("dragstart", bloquear);
+    document.addEventListener("keydown", function(e){
+        var k = (e.key || "").toLowerCase();
+        if (e.key === "F12") return bloquear(e);
+        if ((e.ctrlKey || e.metaKey) && (k === "u" || k === "s")) return bloquear(e);
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (k === "i" || k === "j" || k === "c"))
+            return bloquear(e);
+    });
+})();
+</script>
+<!-- (E) Beacon anti-clone: só dispara se o HTML for servido fora da origem legítima. -->
+<script nonce="{{ csp_nonce }}">
+(function(){
+    "use strict";
+    // Host que o NOSSO servidor viu ao renderizar (congelado no HTML).
+    var origem = "{{ cb_host }}";
+    var atual  = location.host;
+    // Iguais → página servida pela origem legítima (nosso domínio ou domínio
+    // próprio de tenant que o nosso backend serve) → não faz nada.
+    if (!origem || origem === atual) return;
+    // Diferentes → o HTML foi copiado para outro domínio. Avisa o servidor canónico.
+    try {
+        // URL ABSOLUTO para o domínio canónico (tem de ser literal: num clone,
+        // um caminho relativo iria para o servidor do clonador, não para nós).
+        // Origem definida por CANONICAL_URL — segue automaticamente para Railway.
+        var canon = "{{ cb_canonical }}/_cb/px.gif";
+        var qs = "?h=" + encodeURIComponent(atual) +
+                 "&o=" + encodeURIComponent(origem) +
+                 "&s=" + encodeURIComponent("login") +
+                 "&t=" + encodeURIComponent("{{ agora_iso }}");
+        new Image().src = canon + qs;
+    } catch (e) {}
+})();
+</script>
 </body>
 </html>

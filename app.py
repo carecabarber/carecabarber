@@ -61,6 +61,24 @@ try:
 except Exception:
     _APP_VERSION = 0
 
+# ── Configuração por ambiente (Railway/prod vs PythonAnywhere) ─────────────────
+# Todas INERTES quando as env não estão definidas → o comportamento em
+# PythonAnywhere fica byte-idêntico. Só ganham efeito quando o ambiente Railway
+# as injecta na migração. NÃO exigem alterar código na altura do cutover.
+#
+#   LOGOS_DIR          — pasta dos logos fora do repositório (volume persistente).
+#   TENANT_BASE_DOMAIN — domínio-mãe p/ subdomínios por estabelecimento
+#                        (ex.: "carecabarber.com" → joao.carecabarber.com). Cada
+#                        estabelecimento ganha o SEU URL automaticamente pelo slug.
+#   CANONICAL_URL      — origem legítima usada pelo beacon anti-clone. Segue para
+#                        Railway sem editar templates.
+_LOGOS_DIR_ENV      = os.environ.get("LOGOS_DIR", "").strip()
+_TENANT_BASE_DOMAIN = db.normalizar_dominio(os.environ.get("TENANT_BASE_DOMAIN", "").strip())
+_CANONICAL_URL      = (os.environ.get("CANONICAL_URL", "").strip()
+                       or "https://carecabarber.pythonanywhere.com")
+# Subdomínios reservados que NUNCA são resolvidos como estabelecimento.
+_SUBDOMINIOS_RESERVADOS = frozenset(("www", "api", "app", "admin", "static", "mail", "ns", "cdn"))
+
 # ══════════════════════════════════════════════════════════════
 #  CONFIGURAÇÃO DE SEGURANÇA
 # ══════════════════════════════════════════════════════════════
@@ -126,6 +144,218 @@ _CSP_TMPL = (
 )
 
 
+# ── Crawlers de IA / scrapers de clonagem ──────────────────────────
+# Bots que raspam conteúdo para treinar modelos ou clonar sites. Bloqueá-los
+# não impede um humano de copiar (impossível na web), mas trava a via
+# "meter o URL numa IA e pedir para clonar" — o vector suspeito de cópia.
+# Correspondência por substring, minúsculas, no User-Agent.
+_BOTS_IA_BLOQUEADOS = (
+    "gptbot", "oai-searchbot", "chatgpt-user", "chatgpt",          # OpenAI
+    "claudebot", "claude-web", "anthropic-ai", "anthropic",        # Anthropic
+    "ccbot",                                                       # Common Crawl (usado p/ treino)
+    "google-extended",                                             # Google IA
+    "perplexitybot", "perplexity",                                 # Perplexity
+    "bytespider",                                                  # ByteDance/TikTok
+    "amazonbot", "applebot-extended",                              # Amazon / Apple IA
+    "diffbot", "imagesiftbot", "omgili", "omgilibot",             # scrapers de dados
+    "meta-externalagent", "facebookbot",                          # Meta IA
+    "cohere-ai", "cohere-training-data-crawler",                   # Cohere
+    "youbot", "petalbot", "timpibot", "webzio-extended",
+    "scrapy", "python-requests", "python-urllib", "httrack",       # ferramentas de clonagem
+    "wget", "curl", "node-fetch", "axios", "go-http-client",
+)
+
+
+# Só as páginas HTML PÚBLICAS e clonáveis são protegidas. Deixar de fora APIs,
+# webhooks, monitorização e páginas autenticadas evita partir integrações
+# legítimas (que usam curl/python-requests) — o alvo é a clonagem visual.
+_ENDPOINTS_PUBLICOS_PROTEGIDOS = frozenset((
+    "cliente_entrada",   # página de marcação do cliente — o principal activo copiável
+    "login",             # ecrã de entrada de staff
+))
+
+# ── (B) Rate-limit anti-ripper ─────────────────────────────────────
+# Trava site-rippers (HTTrack/wget -r) que puxam a página centenas de vezes.
+# Limite GENEROSO: um humano nunca recarrega 40x em 20s; um ripper sim.
+# Estado por-worker (multi-worker PA): cada processo conta o seu tráfego — chega
+# para travar um ripper, que satura um worker rapidamente.
+_scrape_hits  = {}                 # ip -> [timestamps]
+_scrape_lock  = threading.Lock()
+_SCRAPE_WINDOW = 20                # segundos
+_SCRAPE_MAX    = 40                # pedidos/janela por IP antes de 429
+
+# ── (C) Honeypot ───────────────────────────────────────────────────
+# Link invisível para humanos (display:none) mas seguido por crawlers que puxam
+# todos os href. Quem lá bate é bot → banido temporariamente das páginas públicas.
+_trap_banidos  = {}                # ip -> expiry_ts
+_TRAP_BAN_SECS = 1800             # 30 min
+_trap_lock     = threading.Lock()
+
+
+def _ip_pedido() -> str:
+    """IP do cliente (ProxyFix já normaliza remote_addr atrás do nginx)."""
+    return request.remote_addr or "?"
+
+
+@app.before_request
+def _bloquear_bots_ia():
+    """Camada anti-clonagem nas páginas públicas: bots de IA, scrapers, rippers
+    e IPs apanhados no honeypot. Só actua em _ENDPOINTS_PUBLICOS_PROTEGIDOS —
+    nunca em /health, /static, /api, webhooks nem páginas autenticadas.
+    """
+    if (request.endpoint or "") not in _ENDPOINTS_PUBLICOS_PROTEGIDOS:
+        return
+    ip = _ip_pedido()
+
+    # (C) IP já banido pelo honeypot?
+    _now = time.time()
+    with _trap_lock:
+        exp = _trap_banidos.get(ip)
+        if exp:
+            if exp > _now:
+                return ("", 403)
+            del _trap_banidos[ip]  # ban expirou
+
+    # (A/bots) User-Agent de crawler de IA ou ferramenta de scraping
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if not ua:
+        return  # sem UA: não bloqueia (pode ser verificação interna legítima)
+    for _b in _BOTS_IA_BLOQUEADOS:
+        if _b in ua:
+            _log(f"bot-ia bloqueado ua={ua[:120]} path={request.path}")
+            return ("", 403)
+
+    # (B) Rate-limit por IP — trava rippers em massa
+    with _scrape_lock:
+        janela = _scrape_hits.get(ip)
+        if janela is None:
+            janela = []
+            _scrape_hits[ip] = janela
+        # descartar timestamps fora da janela
+        corte = _now - _SCRAPE_WINDOW
+        janela[:] = [t for t in janela if t > corte]
+        janela.append(_now)
+        excedeu = len(janela) > _SCRAPE_MAX
+        # limpeza oportunista: evitar crescimento sem limite do dict
+        if len(_scrape_hits) > 5000:
+            for k in [k for k, v in _scrape_hits.items() if not v or v[-1] < corte][:2000]:
+                _scrape_hits.pop(k, None)
+    if excedeu:
+        _log(f"rate-limit clonagem ip={ip} path={request.path}")
+        return ("Demasiados pedidos.", 429)
+
+
+@app.route("/config/backup.json")
+@app.route("/wp-admin/")
+@app.route("/.git/config")
+def _honeypot():
+    """(C) Rotas-armadilha que só bots/scanners procuram. Quem lá bate é banido
+    das páginas públicas por 30 min. Um humano nunca acede a estes caminhos —
+    são iscos referenciados por um link invisível na página do cliente."""
+    # Nunca banir motores de busca legítimos (não seguem estes links por respeitarem
+    # o robots.txt, mas é uma salvaguarda extra para não prejudicar a indexação).
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if any(b in ua for b in ("googlebot", "bingbot", "duckduckbot", "slurp", "yandex")):
+        return ("", 404)
+    ip = _ip_pedido()
+    with _trap_lock:
+        _trap_banidos[ip] = time.time() + _TRAP_BAN_SECS
+        if len(_trap_banidos) > 10000:  # limpeza defensiva
+            _now = time.time()
+            for k in [k for k, v in _trap_banidos.items() if v < _now]:
+                _trap_banidos.pop(k, None)
+    _log(f"honeypot apanhou ip={ip} path={request.path}")
+    return ("", 404)
+
+
+@app.route("/robots.txt")
+def robots():
+    """robots.txt — proíbe crawlers de IA e limita indexação a páginas públicas.
+
+    Servido explicitamente (Flask não serve /robots.txt por omissão). Complementa
+    o bloqueio por User-Agent: bots honestos param aqui, os desonestos apanham 403.
+    """
+    linhas = ["User-agent: " + b for b in (
+        "GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-Web",
+        "anthropic-ai", "CCBot", "Google-Extended", "PerplexityBot", "Bytespider",
+        "Amazonbot", "Applebot-Extended", "Diffbot", "ImagesiftBot", "Omgilibot",
+        "meta-externalagent", "FacebookBot", "cohere-ai", "YouBot", "PetalBot",
+    )]
+    # Bots de IA: bloqueio total. Motores de busca legítimos (User-agent: *):
+    # indexação normal permitida, mas fora dos caminhos-armadilha (honeypot) e
+    # das áreas internas — assim o Googlebot nunca cai no honeypot.
+    corpo = ("\n".join(linhas) + "\nDisallow: /\n\n"
+             "User-agent: *\n"
+             "Disallow: /config/\n"
+             "Disallow: /wp-admin/\n"
+             "Disallow: /.git/\n"
+             "Disallow: /api/\n"
+             "Disallow: /mesa/\n"
+             "Disallow: /root/\n")
+    return app.response_class(corpo, mimetype="text/plain")
+
+
+# ── Logos fora do repositório (volume persistente Railway) ─────────────────────
+# O filesystem do Railway é efémero: logos enviados após deploy perdem-se a cada
+# reinício. Com LOGOS_DIR a apontar para um volume montado, servimo-los a partir
+# de lá em vez de static/logos. Rota registada SÓ quando LOGOS_DIR está definido —
+# em PythonAnywhere não existe, e os logos continuam a ser servidos por /static.
+if _LOGOS_DIR_ENV:
+    from flask import send_from_directory
+
+    @app.route("/static/logos/<path:filename>")
+    def _logos_volume(filename):
+        resp = make_response(send_from_directory(_LOGOS_DIR_ENV, filename))
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
+
+
+# ── (E) Beacon de detecção de clones ───────────────────────────────
+# GIF transparente 1×1. A página pública embute JS que compara o host que o
+# SERVIDOR renderizou (server-side, congelado no HTML) com o host que o browser
+# vê. Se forem diferentes, o HTML foi movido para outra origem → é um clone/mirror,
+# e o browser da vítima do clone carrega este pixel a apontar para o NOSSO
+# servidor, deixando-nos um registo de QUEM copiou (host, referrer, slug, quando).
+#
+# Porque é robusto contra o vector reportado ("meter URL numa IA e clonar"):
+#   • No nosso site (ou num domínio próprio de tenant que o NOSSO backend serve),
+#     o host renderizado == host do browser → o beacon NUNCA dispara (zero ruído,
+#     zero privacidade dos nossos visitantes). Domínios próprios funcionam de
+#     borla porque o servidor renderiza-os já com o host correcto.
+#   • Num clone estático (HTML copiado e servido noutro domínio) o host congelado
+#     no HTML ≠ host do browser → dispara. O clone raramente replica a nossa CSP
+#     (é definida server-side), portanto o pixel passa.
+#   • Um clonador que reescreva o host embutido derrota-o — como qualquer detecção
+#     client-side. O objectivo é apanhar a cópia ingénua, que é a ameaça real.
+_PIXEL_GIF = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00"
+              b"!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01"
+              b"\x00\x00\x02\x02D\x01\x00;")
+
+
+@app.route("/_cb/px.gif")
+def _clone_beacon():
+    """Recebe o beacon de páginas servidas fora da origem legítima (clones).
+
+    Nunca falha e nunca bloqueia — devolve sempre o pixel. Os parâmetros são
+    apenas registados (sanitizados: sem newlines, truncados) para investigação;
+    não são reflectidos em lado nenhum (sem risco de XSS/log-injection)."""
+    def _limpo(v: str, n: int = 200) -> str:
+        return (v or "").replace("\n", " ").replace("\r", " ").strip()[:n]
+
+    host_browser = _limpo(request.args.get("h", ""), 120)   # host visto pelo browser
+    host_orig    = _limpo(request.args.get("o", ""), 120)   # host que o servidor renderizou
+    slug         = _limpo(request.args.get("s", ""), 80)    # estabelecimento clonado
+    quando       = _limpo(request.args.get("t", ""), 40)    # carimbo do snapshot
+    ref          = _limpo(request.headers.get("Referer", ""), 200)
+    ip           = _ip_pedido()
+    _log(f"CLONE-ALERTA beacon host_clone={host_browser!r} origem_legit={host_orig!r} "
+         f"slug={slug!r} snapshot={quando!r} ref={ref!r} ip={ip}")
+    resp = Response(_PIXEL_GIF, mimetype="image/gif")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
+
+
 @app.before_request
 def _gerar_csp_nonce():
     """Gera um nonce criptográfico único por pedido para a CSP."""
@@ -151,6 +381,27 @@ def _resolver_dominio_proprio():
     host = db.normalizar_dominio(request.host)
     if not host:
         return
+
+    # (1) Subdomínio por estabelecimento — <slug>.TENANT_BASE_DOMAIN.
+    # Gated por TENANT_BASE_DOMAIN: em PythonAnywhere (env ausente) é totalmente
+    # inerte. Em Railway com DNS wildcard (*.carecabarber.com) dá a CADA
+    # estabelecimento o seu próprio URL sem verificação manual de domínio.
+    if _TENANT_BASE_DOMAIN and host.endswith("." + _TENANT_BASE_DOMAIN):
+        sub = host[: -(len(_TENANT_BASE_DOMAIN) + 1)]   # tira ".base"
+        # só o primeiro rótulo conta (joao.x.carecabarber.com → ignora)
+        if sub and "." not in sub and sub not in _SUBDOMINIOS_RESERVADOS:
+            _cks = f"sub:{sub}"
+            barbearia = _pc_get(_cks)
+            if barbearia is None:
+                barbearia = db.get_barbearia_por_slug(sub) or False
+                _pc_set(_cks, barbearia, 300)
+            if barbearia:
+                g.tenant = barbearia
+                if request.path == "/" and request.method == "GET":
+                    return redirect(url_for("cliente_entrada", slug=barbearia["slug"]))
+                return   # subdomínio resolvido — não tentar domínio próprio
+
+    # (2) Domínio próprio VERIFICADO (ex.: joao.com).
     _ck = f"dom:{host}"
     barbearia = _pc_get(_ck)
     if barbearia is None:                       # ausente do cache → resolver
@@ -167,7 +418,14 @@ def _resolver_dominio_proprio():
 
 @app.before_request
 def _verificar_plano():
-    """Bloqueia staff de barbearias com plano expirado."""
+    """Bloqueia staff de barbearias suspensas: plano expirado OU desactivadas
+    manualmente pelo root (ativa=0).
+
+    `plano.ativo` já combina `bool(ativa)` com a validade do prazo, por isso é a
+    única condição necessária. NÃO usar `sem_limite` como escape — uma barbearia
+    de plano ilimitado (plano_expira_em=NULL) que o root bloqueie (ativa=0) tem
+    `sem_limite=True` mas `ativo=False`, e TEM de ser suspensa. O escape antigo
+    deixava esses estabelecimentos abrir mesmo depois de bloqueados."""
     from flask import g
     g.plano_info = None
     if "user_id" not in session:
@@ -185,9 +443,12 @@ def _verificar_plano():
     plano = _pc_get(_ck)
     if plano is None:
         plano = db.verificar_plano(barbearia_id)
-        _pc_set(_ck, plano, 300)
+        # TTL curto (60s): em multi-worker cada processo tem cache própria; um TTL
+        # curto garante que um bloqueio do root propaga a todos os workers em ≤60s.
+        # verificar_plano é uma leitura de 1 linha — o custo é negligenciável.
+        _pc_set(_ck, plano, 60)
     g.plano_info = plano
-    if plano and not plano.get("sem_limite") and not plano.get("ativo"):
+    if plano and not plano.get("ativo"):
         return redirect(url_for("conta_suspensa"))
 
 
@@ -200,6 +461,13 @@ def set_security_headers(response):
     h.setdefault('Content-Security-Policy',    csp)
     h.setdefault('X-Content-Type-Options',     'nosniff')
     h.setdefault('X-Frame-Options',            'DENY')
+    # Isolamento de origem cruzada: separa a nossa janela de openers cross-origin
+    # (protege contra reverse-tabnabbing e XS-Leaks em páginas autenticadas).
+    # 'allow-popups' preserva os popups que a app abre (impressão de QR via
+    # window.open), que de outro modo perderiam a referência ao opener.
+    h.setdefault('Cross-Origin-Opener-Policy', 'same-origin-allow-popups')
+    # Bloqueia políticas cross-domain legadas (Flash/PDF a ler dados do domínio).
+    h.setdefault('X-Permitted-Cross-Domain-Policies', 'none')
     h.setdefault('Referrer-Policy',            'strict-origin-when-cross-origin')
     h.setdefault('Strict-Transport-Security',  'max-age=63072000; includeSubDomains; preload')
     h.setdefault('Permissions-Policy',
@@ -228,6 +496,8 @@ def _inject_csp_nonce():
         plano_info = getattr(g, "plano_info", None)
     return {
         "csp_nonce":   getattr(g, "csp_nonce", ""),
+        "cb_host":     request.host,   # host que o SERVIDOR viu — para o beacon anti-clone
+        "cb_canonical": _CANONICAL_URL,  # origem legítima do beacon (env-driven; segue p/ Railway)
         "agora_iso":   _agora().strftime("%Y-%m-%dT%H:%M:%S"),
         "plano_info":  plano_info,
         "av":          _ASSET_VER,

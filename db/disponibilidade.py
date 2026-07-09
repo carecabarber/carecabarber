@@ -167,18 +167,23 @@ def _horarios_disponiveis_impl(barbeiro_id: int | None, data_str: str, duracao_m
             return 0
 
     def _slot_em_ausencia(hora_str):
-        """Verificação de ausência em memória — sem query à BD."""
+        """Verificação de ausência em memória — sem query à BD.
+        Considera a DURAÇÃO do serviço: um serviço que começa antes da ausência
+        mas a invade também é rejeitado (não basta olhar só a hora de início)."""
+        h     = _hm(hora_str)
+        h_fim = h + duracao_min
         for a in ausencias_dia:
             if not a.get("hora_inicio") and not a.get("hora_fim"):
                 return True   # ausência de dia inteiro
             if a.get("hora_inicio") and a.get("hora_fim"):
-                h   = _hm(hora_str)
                 ini = _hm(a["hora_inicio"])
                 fim = _hm(a["hora_fim"])
                 if ini < fim:
-                    if ini <= h < fim:
+                    # intervalo normal — overlap se [h, h+dur) intersecta [ini, fim)
+                    if h < fim and h_fim > ini:
                         return True
                 else:
+                    # intervalo que atravessa a meia-noite — check por início
                     if h >= ini or h < fim:
                         return True
         return False
@@ -207,7 +212,8 @@ def _horarios_disponiveis_impl(barbeiro_id: int | None, data_str: str, duracao_m
             h = int(p[0]) * 60 + int(p[1])
         except (ValueError, IndexError):
             return False
-        return _pausa_ini_min <= h < _pausa_fim_min
+        # Considera a DURAÇÃO: o serviço [h, h+dur) não pode invadir a pausa [ini, fim)
+        return h < _pausa_fim_min and (h + duracao_min) > _pausa_ini_min
 
     # Gerar todos os slots de 10 em 10 minutos
     # Só incluir slots onde o serviço termina dentro do horário de fecho

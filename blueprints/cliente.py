@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from flask import render_template, request, redirect, url_for, session, flash
 import database as db
 from database import ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO
@@ -11,12 +11,29 @@ from helpers import (
 )
 
 
+def _barbearia_indisponivel(barbearia) -> bool:
+    """True se a barbearia não pode receber clientes: inexistente, desativada,
+    ou com o plano expirado. Verificar a expiração aqui (e não só a coluna
+    `ativa`) fecha a janela entre a data de expiração e o cron nocturno
+    `desativar_planos_expirados()` — nessa janela `ativa` ainda é 1."""
+    if not barbearia or not barbearia.get("ativa"):
+        return True
+    expira = barbearia.get("plano_expira_em")
+    if expira:
+        try:
+            if date.fromisoformat(expira) < date.today():
+                return True
+        except (ValueError, TypeError):
+            pass
+    return False
+
+
 def register(app) -> None:
 
     @app.route("/cliente/<slug>", methods=["GET","POST"])
     def cliente_entrada(slug):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         barbearia_id = barbearia["id"]
         erro = None
@@ -55,7 +72,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/area")
     def cliente_home(slug):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
@@ -116,7 +133,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/marcar", methods=["GET","POST"])
     def cliente_marcar(slug):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
@@ -178,7 +195,7 @@ def register(app) -> None:
                             erro = "Não há vagas disponíveis para este dia. Escolhe outra data."
                         if not erro and bid_:
                             # Re-verificar ausência e disponibilidade dentro do lock (TOCTOU fix)
-                            aus = db.ausencia_ativa(bid_, data, hora)
+                            aus = db.ausencia_ativa(bid_, data, hora, duracao_min=s["duracao_min"])
                             if aus:
                                 erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro barbeiro ou data."
                             else:
@@ -193,15 +210,19 @@ def register(app) -> None:
                         if not erro:
                             novo_id = db.criar_agendamento(
                                 session.get("user_nome",""), sid, dh, barbearia_id,
-                                bid_, "agendado", 0, session.get("telefone"))
-                            _invalidar_idx(barbearia_id)
-                            _s = db.servico_por_id(sid)
-                            from helpers import _push_async
-                            _push_async(barbearia_id,
-                                        "📅 Novo agendamento",
-                                        f"{session.get('user_nome','Cliente')} marcou {_s['nome'] if _s else ''} para {dh[8:10]}/{dh[5:7]} {dh[11:16]}",
-                                        barbeiro_id=bid_)
-                            return redirect(url_for("cliente_confirmacao", slug=slug, id=novo_id))
+                                bid_, "agendado", 0, session.get("telefone"),
+                                duracao_min=s["duracao_min"], verificar_conflito=True)
+                            if novo_id == -1:
+                                erro = "Esse horário acabou de ser ocupado. Escolhe outro."
+                            else:
+                                _invalidar_idx(barbearia_id)
+                                _s = db.servico_por_id(sid)
+                                from helpers import _push_async
+                                _push_async(barbearia_id,
+                                            "📅 Novo agendamento",
+                                            f"{session.get('user_nome','Cliente')} marcou {_s['nome'] if _s else ''} para {dh[8:10]}/{dh[5:7]} {dh[11:16]}",
+                                            barbeiro_id=bid_)
+                                return redirect(url_for("cliente_confirmacao", slug=slug, id=novo_id))
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("cliente_marcar.html", servicos=servicos, barbeiros=barbeiros,
                                hoje=hoje, agora=_agora().strftime("%H:%M"),
@@ -212,7 +233,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/confirmacao/<int:id>")
     def cliente_confirmacao(slug, id):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
@@ -231,7 +252,7 @@ def register(app) -> None:
     def cliente_confirmar(slug, token):
         """Rota pública (sem login) para confirmação de presença via link."""
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         ag = db.confirmar_agendamento(token)
         if ag and ag["barbearia_id"] != barbearia["id"]:
@@ -245,7 +266,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/cancelar/<int:id>", methods=["POST"])
     def cliente_cancelar(slug, id):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return redirect(url_for("login"))
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
@@ -277,7 +298,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/reagendar/<int:id>", methods=["GET","POST"])
     def cliente_reagendar(slug, id):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:
@@ -335,7 +356,7 @@ def register(app) -> None:
                     erro = msg_h
             if not erro:
                 if bid_:
-                    aus = db.ausencia_ativa(bid_, data, hora)
+                    aus = db.ausencia_ativa(bid_, data, hora, duracao_min=dur)
                     if aus:
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro barbeiro ou data."
                 if not erro:
@@ -344,10 +365,11 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
-                            db.reagendar_agendamento(id, dh, bid_, sid)
-                            db.invalidar_cache_slots(barbearia_id)
-                            _invalidar_idx(barbearia_id)
-                            return redirect(url_for("cliente_home", slug=slug))
+                            if db.reagendar_agendamento(id, dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
+                                db.invalidar_cache_slots(barbearia_id)
+                                _invalidar_idx(barbearia_id)
+                                return redirect(url_for("cliente_home", slug=slug))
+                            erro = "Esse horário acabou de ser ocupado. Escolhe outro."
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("reagendar.html", ag=enriquecer(ag),
                                servicos=db.listar_servicos(barbearia_id),
@@ -365,7 +387,7 @@ def register(app) -> None:
 
         barbearia_id = ag["barbearia_id"]
         barbearia    = db.get_barbearia(barbearia_id)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
 
         erro = None
@@ -414,7 +436,7 @@ def register(app) -> None:
                     erro = msg_h
             if not erro:
                 if bid_:
-                    aus = db.ausencia_ativa(bid_, data, hora)
+                    aus = db.ausencia_ativa(bid_, data, hora, duracao_min=dur)
                     if aus:
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro horário."
                 if not erro:
@@ -424,13 +446,14 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
-                            db.reagendar_agendamento(ag["id"], dh, bid_, sid)
-                            db.invalidar_cache_slots(barbearia_id)
-                            _invalidar_idx(barbearia_id)
-                            return render_template("reagendar_link_ok.html",
-                                                   ag=enriquecer(db.get_agendamento(ag["id"])),
-                                                   barbearia=barbearia,
-                                                   vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
+                            if db.reagendar_agendamento(ag["id"], dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
+                                db.invalidar_cache_slots(barbearia_id)
+                                _invalidar_idx(barbearia_id)
+                                return render_template("reagendar_link_ok.html",
+                                                       ag=enriquecer(db.get_agendamento(ag["id"])),
+                                                       barbearia=barbearia,
+                                                       vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
+                            erro = "Esse horário acabou de ser ocupado. Escolhe outro."
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("reagendar.html",
                                ag=enriquecer(ag),
@@ -451,7 +474,7 @@ def register(app) -> None:
 
         barbearia_id = ag["barbearia_id"]
         barbearia    = db.get_barbearia(barbearia_id)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
 
         erro_cancelar = None
@@ -483,7 +506,7 @@ def register(app) -> None:
         if not ag:
             return render_template("404.html"), 404
         barbearia = db.get_barbearia(ag["barbearia_id"])
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return render_template("404.html"), 404
         nao_concluido = ag.get("status") != "concluido"
         ja_avaliou    = ag.get("avaliacao") is not None
@@ -511,7 +534,7 @@ def register(app) -> None:
     @app.route("/cliente/<slug>/fila-espera", methods=["POST"])
     def cliente_fila_espera(slug):
         barbearia = db.get_barbearia_por_slug(slug)
-        if not barbearia or not barbearia["ativa"]:
+        if _barbearia_indisponivel(barbearia):
             return redirect(url_for("cliente_entrada", slug=slug))
         barbearia_id = barbearia["id"]
         if session.get("role") != "cliente" or session.get("barbearia_id") != barbearia_id:

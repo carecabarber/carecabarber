@@ -587,6 +587,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // Estado local: ids já marcados nesta sessão (evita duplo clique)
     var _enviados = {};
 
+    // Delegação de evento (CSP-safe): marca o lembrete ao clicar no botão WA.
+    // Substitui o onclick inline, bloqueado pela CSP (script-src sem unsafe-inline).
+    if (_lista) {
+        _lista.addEventListener('click', function(ev) {
+            var el = ev.target.closest ? ev.target.closest('.js-wa-lembrete') : null;
+            if (!el) return;
+            var id = el.getAttribute('data-lid');
+            if (id) _marcarEnviado(id);
+        });
+    }
+
     function _waBase(tel) {
         if (!tel) return null;
         var t = tel.replace(/\s/g,'');
@@ -652,13 +663,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 'background:rgba(37,211,102,0.10);color:#25d366;border:1px solid rgba(37,211,102,0.25);' +
                                 'white-space:nowrap;font-weight:600">' + escHtml(envLabel) + '</span>';
                         } else {
-                            // Botão "💬 WA" — abre WA + marca como enviado
+                            // Botão "💬 WA" — abre WA + marca como enviado (CSP: delegação, sem onclick inline)
                             html += '<a href="' + waLink + '" target="_blank" rel="noopener" ' +
-                                'data-lid="' + a.id + '" ' +
-                                'onclick="(function(el){' +
-                                'var id=el.getAttribute(\'data-lid\');' +
-                                'fetch(\'/api/marcar-lembrete/\'+id,{method:\'POST\',headers:{\'X-Requested-With\':\'XMLHttpRequest\'}}).catch(function(){});' +
-                                '})(this)" ' +
+                                'data-lid="' + a.id + '" class="js-wa-lembrete" ' +
                                 'style="font-size:0.7rem;padding:2px 8px;border-radius:6px;' +
                                 'background:rgba(37,211,102,0.15);color:#25d366;border:1px solid rgba(37,211,102,0.3);' +
                                 'text-decoration:none;white-space:nowrap;font-weight:600">💬 WA</a>';

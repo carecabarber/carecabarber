@@ -41,7 +41,7 @@ from db.barbearia import (
     _plano_info, registar_pagamento, _codigo_plano_atual,
     verificar_plano, listar_pagamentos, verificar_todos_planos,
     listar_todos_pagamentos, cancelar_plano, desativar_planos_expirados,
-    toggle_barbearia, editar_barbearia, set_logo,
+    toggle_barbearia, apagar_barbearia, editar_barbearia, set_logo,
     get_horario, set_horario_dia, get_horario_dia,
     listar_dias_fechados, adicionar_dia_fechado, remover_dia_fechado,
     dia_esta_fechado,

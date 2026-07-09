@@ -3,7 +3,7 @@ from urllib.parse import quote_plus
 import json
 import database as db
 from helpers import (
-    _log, _blog, _limpar, _salvar_logo, _USER_RE, _MAX_USERNAME, root_required,
+    _log, _blog, _audit, _limpar, _salvar_logo, _USER_RE, _MAX_USERNAME, root_required,
     VOCAB_TIPOS, get_vocab, MOEDAS, _MOEDA_MAP, _pc_del,
 )
 
@@ -51,6 +51,7 @@ def register(app) -> None:
             vocab_custom_json = json.dumps(vc, ensure_ascii=False)
         barbearia_id = db.criar_barbearia(nome, tipo=tipo, vocab_custom_json=vocab_custom_json)
         db.criar_chefe(chefe_nome, username, senha, barbearia_id)
+        _audit("root-criar-estabelecimento", alvo=barbearia_id, nome=nome, chefe=username)
         logo = request.files.get("logo")
         if logo and logo.filename:
             filename = _salvar_logo(logo, barbearia_id)
@@ -65,7 +66,69 @@ def register(app) -> None:
     @root_required
     def root_toggle_barbearia(id):
         db.toggle_barbearia(id)
+        # Invalidar a cache do gate de plano — sem isto, o staff da barbearia
+        # bloqueada continuaria a entrar até a cache expirar (bug corrigido).
+        _pc_del(f"plano:{id}:")
+        barb = db.get_barbearia(id)
+        _audit("root-toggle-estabelecimento", alvo=id,
+               estado=("ativa" if (barb or {}).get("ativa") else "inativa"))
         return redirect(url_for("root_dashboard"))
+
+
+    @app.route("/root/apagar/<int:id>", methods=["POST"])
+    @root_required
+    def root_apagar_barbearia(id):
+        """Elimina DEFINITIVAMENTE uma barbearia e todos os dados ligados.
+
+        Segurança em camadas (acção irreversível):
+          1. Confirmação por nome escrito à mão — o root tem de escrever o nome
+             EXACTO da barbearia no campo `confirmar`; senão aborta.
+          2. Backup automático da BD ANTES de apagar (para /root/backups ou
+             junto da BD), para que nada se perca por engano.
+          3. Só depois corre a eliminação em cascata (introspecção de schema).
+        """
+        barb = db.get_barbearia(id)
+        if not barb:
+            return redirect(url_for("root_dashboard") + "?erro=" +
+                            quote_plus("Estabelecimento não encontrado."))
+
+        nome = barb["nome"]
+        confirmar = _limpar(request.form.get("confirmar", "")).strip()
+        if confirmar != nome.strip():
+            return redirect(url_for("root_dashboard") + "?erro=" + quote_plus(
+                "Nome de confirmação não coincide — eliminação cancelada."))
+
+        # ── Backup automático ANTES de qualquer DELETE ──────────────
+        import os
+        from datetime import datetime
+        try:
+            base_dir = os.path.dirname(db.DB_PATH) or "."
+            bkp_dir = os.path.join(base_dir, "backups")
+            os.makedirs(bkp_dir, exist_ok=True)
+            carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
+            bkp_path = os.path.join(bkp_dir, f"antes_apagar_{id}_{carimbo}.db")
+            db.backup_db(bkp_path)
+        except Exception as e:  # noqa: BLE001 — não apagar sem backup
+            _blog(f"root: backup pré-eliminação falhou id={id}: {e}")
+            return redirect(url_for("root_dashboard") + "?erro=" + quote_plus(
+                "Falha ao criar backup de segurança — eliminação abortada."))
+
+        # ── Eliminação em cascata ───────────────────────────────────
+        try:
+            resumo = db.apagar_barbearia(id)
+        except Exception as e:  # noqa: BLE001
+            _blog(f"root: apagar_barbearia id={id} falhou: {e}")
+            return redirect(url_for("root_dashboard") + "?erro=" + quote_plus(
+                f"Erro ao eliminar: {e}"))
+
+        _pc_del(f"plano:{id}:")
+        _audit("root-eliminar-estabelecimento", alvo=id, nome=nome,
+               registos=sum(resumo.values()), backup=os.path.basename(bkp_path))
+        _blog(f"root: barbearia id={id} «{nome}» ELIMINADA. "
+              f"backup={bkp_path} resumo={resumo}")
+        total = sum(resumo.values())
+        return redirect(url_for("root_dashboard") + "?ok=" + quote_plus(
+            f"«{nome}» eliminada ({total} registos). Backup: {os.path.basename(bkp_path)}"))
 
 
     @app.route("/root/editar/<int:id>", methods=["POST"])
@@ -115,6 +178,7 @@ def register(app) -> None:
         if len(nova) < 6:
             return redirect(url_for("root_dashboard") + "?erro=" + quote_plus("Senha deve ter pelo menos 6 caracteres."))
         db.alterar_senha(session["user_id"], nova)
+        _audit("root-mudar-senha", alvo=session["user_id"])
         return redirect(url_for("root_dashboard") + "?ok=" + quote_plus("Senha alterada com sucesso."))
 
 
@@ -128,6 +192,7 @@ def register(app) -> None:
         session["barbearia_id"] = id
         session["role"]         = "chefe"
         session["root_gerir"]   = True
+        _audit("root-impersonar", alvo=id, nome=barbearia.get("nome", ""))
         return redirect(url_for("index"))
 
 

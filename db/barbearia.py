@@ -3,7 +3,7 @@
 import sqlite3
 from datetime import datetime, timedelta, date
 from db._conn import (
-    _read, _write, _agora, FMT, invalidar_cache_slots, slug_unico,
+    _read, _write, _write_exclusive, _agora, FMT, invalidar_cache_slots, slug_unico,
     normalizar_dominio,
     _HORARIO_PADRAO,
     get_config, set_config,
@@ -395,6 +395,61 @@ def toggle_barbearia(id: int) -> None:
         conn.execute("UPDATE barbearias SET ativa = 1 - ativa WHERE id=?", (id,))
 
 
+def apagar_barbearia(id: int) -> dict:
+    """Elimina uma barbearia e TODOS os dados ligados, em cascata e a-prova-de-FK.
+
+    Introspecciona o schema em tempo real: qualquer tabela com coluna
+    `barbearia_id` é limpa, e tabelas ligadas só por `barbeiro_id`
+    (ausencias, webauthn_credentials) são limpas via subconsulta aos
+    barbeiros desta barbearia. Assim, tabelas futuras são apanhadas
+    automaticamente sem editar esta função.
+
+    Irreversível. Faz sempre backup ANTES de chamar (feito na rota root).
+    Devolve um resumo {tabela: nº_linhas_apagadas} para auditoria.
+    """
+    resumo: dict[str, int] = {}
+    with _write_exclusive() as conn:
+        existe = conn.execute(
+            "SELECT nome FROM barbearias WHERE id=?", (id,)).fetchone()
+        if not existe:
+            raise ValueError(f"barbearia id={id} não existe")
+
+        tabelas = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%'").fetchall()]
+
+        com_barbearia_id: list[str] = []
+        so_barbeiro_id: list[str] = []
+        for t in tabelas:
+            if t == "barbearias":
+                continue
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})").fetchall()}
+            if "barbearia_id" in cols:
+                com_barbearia_id.append(t)
+            elif "barbeiro_id" in cols:
+                so_barbeiro_id.append(t)
+
+        # 1) tabelas ligadas só por barbeiro_id (filhas dos barbeiros) primeiro
+        for t in so_barbeiro_id:
+            cur = conn.execute(
+                f"DELETE FROM {t} WHERE barbeiro_id IN "
+                "(SELECT id FROM barbeiros WHERE barbearia_id=?)", (id,))
+            if cur.rowcount:
+                resumo[t] = cur.rowcount
+
+        # 2) todas as tabelas com barbearia_id (inclui a tabela barbeiros)
+        for t in com_barbearia_id:
+            cur = conn.execute(f"DELETE FROM {t} WHERE barbearia_id=?", (id,))
+            if cur.rowcount:
+                resumo[t] = cur.rowcount
+
+        # 3) a própria barbearia
+        cur = conn.execute("DELETE FROM barbearias WHERE id=?", (id,))
+        resumo["barbearias"] = cur.rowcount
+
+    return resumo
+
+
 def editar_barbearia(id: int, nome: str) -> None:
     novo_slug = slug_unico(nome, excluir_id=id)
     with _write() as conn:
@@ -518,7 +573,10 @@ def apagar_ausencia(id: int) -> None:
         invalidar_cache_slots(bid)
 
 
-def ausencia_ativa(barbeiro_id: int, data_str: str, hora_str: str | None = None) -> dict | None:
+def ausencia_ativa(barbeiro_id: int, data_str: str, hora_str: str | None = None,
+                   duracao_min: int | None = None) -> dict | None:
+    # duracao_min: se fornecido, verifica sobreposição do serviço [h, h+dur) com a
+    # ausência — um serviço que começa antes da ausência mas a invade é rejeitado.
     with _read() as conn:
         rows = conn.execute(
             "SELECT a.*, b.nome as barbeiro_nome FROM ausencias a "
@@ -541,7 +599,10 @@ def ausencia_ativa(barbeiro_id: int, data_str: str, hora_str: str | None = None)
             ini = _hm(a["hora_inicio"])
             fim = _hm(a["hora_fim"])
             if ini < fim:
-                if ini <= h < fim:
+                if duracao_min:
+                    if h < fim and (h + duracao_min) > ini:
+                        return dict(a)
+                elif ini <= h < fim:
                     return dict(a)
             else:
                 if h >= ini or h < fim:
@@ -562,7 +623,7 @@ def cliente_bloquear(barbearia_id: int, telefone: str, motivo: str = "") -> None
         conn.execute(
             "INSERT OR REPLACE INTO clientes_bloqueados "
             "(barbearia_id, telefone, motivo, bloqueado_em) VALUES (?, ?, ?, ?)",
-            (barbearia_id, tel, (motivo or "")[:200], _agora().strftime(FMT)))
+            (barbearia_id, tel, (motivo or "")[:200], _agora(barbearia_id=barbearia_id).strftime(FMT)))
 
 
 def cliente_desbloquear(id: int) -> None:

@@ -457,6 +457,35 @@ class TestVerificarPlano:
         # Sem barbearia_id, a rota protegida pode redirecionar ou 200
         assert r.status_code in (200, 302, 500)
 
+    def test_barbearia_bloqueada_sem_limite_suspende_staff(self, client):
+        """REGRESSÃO: barbearia de plano ilimitado (plano_expira_em=NULL, sem_limite)
+        que o root BLOQUEIA (ativa=0) tem de suspender o staff. O bug antigo deixava
+        estes estabelecimentos abrir por causa do escape `not sem_limite`."""
+        c, ctx = client
+        db = ctx["db"]
+        import app as app_module
+        # Garantir plano ilimitado sem prazo → sem_limite=True
+        with db._write() as conn:
+            conn.execute("UPDATE barbearias SET plano_expira_em=NULL, ativa=1 WHERE id=?",
+                         (ctx["bid"],))
+        app_module._pc_del(f"plano:{ctx['bid']}:")
+        _chefe(c, ctx)
+        # Antes de bloquear: staff entra (não é suspenso)
+        r = c.get("/barbeiros", follow_redirects=False)
+        assert "conta-suspensa" not in (r.headers.get("Location") or "")
+        # Bloquear (ativa=0) e invalidar cache — como faz root_toggle_barbearia
+        with db._write() as conn:
+            conn.execute("UPDATE barbearias SET ativa=0 WHERE id=?", (ctx["bid"],))
+        app_module._pc_del(f"plano:{ctx['bid']}:")
+        r = c.get("/barbeiros", follow_redirects=False)
+        assert r.status_code == 302
+        assert "conta-suspensa" in (r.headers.get("Location") or ""), \
+            "Staff de barbearia bloqueada (sem_limite) DEVE ser suspenso"
+        # Restaurar estado para não afectar outros testes
+        with db._write() as conn:
+            conn.execute("UPDATE barbearias SET ativa=1 WHERE id=?", (ctx["bid"],))
+        app_module._pc_del(f"plano:{ctx['bid']}:")
+
 
 # ══════════════════════════════════════════════════════════════
 #  TESTES DE INTEGRAÇÃO COMPLETOS — flows end-to-end

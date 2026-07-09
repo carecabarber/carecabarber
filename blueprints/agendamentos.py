@@ -221,10 +221,14 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                     if not erro:
-                        db.criar_agendamento(nome, sid, dh, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas)
-                        _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
-                        _invalidar_idx(barbearia_id)
-                        return redirect(url_for("index", fresh=1))
+                        _novo_id = db.criar_agendamento(nome, sid, dh, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas,
+                                                        duracao_min=s["duracao_min"], verificar_conflito=True)
+                        if _novo_id == -1:
+                            erro = "Esse horário acabou de ser ocupado. Escolhe outro."
+                        else:
+                            _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
+                            _invalidar_idx(barbearia_id)
+                            return redirect(url_for("index", fresh=1))
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("novo.html", servicos=db.listar_servicos(barbearia_id),
                                barbeiros=db.listar_barbeiros(barbearia_id, incluir_chefe=True),
@@ -279,10 +283,17 @@ def register(app) -> None:
                               f"Bloqueado até às {_bloq.get('hora_fim','?')}.", "erro")
                         return redirect(url_for("walkin"))
                     agora_str = _agora_wi.strftime("%Y-%m-%d %H:%M:%S")
+                    _aviso_conflito = None
                     with _booking_lock:
                         if bid_ and db.barbeiro_tem_em_andamento(bid_):
                             flash(f"⚠️ O {_vw.get('profissional','Barbeiro').lower()} já tem um {_vw.get('servico','serviço').lower()} em curso. Aguarda que termine.", "erro")
                             return redirect(url_for("walkin"))
+                        # Aviso (não bloqueia): o walk-in começa AGORA e pode invadir uma
+                        # marcação futura do barbeiro se o serviço for mais longo que a folga.
+                        if bid_:
+                            _livre_wi, _hc_wi = db.verificar_disponibilidade(bid_, agora_str, s["duracao_min"], barbearia_id)
+                            if not _livre_wi:
+                                _aviso_conflito = _hc_wi
                         novo_id = db.criar_agendamento(nome, sid, agora_str, barbearia_id, bid_, ST_WALKIN, 0, tel, notas)
                         ok = db.iniciar_trabalho(novo_id)
                         if not ok:
@@ -291,6 +302,9 @@ def register(app) -> None:
                             return redirect(url_for("walkin"))
                         _blog("WALKIN", bid=barbearia_id, barb=bid_, sid=sid, ag_id=novo_id)
                     _invalidar_idx(barbearia_id)
+                    if _aviso_conflito:
+                        flash(f"⚠️ Walk-in iniciado, mas sobrepõe-se à marcação das {_aviso_conflito}. "
+                              f"Convém reagendar essa marcação.", "aviso")
                     return redirect(url_for("index", fresh=1))
         _agora_dt   = _agora()
         _weekday    = _agora_dt.weekday()
@@ -520,7 +534,7 @@ def register(app) -> None:
                     erro = msg_h
             if not erro:
                 if bid_:
-                    aus = db.ausencia_ativa(bid_, data, hora)
+                    aus = db.ausencia_ativa(bid_, data, hora, duracao_min=dur)
                     if aus:
                         erro = f"{aus['barbeiro_nome']} está indisponível. Escolhe outro {_vprof_r.lower()} ou data."
                 if not erro:
@@ -530,10 +544,11 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
-                            db.reagendar_agendamento(id, dh, bid_, sid)
-                            db.invalidar_cache_slots(barbearia_id)
-                            _invalidar_idx(barbearia_id)
-                            return redirect(url_for("index"))
+                            if db.reagendar_agendamento(id, dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
+                                db.invalidar_cache_slots(barbearia_id)
+                                _invalidar_idx(barbearia_id)
+                                return redirect(url_for("index"))
+                            erro = "Esse horário acabou de ser ocupado. Escolhe outro."
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("reagendar.html", ag=enriquecer(ag),
                                servicos=db.listar_servicos(barbearia_id),

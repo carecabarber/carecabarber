@@ -115,12 +115,15 @@ def apagar_foto_perfil(barbeiro_id: int) -> None:
 def registar_credencial(barbeiro_id: int, credential_id: str, public_key: str, nome_dispositivo: str = "Dispositivo") -> None:
     """Guarda uma nova credencial WebAuthn para um barbeiro."""
     with _write() as conn:
+        _brow = conn.execute(
+            "SELECT barbearia_id FROM barbeiros WHERE id=?", (barbeiro_id,)).fetchone()
+        _bid = _brow["barbearia_id"] if _brow else None
         conn.execute(
             "INSERT INTO webauthn_credentials "
             "(barbeiro_id, credential_id, public_key, nome_dispositivo, criado_em) "
             "VALUES (?,?,?,?,?)",
             (barbeiro_id, credential_id, public_key,
-             nome_dispositivo, _agora().strftime(FMT)))
+             nome_dispositivo, _agora(barbearia_id=_bid).strftime(FMT)))
 
 
 def get_credenciais_barbeiro(barbeiro_id: int) -> list[dict]:
