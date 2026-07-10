@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .secret_key
 barbearia.db
+barbearia_prod.db
+*_prod.db
 rate_limit.db
 version.txt
 .env

@@ -1042,12 +1042,17 @@ def _migrar_hashes_lentos():
     """Migra scrypt e pbkdf2:sha256:600000 → pbkdf2:sha256:10000."""
     import sqlite3 as _sq, secrets as _sec, string as _str
     _base = os.path.dirname(os.path.abspath(__file__))
-    _flag = os.path.join(_base, ".migr2_done")
-    _out  = os.path.join(_base, ".migr_tmp")
+    # Honrar DB_PATH (volume Railway). Em PythonAnywhere (env ausente) resolve
+    # para _base/barbearia.db → comportamento byte-idêntico ao anterior. Sem isto,
+    # a migração ligava-se à BD errada (/app efémero) e nunca corria no volume.
+    _db_path  = os.environ.get("DB_PATH") or os.path.join(_base, "barbearia.db")
+    _data_dir = os.path.dirname(_db_path) or _base
+    _flag = os.path.join(_data_dir, ".migr2_done")
+    _out  = os.path.join(_data_dir, ".migr_tmp")
     if os.path.exists(_flag):
         return
     try:
-        _conn = _sq.connect(os.path.join(_base, "barbearia.db"), timeout=30)
+        _conn = _sq.connect(_db_path, timeout=30)
         _rows = _conn.execute(
             "SELECT id, nome, username, role, password_hash FROM barbeiros"
             " WHERE password_hash LIKE 'scrypt:%'"
