@@ -215,6 +215,17 @@ def register(app) -> None:
                 if not ok_h:
                     erro = msg_h
             if not erro:
+                # Recorrência (opcional): repetir a marcação nas semanas seguintes,
+                # mesma hora/serviço/barbeiro. Ex.: cliente habitual de 15 em 15 dias.
+                _INTERVALOS = {"semanal": 7, "quinzenal": 14, "mensal": 28}
+                _dias_rec = _INTERVALOS.get(request.form.get("recorrencia", "nao"), 0)
+                try:
+                    _vezes = int(request.form.get("recorrencia_vezes", 1) or 1)
+                except (ValueError, TypeError):
+                    _vezes = 1
+                _vezes = max(1, min(_vezes, 12))   # teto de segurança (máx. 12 marcações)
+                if not _dias_rec:
+                    _vezes = 1                       # sem recorrência → só a 1.ª
                 with _booking_lock:
                     if bid_:
                         livre, hora_conf = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
@@ -227,7 +238,32 @@ def register(app) -> None:
                             erro = "Esse horário acabou de ser ocupado. Escolhe outro."
                         else:
                             _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
+                            # Criar as repetições. Datas com conflito ou fora de horário
+                            # são saltadas (não abortam as restantes) e reportadas.
+                            _criados_extra, _saltados = 0, 0
+                            if _vezes > 1:
+                                _base_dt = datetime.strptime(dh, "%Y-%m-%d %H:%M:%S")
+                                for _k in range(1, _vezes):
+                                    _dh_k = (_base_dt + timedelta(days=_dias_rec * _k)).strftime("%Y-%m-%d %H:%M:%S")
+                                    _dk, _hk = _dh_k[:10], _dh_k[11:16]
+                                    _okh, _ = _dentro_horario(_dk, _hk, s["duracao_min"], barbearia_id)
+                                    if not _okh:
+                                        _saltados += 1
+                                        continue
+                                    _id_k = db.criar_agendamento(nome, sid, _dh_k, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas,
+                                                                 duracao_min=s["duracao_min"], verificar_conflito=True)
+                                    if _id_k == -1:
+                                        _saltados += 1
+                                    else:
+                                        _criados_extra += 1
+                                _blog("RECORRENCIA", bid=barbearia_id, barb=bid_,
+                                      criados=_criados_extra, saltados=_saltados)
                             _invalidar_idx(barbearia_id)
+                            if _criados_extra or _saltados:
+                                _msg = f"✅ Marcação criada + {_criados_extra} repetição(ões) agendada(s)."
+                                if _saltados:
+                                    _msg += f" {_saltados} data(s) saltada(s) por conflito ou fora de horário."
+                                flash(_msg, "sucesso")
                             return redirect(url_for("index", fresh=1))
         hoje = _agora().strftime("%Y-%m-%d")
         return render_template("novo.html", servicos=db.listar_servicos(barbearia_id),

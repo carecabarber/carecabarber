@@ -92,6 +92,32 @@
                   style="resize:vertical;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;color:var(--text);font-size:0.9rem;width:100%;box-sizing:border-box;font-family:inherit"></textarea>
     </div>
 
+    <div class="field">
+        <label for="recorrencia">Repetir <span style="color:var(--text2);font-size:0.75rem">(cliente habitual)</span></label>
+        <select id="recorrencia" name="recorrencia">
+            <option value="nao">Não repetir</option>
+            <option value="semanal">Todas as semanas</option>
+            <option value="quinzenal">De 15 em 15 dias</option>
+            <option value="mensal">Uma vez por mês</option>
+        </select>
+    </div>
+
+    <div class="field" id="campo-vezes" style="display:none">
+        <label for="recorrencia_vezes">Quantas marcações no total (incluindo esta)</label>
+        <select id="recorrencia_vezes" name="recorrencia_vezes">
+            <option value="2">2 marcações</option>
+            <option value="3">3 marcações</option>
+            <option value="4" selected>4 marcações</option>
+            <option value="5">5 marcações</option>
+            <option value="6">6 marcações</option>
+            <option value="8">8 marcações</option>
+            <option value="12">12 marcações</option>
+        </select>
+        <span style="color:var(--text2);font-size:0.75rem;margin-top:4px;display:block">
+            As repetições usam a mesma hora, serviço e {{ vocab.profissional | lower }}. Datas ocupadas são saltadas.
+        </span>
+    </div>
+
     <button type="submit" class="btn btn-primary btn-full" id="btn-agendar" disabled>Agendar</button>
 </form>
 
@@ -245,6 +271,15 @@ slotsList.addEventListener('click', function(e) {
     const btn = e.target.closest('.slot-btn:not(.slot-ocupado)[data-hora]');
     if (btn) escolherHora(btn.dataset.hora, btn);
 });
+
+// Recorrência: mostrar "quantas vezes" só quando há repetição escolhida
+const selRec     = document.getElementById("recorrencia");
+const campoVezes = document.getElementById("campo-vezes");
+if (selRec && campoVezes) {
+    selRec.addEventListener("change", () => {
+        campoVezes.style.display = selRec.value === "nao" ? "none" : "block";
+    });
+}
 
 // Carregar slots no arranque se barbeiro já estiver definido
 if (minhaBarbId || (selB && selB.value)) carregarSlots();

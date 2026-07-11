@@ -256,6 +256,57 @@ class TestMarcacoes:
         assert r.status_code == 200
         assert b"hora" in r.data.lower()
 
+    def _proxima_segunda(self):
+        """Data da próxima segunda-feira (dia útil garantido aberto 08–19)."""
+        hoje = datetime.now()
+        dias = (7 - hoje.weekday()) % 7 or 7   # sempre 1..7 dias à frente
+        return (hoje + timedelta(days=dias)).strftime("%Y-%m-%d")
+
+    def test_novo_recorrencia_semanal_cria_multiplas(self, client):
+        """Recorrência semanal × 3 → cria 3 marcações (a base + 2 repetições),
+        todas no mesmo barbeiro/serviço, em segundas consecutivas."""
+        c, ctx = _sessao_chefe(client)
+        db = ctx["db"]
+        base = self._proxima_segunda()
+        nome = "Cliente Recorrente ABC"
+        r = c.post("/novo", data={
+            "cliente":     nome,
+            "servico_id":  ctx["svc_id"],
+            "barbeiro_id": ctx["barb_id"],
+            "data":        base,
+            "hora":        "16:30",
+            "recorrencia": "semanal",
+            "recorrencia_vezes": "3",
+        }, follow_redirects=False)
+        assert r.status_code == 302
+        with db._read() as conn:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM agendamentos WHERE cliente=? AND barbearia_id=?",
+                (nome, ctx["bid"])).fetchone()["n"]
+        assert n == 3
+
+    def test_novo_sem_recorrencia_cria_uma(self, client):
+        """Sem recorrência (default) → só 1 marcação, comportamento inalterado."""
+        c, ctx = _sessao_chefe(client)
+        db = ctx["db"]
+        base = self._proxima_segunda()
+        nome = "Cliente Unico DEF"
+        r = c.post("/novo", data={
+            "cliente":     nome,
+            "servico_id":  ctx["svc_id"],
+            "barbeiro_id": ctx["barb_id"],
+            "data":        base,
+            "hora":        "17:30",
+            "recorrencia": "nao",
+            "recorrencia_vezes": "4",   # ignorado quando recorrencia=nao
+        }, follow_redirects=False)
+        assert r.status_code == 302
+        with db._read() as conn:
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM agendamentos WHERE cliente=? AND barbearia_id=?",
+                (nome, ctx["bid"])).fetchone()["n"]
+        assert n == 1
+
     def test_walkin_get(self, client):
         c, ctx = _sessao_chefe(client)
         r = c.get("/walkin")
