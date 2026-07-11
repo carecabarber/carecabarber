@@ -626,10 +626,15 @@ def erro_servidor(e):
     _elog.error("500", extra={
         "method": request.method, "path": request.path,
         "exc": _tb.format_exc()[:800]})
+    # Alerta por push SÓ à barbearia onde o erro ocorreu — nunca a todas.
+    # Notificar todas vazava a cada dono os erros (e o path) dos outros
+    # estabelecimentos, além do ruído de N pushes por cada 500. Sem sessão
+    # (páginas públicas) → sem push; o Sentry continua a capturar tudo para o
+    # operador, que é o canal de monitorização real.
     try:
-        barbearias = db.listar_barbearias(apenas_ativas=True)
-        for _b in barbearias:
-            _push_async(_b["id"], "⚠️ Erro 500",
+        _bid_erro = session.get("barbearia_id")
+        if _bid_erro:
+            _push_async(_bid_erro, "⚠️ Erro 500",
                         f"{request.method} {request.path[:60]}")
     except Exception:
         pass

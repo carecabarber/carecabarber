@@ -182,6 +182,31 @@ class TestErrorHandlers:
             status = resp[1] if isinstance(resp, tuple) else resp.status_code
             assert status == 500
 
+    def test_500_push_so_barbearia_da_sessao(self, client):
+        """Privacidade: o alerta de 500 vai SÓ à barbearia da sessão — nunca a
+        todas. Evita vazar a cada dono os erros/paths dos outros tenants."""
+        c, ctx = client
+        import app as app_module
+        from flask import session as _sess
+        e = Exception("erro simulado")
+        with app_module.app.test_request_context("/x", method="POST"):
+            _sess["barbearia_id"] = 42
+            with patch("app._push_async") as mock_push:
+                app_module.erro_servidor(e)
+            assert mock_push.call_count == 1
+            assert mock_push.call_args[0][0] == 42
+
+    def test_500_push_ausente_sem_sessao(self, client):
+        """Erro numa página pública (sem barbearia_id na sessão) → nenhum push;
+        o Sentry continua a ser o canal de monitorização do operador."""
+        c, ctx = client
+        import app as app_module
+        e = Exception("erro simulado")
+        with app_module.app.test_request_context("/publica", method="GET"):
+            with patch("app._push_async") as mock_push:
+                app_module.erro_servidor(e)
+            assert mock_push.call_count == 0
+
     def test_handle_runtime_db_timeout_json(self, client):
         """RuntimeError DB_TIMEOUT em pedido JSON → 503 (linhas 302-305)."""
         c, ctx = client
