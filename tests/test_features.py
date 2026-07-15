@@ -263,8 +263,9 @@ class TestMarcacoes:
         return (hoje + timedelta(days=dias)).strftime("%Y-%m-%d")
 
     def test_novo_recorrencia_semanal_cria_multiplas(self, client):
-        """Recorrência semanal × 3 → cria 3 marcações (a base + 2 repetições),
-        todas no mesmo barbeiro/serviço, em segundas consecutivas."""
+        """Recorrência semanal → cria a base + repetições automáticas até ao
+        horizonte (365 dias), todas no mesmo barbeiro/serviço em segundas
+        consecutivas. Deixou de existir contagem manual (recorrencia_vezes)."""
         c, ctx = _sessao_chefe(client)
         db = ctx["db"]
         base = self._proxima_segunda()
@@ -276,14 +277,14 @@ class TestMarcacoes:
             "data":        base,
             "hora":        "16:30",
             "recorrencia": "semanal",
-            "recorrencia_vezes": "3",
         }, follow_redirects=False)
         assert r.status_code == 302
         with db._read() as conn:
             n = conn.execute(
                 "SELECT COUNT(*) AS n FROM agendamentos WHERE cliente=? AND barbearia_id=?",
                 (nome, ctx["bid"])).fetchone()["n"]
-        assert n == 3
+        # Horizonte de 1 ano ⇒ ~52 semanas + a base. Aceita margem por feriados/ausências saltados.
+        assert n >= 40, f"esperava repetições até ao horizonte, criou apenas {n}"
 
     def test_novo_sem_recorrencia_cria_uma(self, client):
         """Sem recorrência (default) → só 1 marcação, comportamento inalterado."""

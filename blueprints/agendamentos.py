@@ -217,15 +217,11 @@ def register(app) -> None:
             if not erro:
                 # Recorrência (opcional): repetir a marcação nas semanas seguintes,
                 # mesma hora/serviço/barbeiro. Ex.: cliente habitual de 15 em 15 dias.
+                # Indefinida: sem número escolhido — repete até um horizonte fixo.
                 _INTERVALOS = {"semanal": 7, "quinzenal": 14, "mensal": 28}
                 _dias_rec = _INTERVALOS.get(request.form.get("recorrencia", "nao"), 0)
-                try:
-                    _vezes = int(request.form.get("recorrencia_vezes", 1) or 1)
-                except (ValueError, TypeError):
-                    _vezes = 1
-                _vezes = max(1, min(_vezes, 12))   # teto de segurança (máx. 12 marcações)
-                if not _dias_rec:
-                    _vezes = 1                       # sem recorrência → só a 1.ª
+                _HORIZONTE_DIAS = 365   # até ~1 ano de marcações antecipadas
+                _MAX_REPETICOES = 60    # teto de segurança absoluto (evita runaway)
                 with _booking_lock:
                     if bid_:
                         livre, hora_conf = db.verificar_disponibilidade(bid_, dh, s["duracao_min"], barbearia_id)
@@ -238,29 +234,51 @@ def register(app) -> None:
                             erro = "Esse horário acabou de ser ocupado. Escolhe outro."
                         else:
                             _blog("NOVO_AGENDAMENTO", bid=barbearia_id, barb=bid_, sid=sid, dh=dh)
-                            # Criar as repetições. Datas com conflito ou fora de horário
-                            # são saltadas (não abortam as restantes) e reportadas.
-                            _criados_extra, _saltados = 0, 0
-                            if _vezes > 1:
+                            # Criar as repetições. Se a data cair num feriado (barbearia
+                            # fechada) ou com o barbeiro em falta (ausência), recua-se para
+                            # o dia anterior útil (até 6 dias). Só se salta quando nenhum dia
+                            # dessa janela serve. Conflito/fora de horário não aborta as restantes.
+                            _criados_extra, _saltados, _movidos = 0, 0, 0
+                            if _dias_rec:
                                 _base_dt = datetime.strptime(dh, "%Y-%m-%d %H:%M:%S")
-                                for _k in range(1, _vezes):
-                                    _dh_k = (_base_dt + timedelta(days=_dias_rec * _k)).strftime("%Y-%m-%d %H:%M:%S")
-                                    _dk, _hk = _dh_k[:10], _dh_k[11:16]
-                                    _okh, _ = _dentro_horario(_dk, _hk, s["duracao_min"], barbearia_id)
-                                    if not _okh:
-                                        _saltados += 1
-                                        continue
-                                    _id_k = db.criar_agendamento(nome, sid, _dh_k, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas,
-                                                                 duracao_min=s["duracao_min"], verificar_conflito=True)
-                                    if _id_k == -1:
-                                        _saltados += 1
-                                    else:
+                                _limite  = _base_dt + timedelta(days=_HORIZONTE_DIAS)
+                                _MAX_RECUO = 6   # dias a recuar à procura de dia útil
+                                _k = 1
+                                while _k <= _MAX_REPETICOES:
+                                    _alvo = _base_dt + timedelta(days=_dias_rec * _k)
+                                    if _alvo > _limite:
+                                        break
+                                    _feito = False
+                                    for _recuo in range(0, _MAX_RECUO + 1):
+                                        _cand = _alvo - timedelta(days=_recuo)
+                                        _dk, _hk = _cand.strftime("%Y-%m-%d"), _cand.strftime("%H:%M")
+                                        # Feriado / dia fechado / fora de horário → recuar
+                                        _okh, _ = _dentro_horario(_dk, _hk, s["duracao_min"], barbearia_id)
+                                        if not _okh:
+                                            continue
+                                        # Barbeiro em falta nesse dia → recuar
+                                        if bid_ and db.ausencia_ativa(bid_, _dk, _hk, duracao_min=s["duracao_min"]):
+                                            continue
+                                        _dh_k = _cand.strftime("%Y-%m-%d %H:%M:%S")
+                                        _id_k = db.criar_agendamento(nome, sid, _dh_k, barbearia_id, bid_, ST_AGENDADO, 0, tel, notas,
+                                                                     duracao_min=s["duracao_min"], verificar_conflito=True)
+                                        if _id_k == -1:
+                                            continue   # horário ocupado nesse dia → recuar mais
                                         _criados_extra += 1
+                                        if _recuo > 0:
+                                            _movidos += 1
+                                        _feito = True
+                                        break
+                                    if not _feito:
+                                        _saltados += 1
+                                    _k += 1
                                 _blog("RECORRENCIA", bid=barbearia_id, barb=bid_,
-                                      criados=_criados_extra, saltados=_saltados)
+                                      criados=_criados_extra, movidos=_movidos, saltados=_saltados)
                             _invalidar_idx(barbearia_id)
-                            if _criados_extra or _saltados:
+                            if _criados_extra or _saltados or _movidos:
                                 _msg = f"✅ Marcação criada + {_criados_extra} repetição(ões) agendada(s)."
+                                if _movidos:
+                                    _msg += f" {_movidos} passada(s) para o dia anterior (feriado/ausência)."
                                 if _saltados:
                                     _msg += f" {_saltados} data(s) saltada(s) por conflito ou fora de horário."
                                 flash(_msg, "sucesso")
