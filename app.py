@@ -77,7 +77,7 @@ _TENANT_BASE_DOMAIN = db.normalizar_dominio(os.environ.get("TENANT_BASE_DOMAIN",
 _CANONICAL_URL      = (os.environ.get("CANONICAL_URL", "").strip()
                        or "https://carecabarber.pythonanywhere.com")
 # Subdomínios reservados que NUNCA são resolvidos como estabelecimento.
-_SUBDOMINIOS_RESERVADOS = frozenset(("www", "api", "app", "admin", "static", "mail", "ns", "cdn"))
+_SUBDOMINIOS_RESERVADOS = frozenset(("www", "api", "app", "admin", "static", "mail", "ns", "cdn", "invoice"))
 
 # ══════════════════════════════════════════════════════════════
 #  CONFIGURAÇÃO DE SEGURANÇA
@@ -382,6 +382,20 @@ def _resolver_dominio_proprio():
     if not host:
         return
 
+    # (0) Subdomínio reservado "invoice" → redirect para a app Invoice (serviço
+    # Railway SEPARADO — não misturamos apps, é só um encaminhamento de tráfego).
+    # Não dá para dar à Invoice um domínio próprio sob carecabarber.com porque
+    # esta app já reclama o wildcard *.carecabarber.com na Railway (a Railway
+    # não deixa dois serviços reclamarem domínios sobrepostos). Isto é a única
+    # forma de ter invoice.carecabarber.com na barra do browser.
+    if _TENANT_BASE_DOMAIN and host == "invoice." + _TENANT_BASE_DOMAIN:
+        _invoice_url = os.environ.get("INVOICE_URL", "").rstrip("/")
+        if _invoice_url:
+            qs = request.query_string.decode()
+            destino = _invoice_url + request.path + (("?" + qs) if qs else "")
+            return redirect(destino, code=302)
+        return  # sem INVOICE_URL configurado: comportamento normal (site principal)
+
     # (1) Subdomínio por estabelecimento — <slug>.TENANT_BASE_DOMAIN.
     # Gated por TENANT_BASE_DOMAIN: em PythonAnywhere (env ausente) é totalmente
     # inerte. Em Railway com DNS wildcard (*.carecabarber.com) dá a CADA
@@ -503,6 +517,9 @@ def _inject_csp_nonce():
         "av":          _ASSET_VER,
         "app_version": _APP_VERSION,
         "tema_claro":  request.cookies.get("cb-theme") == "light",
+        # invoice_url: aba de switch para a app Invoice — SÓ visível ao root
+        # (ver base.html). Vazio = dormente. Não misturamos apps: é só um link.
+        "invoice_url": os.environ.get("INVOICE_URL", ""),
     }
 
 
