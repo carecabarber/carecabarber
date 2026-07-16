@@ -379,6 +379,10 @@ def _resolver_dominio_proprio():
     from flask import g
     g.tenant = None
     host = db.normalizar_dominio(request.host)
+    print(f"[DEBUG-INVOICE] request.host={request.host!r} normalizado={host!r} "
+          f"XFH={request.headers.get('X-Forwarded-Host')!r} "
+          f"XFP={request.headers.get('X-Forwarded-Proto')!r} "
+          f"url={request.url!r} TBD={_TENANT_BASE_DOMAIN!r}", flush=True)
     if not host:
         return
 
