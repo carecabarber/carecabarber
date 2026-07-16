@@ -3,19 +3,5 @@
     "defaultMode": "bypassPermissions"
   },
   "skipDangerousModePermissionPrompt": true,
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/helder-neves/Documentos/barbearia/.claude/deploy.sh",
-            "statusMessage": "🚀 Deploy para PythonAnywhere…",
-            "timeout": 300
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }
