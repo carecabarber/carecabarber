@@ -10,11 +10,10 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 # import da app. setdefault não sobrepõe se já estiver no ambiente do PythonAnywhere.
 os.environ.setdefault("VAPID_PRIVATE_KEY", "om_CnOBDJSLlLHSqt0S_Z6AK16rYSzwf9Ebx8D_enQM")
 
-# SSO root → Invoice: segredo partilhado com a app Invoice (Railway, mesmo
-# valor em SSO_SHARED_SECRET lá) para assinar o token efémero de troca de
-# sessão em /sso/invoice → /sso/root. Sem isto a aba "Invoice" ainda funciona
-# como link normal (pede login lá), só perde o salto directo.
-os.environ.setdefault("SSO_SHARED_SECRET", "266d4f24bbad8fa287149d52936a6e656e9981e6e7f04fabb65d7e36c554f265")
+# SSO root → Invoice: SSO_SHARED_SECRET vem de variável de ambiente Railway
+# (mesmo valor do lado da Invoice) — ver `railway variables`. Sem isto a aba
+# "Invoice" ainda funciona como link normal (pede login lá), só perde o
+# salto directo.
 
 # Sentry (observabilidade de erros em produção). Para ACTIVAR:
 #   1. Criar projecto Flask em https://sentry.io e copiar o DSN.
