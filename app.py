@@ -17,6 +17,8 @@ import database as db
 from database import (ST_AGENDADO, ST_EM_ANDAMENTO, ST_CONCLUIDO,
                       ST_CANCELADO, ST_NAO_COMP, ST_WALKIN)
 import os, secrets
+import hmac
+import hashlib
 
 # ── Sentry — activo só se SENTRY_DSN estiver definido (produção) ──────────────
 # Privacidade: send_default_pii=False (clientes reais — não enviar IPs, cookies,
@@ -526,6 +528,32 @@ def _inject_csp_nonce():
         # (ver base.html). Vazio = dormente. Não misturamos apps: é só um link.
         "invoice_url": os.environ.get("INVOICE_URL", ""),
     }
+
+
+@app.route("/sso/invoice")
+def sso_invoice():
+    """Gera um token assinado, de vida curta e uso único, e envia o root
+    directamente para a sessão root da Invoice — sem pedir login outra vez.
+
+    Não usamos sessão/BD partilhada entre as duas apps (isso acoplava-as
+    demasiado); é só uma troca de um token HMAC efémero no redirect, validado
+    do outro lado com o mesmo segredo (SSO_SHARED_SECRET). Mesma barreira de
+    acesso que já protege a própria aba: root verdadeiro OU a impersonar uma
+    barbearia (root_gerir) — ver templates/base.html.
+    """
+    if not (session.get("role") == "root" or session.get("root_gerir")):
+        return redirect(url_for("login"))
+    invoice_url = os.environ.get("INVOICE_URL", "").rstrip("/")
+    if not invoice_url:
+        return redirect(url_for("root_dashboard"))
+    secret = os.environ.get("SSO_SHARED_SECRET", "")
+    if not secret:
+        # Sem segredo configurado: degrada para link normal (pede login lá).
+        return redirect(invoice_url)
+    payload = f"{int(time.time())}.{secrets.token_hex(16)}"
+    sig     = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    token   = f"{payload}.{sig}"
+    return redirect(f"{invoice_url}/sso/root?token={token}")
 
 
 @app.template_filter("moeda")
