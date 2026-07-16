@@ -379,10 +379,6 @@ def _resolver_dominio_proprio():
     from flask import g
     g.tenant = None
     host = db.normalizar_dominio(request.host)
-    print(f"[DEBUG-INVOICE] request.host={request.host!r} normalizado={host!r} "
-          f"XFH={request.headers.get('X-Forwarded-Host')!r} "
-          f"XFP={request.headers.get('X-Forwarded-Proto')!r} "
-          f"url={request.url!r} TBD={_TENANT_BASE_DOMAIN!r}", flush=True)
     if not host:
         return
 
@@ -394,6 +390,11 @@ def _resolver_dominio_proprio():
     # forma de ter invoice.carecabarber.com na barra do browser.
     if _TENANT_BASE_DOMAIN and host == "invoice." + _TENANT_BASE_DOMAIN:
         _invoice_url = os.environ.get("INVOICE_URL", "").rstrip("/")
+        # Salvaguarda anti-loop: se INVOICE_URL apontar para o próprio domínio
+        # reservado (ex.: mal configurado como https://invoice.<base>), o
+        # redirect voltaria a cair aqui via o wildcard — loop infinito.
+        if _invoice_url and db.normalizar_dominio(_invoice_url) == host:
+            _invoice_url = ""
         if _invoice_url:
             qs = request.query_string.decode()
             destino = _invoice_url + request.path + (("?" + qs) if qs else "")
