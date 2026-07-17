@@ -5,18 +5,18 @@
 - **Frontend:** HTML/CSS/JS puro, PWA (`sw.js`, `manifest.json`)
 - **App Android:** Capacitor em `../barbearia-app/`
 - **Auth:** login tradicional + WebAuthn opcional (`_WEBAUTHN_OK` flag)
-- **Deploy:** PythonAnywhere — corre atrás de nginx, usa `ProxyFix`
-- **URL produção:** `https://carecabarber.pythonanywhere.com`
+- **Deploy:** Railway (NIXPACKS, sem Docker) — corre atrás de proxy, usa `ProxyFix`
+- **URL produção:** `https://carecabarber.com`
 
 ## Armadilhas conhecidas
 - **Cache slots** — após qualquer escrita que afecte disponibilidade → `_invalidar_idx(bid)`
-- **PythonAnywhere workers** — cache em memória não é partilhada; comportamento esperado
+- **Workers Railway** — cache em memória não é partilhada entre workers; comportamento esperado
 - **WebAuthn** — só funciona em HTTPS; desactivado automaticamente em localhost
 - **ProxyFix** — obrigatório; sem ele CSRF falha (cookies secure vs. proxy)
 - **Logos** — guardar em `static/logos/{barbearia_id}/`; criar pasta antes
-- **RotatingFileHandler** — não usar no PA (OSError); usar stderr
+- **Logging** — usar stderr (`logging.basicConfig(stream=sys.stderr)`) — sem RotatingFileHandler
+- **Railway filesystem efémero** — BD e logos têm de viver no Volume (`DB_PATH=/data/barbearia.db`, `LOGOS_DIR=/data/logos`)
 - **Templates e sessão** — NÃO usar `session.get('user_nome')` nos templates para dados do barbeiro; passar `barbeiro=barb_atual` explicitamente da rota e usar `barbeiro.nome` *(bug corrigido 18/05/2026)*
-- **bidfax** — (VIN Remover) usa minúsculas no URL; usar `{vin_lower}`
 
 ## Ficheiros principais
 | Ficheiro | O que faz |
@@ -24,7 +24,7 @@
 | `app.py` | Toda a lógica Flask (~2950 linhas) |
 | `database.py` | Acesso SQLite, cache de slots, fusos horários (~1950 linhas) |
 | `barbearia.db` | Base de dados SQLite |
-| `wsgi.py` | Entry point PythonAnywhere |
+| `wsgi.py` | Entry point WSGI (Railway + local) |
 | `backup.py` | Backups automáticos |
 | `templates/` | 25+ templates Jinja2 |
 | `static/style.css` | CSS com design system (variáveis CSS) |
@@ -47,14 +47,14 @@
 - `WTF_CSRF_SSL_STRICT = False` e `WTF_CSRF_TIME_LIMIT = None` — obrigatório para PA
 - Rate limiting: `_ip_ok()` para login, `_api_ok()` para APIs da mesa
 - Validação de imagens por magic bytes (`_IMG_MAGIC`) — não confiar só na extensão
-- Logging de segurança → stderr (PA não suporta RotatingFileHandler)
+- Logging de segurança → stderr (`logging.basicConfig(stream=sys.stderr)`)
 - `_booking_lock` — threading.Lock para operações de agendamento (evita race conditions)
 
 ## Cache de slots
 - Em memória, TTL 60s (datas futuras) / 15s (hoje)
-- Máx 300 entradas — evita OOM no PythonAnywhere
+- Máx 300 entradas
 - **Sempre** chamar `_invalidar_idx(barbearia_id)` após criar/cancelar/reagendar
-- PythonAnywhere tem workers separados — cache não é partilhada (comportamento esperado)
+- Workers separados — cache não é partilhada entre instâncias (comportamento esperado)
 
 ## Convenções de código
 - SQL **nunca** em `app.py` — sempre via funções de `database.py`
@@ -468,56 +468,36 @@ media_avaliacoes(bid, barbeiro_id)
 
 **Regra:** Sempre passar `csp_nonce=csp_nonce` a TODOS os render_template. Barbeiro actual: `barb_atual = db.get_barbeiro(session['user_id'])` → passar como `barbeiro=barb_atual`.
 
-## Deploy — Automático (PostToolUse hook)
-O projeto tem deploy automático para PythonAnywhere configurado via Claude Code hook:
+## Deploy — Railway
 
-- **Hook:** `.claude/settings.json` → `PostToolUse` em `Write|Edit` → chama `.claude/deploy.sh`
-- **deploy.sh** — lê credenciais de `.pythonanywhere`, faz upload + reload + health check
-- **Credenciais** em `.pythonanywhere` (gitignored): `USER`, `DOMAIN`, `API_TOKEN`, `API_BASE`, `SSH_HOST`
-- **Throttle:** reload apenas se passaram >30s desde o último (stamp em `/tmp/carecabarber_last_reload`)
-- **Health check:** após reload, `curl /login` → verifica HTTP 200/302 antes de reportar sucesso
-- **Log:** `/tmp/barbearia_deploy.log` — audit trail de todos os deploys
-- **Excluções:** `.claude/*`, `*.pyc`, `*.db`, `backups/*`, ficheiros de QR — não são enviados
-- **Caminho remoto:** `/home/CarecaBarber/barbearia/` no PythonAnywhere
+- **Plataforma:** Railway (NIXPACKS, sem Docker)
+- **URL:** `https://carecabarber.com`
+- **CI/CD:** GitHub Actions (`.github/workflows/deploy.yml`) → push para `master` → deploy automático
+- **Volume Railway:** montar em `/data` — BD e logos vivem aqui (filesystem efémero fora do volume)
+- **Variáveis de ambiente Railway:** `SECRET_KEY`, `DB_PATH=/data/barbearia.db`, `LOGOS_DIR=/data/logos`, `VAPID_PRIVATE_KEY`
+- **Health check:** rota `/health` → Railway verifica após cada deploy
+- **Logs:** painel Railway → Deployments → logs em tempo real
 
 ```bash
-# Deploy de TODOS os ficheiros (setup inicial ou sync completo):
-bash .claude/deploy_all.sh
+# Deploy = git push
+git push origin master
 
-# Dry-run (lista ficheiros sem enviar):
-bash .claude/deploy_all.sh --dry-run
+# Ver estado do serviço Railway
+railway status
 
-# Deploy manual de um ficheiro específico:
-echo '{"tool_input":{"file_path":"/home/helder-neves/Documentos/barbearia/app.py"}}' \
-  | bash .claude/deploy.sh
-
-# Ver log de deploys:
-cat /tmp/barbearia_deploy.log
-
-# Reload manual (ler token de .pythonanywhere):
-source .pythonanywhere
-curl -X POST -H "Authorization: Token $API_TOKEN" \
-  "$API_BASE/webapps/$DOMAIN/reload/"
+# Logs em tempo real
+railway logs
 ```
 
 ## App Android (Capacitor)
 - **Localização:** `~/Documentos/barbearia-app/`
 - **Framework:** Capacitor 6 + Android (Gradle)
-- **Ficheiro de configuração:** `capacitor.config.json` — aponta para `https://carecabarber.pythonanywhere.com`
+- **Ficheiro de configuração:** `capacitor.config.json` — aponta para `https://carecabarber.com`
 - **Build:** `barbearia-app/build-android.sh` — compila o APK
 - **Android manifest:** `android/app/src/main/AndroidManifest.xml`
 - **Nota:** a app Android é essencialmente um WebView da PWA em produção; não tem código nativo
 
 ## Backup automático (`backup.py`)
 - Usa **SQLite Online Backup API** (`sqlite3.connect().backup()`) — seguro com escritas concorrentes
-- Copia `barbearia.db` → `~/backups/barbearia_YYYYMMDD_HHMMSS.db`
-- Mantém máx 30 backups (apaga os mais antigos); se falhar, limpa o ficheiro parcial
-- Corre diariamente via **PythonAnywhere Scheduled Tasks**
-- Não precisa de alterações em deploy normal
-
-## Deploy — PythonAnywhere (informação base)
-- WSGI em `/var/www/...wsgi.py` → aponta para `wsgi.py` local
-- Logs de erro: `/var/log/...error.log`
-- `SECRET_KEY` via env var ou `.secret_key` (gerado automaticamente na 1ª execução)
-- `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGIN` via env vars para WebAuthn em produção
-- SSH: `ssh.eu.pythonanywhere.com` — user `CarecaBarber`
+- Copia `barbearia.db` → `~/backups/barbearia_YYYYMMDD_HHMMSS.db` (local) e para o volume Railway
+- Mantém máx 30 backups; se falhar, limpa o ficheiro parcial
