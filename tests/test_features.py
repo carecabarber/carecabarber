@@ -661,3 +661,89 @@ class TestRootDashboard:
         c, ctx = _sessao_root(client)
         r = c.get("/root/planos/99999", follow_redirects=True)
         assert r.status_code in (200, 302)
+
+
+# ══════════════════════════════════════════════════════════════
+#  SSO ROOT → INVOICE  (app switcher)
+# ══════════════════════════════════════════════════════════════
+
+def _sessao_root_gerir(client_tuple):
+    """Root a impersonar uma barbearia: role=chefe + flag root_gerir."""
+    c, ctx = client_tuple
+    with c.session_transaction() as s:
+        s.clear()
+        s["user_id"]      = 1
+        s["role"]         = "chefe"
+        s["root_gerir"]   = True
+        s["barbearia_id"] = ctx["bid"]
+        s["user_nome"]    = "Root"
+    return c, ctx
+
+
+class TestSSOInvoice:
+    """/sso/invoice — troca de token HMAC efémero para a app Invoice."""
+
+    def _env(self, monkeypatch, invoice_url=None, secret=None):
+        import os as _os
+        if invoice_url is None:
+            monkeypatch.delenv("INVOICE_URL", raising=False)
+        else:
+            monkeypatch.setenv("INVOICE_URL", invoice_url)
+        if secret is None:
+            monkeypatch.delenv("SSO_SHARED_SECRET", raising=False)
+        else:
+            monkeypatch.setenv("SSO_SHARED_SECRET", secret)
+
+    def test_anonimo_vai_para_login(self, client, monkeypatch):
+        c, ctx = client
+        with c.session_transaction() as s:
+            s.clear()
+        self._env(monkeypatch, "https://inv.example.com", "seg")
+        r = c.get("/sso/invoice", follow_redirects=False)
+        assert r.status_code in (301, 302)
+        assert "/login" in r.headers["Location"]
+
+    def test_chefe_normal_bloqueado(self, client, monkeypatch):
+        c, ctx = _sessao_chefe(client)
+        self._env(monkeypatch, "https://inv.example.com", "seg")
+        r = c.get("/sso/invoice", follow_redirects=False)
+        assert "/login" in r.headers["Location"]
+
+    def test_root_happy_path_gera_token(self, client, monkeypatch):
+        c, ctx = _sessao_root(client)
+        self._env(monkeypatch, "https://inv.example.com", "segredo123")
+        r = c.get("/sso/invoice", follow_redirects=False)
+        assert r.status_code == 302
+        loc = r.headers["Location"]
+        assert loc.startswith("https://inv.example.com/sso/root?token=")
+        # token = timestamp.nonce.assinatura
+        token = loc.split("token=", 1)[1]
+        assert len(token.split(".")) == 3
+
+    def test_root_sem_secret_degrada_para_link(self, client, monkeypatch):
+        c, ctx = _sessao_root(client)
+        self._env(monkeypatch, "https://inv.example.com", None)
+        r = c.get("/sso/invoice", follow_redirects=False)
+        assert r.headers["Location"] == "https://inv.example.com"
+
+    def test_root_sem_invoice_url_vai_para_root(self, client, monkeypatch):
+        c, ctx = _sessao_root(client)
+        self._env(monkeypatch, None, None)
+        r = c.get("/sso/invoice", follow_redirects=False)
+        assert r.headers["Location"].endswith("/root")
+
+    def test_root_gerir_sem_invoice_url_nao_faz_bounce_para_login(self, client, monkeypatch):
+        """REGRESSÃO: root a impersonar + INVOICE_URL vazio não pode cair no
+        root_required de /root e ser expulso para /login."""
+        c, ctx = _sessao_root_gerir(client)
+        self._env(monkeypatch, None, None)
+        r = c.get("/sso/invoice", follow_redirects=True)
+        assert r.status_code == 200
+        assert not r.request.path.endswith("/login")
+
+    def test_token_muda_a_cada_pedido(self, client, monkeypatch):
+        c, ctx = _sessao_root(client)
+        self._env(monkeypatch, "https://inv.example.com", "segredo123")
+        t1 = c.get("/sso/invoice").headers["Location"].split("token=", 1)[1]
+        t2 = c.get("/sso/invoice").headers["Location"].split("token=", 1)[1]
+        assert t1 != t2

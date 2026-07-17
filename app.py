@@ -545,7 +545,14 @@ def sso_invoice():
         return redirect(url_for("login"))
     invoice_url = os.environ.get("INVOICE_URL", "").rstrip("/")
     if not invoice_url:
-        return redirect(url_for("root_dashboard"))
+        # Fallback para uma página que o CHAMADOR pode aceder. Root verdadeiro
+        # vai para /root; um root a impersonar (role=chefe, root_gerir) NÃO passa
+        # o root_required de /root — mandá-lo para lá fazia bounce para /login e
+        # matava a sessão de impersonação. Nesse caso volta para o painel da
+        # barbearia (index).
+        return redirect(url_for("root_dashboard")
+                        if session.get("role") == "root"
+                        else url_for("index"))
     secret = os.environ.get("SSO_SHARED_SECRET", "")
     if not secret:
         # Sem segredo configurado: degrada para link normal (pede login lá).
