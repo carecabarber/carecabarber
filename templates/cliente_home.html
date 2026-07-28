@@ -277,7 +277,7 @@
         <!-- Ecrã de scan -->
         <div id="qr-scan-ecrã" style="width:100%;max-width:380px;padding:0 16px;text-align:center">
             <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px" id="qr-modal-titulo">
-                Aponta para o QR da mesa do " + _PROF + "
+                Aponta para o QR da mesa do {{ vocab.profissional | lower }}
             </div>
             <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;
                         aspect-ratio:1;max-height:320px">
@@ -304,6 +304,16 @@
     const _PROF      = {{ vocab.profissional | lower | tojson }};
     const _SERVC     = {{ vocab.servico | lower | tojson }};
     const _MESA_ICON = {{ vocab.mesa_icon | tojson }};
+    function _msgCamera(e) {
+        const n = e && e.name;
+        if (n === "NotAllowedError" || n === "SecurityError")
+            return "Acesso à câmara bloqueado. Toca no ícone da câmara/aA na barra de endereço e permite o acesso, depois volta a tentar.";
+        if (n === "NotFoundError" || n === "OverconstrainedError")
+            return "Nenhuma câmara encontrada neste dispositivo.";
+        if (n === "NotReadableError")
+            return "A câmara está a ser usada por outra app. Fecha-a e tenta de novo.";
+        return "Câmara indisponível. Verifica as permissões e tenta novamente.";
+    }
     (function() {
         const _meta = document.querySelector('meta[name="csrf-token"]');
         const token = _meta && _meta.content;
@@ -357,7 +367,7 @@
                 _rafId = requestAnimationFrame(scanFrame);
             } catch(e) {
                 if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
-                msg.textContent = "Câmara indisponível: " + e.message;
+                msg.textContent = _msgCamera(e);
             }
         }
 
@@ -474,7 +484,7 @@
          background:rgba(0,0,0,0.95);flex-direction:column;align-items:center;justify-content:center;padding:16px">
         <div id="wi-ecrã-scan" style="width:100%;max-width:380px;text-align:center">
             <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px">
-                Aponta para o QR da mesa do " + _PROF + "
+                Aponta para o QR da mesa do {{ vocab.profissional | lower }}
             </div>
             <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:1;max-height:300px">
                 <video id="wi-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
@@ -564,7 +574,7 @@
                 _stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 video.srcObject = _stream; await video.play();
                 _rafId = requestAnimationFrame(scanLoop);
-            } catch(e) { scanMsg.textContent = "Câmara indisponível: " + e.message; }
+            } catch(e) { scanMsg.textContent = _msgCamera(e); }
         }
         function scanLoop() {
             if (!_stream || _processando) { _rafId = requestAnimationFrame(scanLoop); return; }
