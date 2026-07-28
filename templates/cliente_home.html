@@ -200,6 +200,7 @@
                     <!-- Terminar via QR (único método — preço definido pelo serviço) -->
                     <button class="btn btn-qr-scan btn-terminar-qr"
                             data-ag-id="{{ a.id }}" data-acao="terminar"
+                            data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
                             title="Escanear QR da mesa para terminar"
                             style="width:100%">
                         📷 Terminar
@@ -208,6 +209,7 @@
                     <!-- QR para iniciar -->
                     <button class="btn btn-qr-scan"
                             data-ag-id="{{ a.id }}" data-acao="iniciar"
+                            data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
                             title="Escanear QR da mesa para iniciar"
                             style="width:100%">
                         📷 Iniciar
@@ -350,11 +352,12 @@
 
         btnFechar.addEventListener("click", pararScanner);
 
-        async function iniciarScanner(agId, acao) {
+        async function iniciarScanner(agId, acao, barbeiro) {
             _agId = agId; _acao = acao; _processando = false;
+            const alvo = (barbeiro && barbeiro.trim()) ? barbeiro.trim() : _PROF;
             titulo.textContent = acao === "iniciar"
-                ? "Aponta para o QR da mesa do " + _PROF + " para INICIAR"
-                : "Aponta para o QR da mesa do " + _PROF + " para TERMINAR";
+                ? "Aponta para o QR da mesa do " + alvo + " para INICIAR"
+                : "Aponta para o QR da mesa do " + alvo + " para TERMINAR";
             msg.textContent = "";
             scanEcrã.style.display = "block";
             modal.style.display = "flex";
@@ -429,7 +432,7 @@
         document.addEventListener("click", function(e) {
             const btn = e.target.closest(".btn-qr-scan[data-ag-id]");
             if (!btn) return;
-            iniciarScanner(parseInt(btn.dataset.agId), btn.dataset.acao);
+            iniciarScanner(parseInt(btn.dataset.agId), btn.dataset.acao, btn.dataset.barbeiro);
         });
     })();
 
