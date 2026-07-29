@@ -379,7 +379,8 @@ document.getElementById("btn-walkin").addEventListener("click", async function()
             novoCard.id = "ag-" + d.ag_id;
             novoCard.dataset.id = d.ag_id;
             novoCard.dataset.status = "em_andamento";
-            novoCard.dataset.valor = "0";
+            // Mesmo critério do template: valor registado, senão preço de tabela
+            novoCard.dataset.valor = String(d.valor || d.preco || 0);
             const btnT = document.createElement("button");
             btnT.className = "btn btn-outline-small";
             btnT.style.cssText = "padding:8px 10px;font-size:0.8rem;color:var(--text);border-color:var(--border)";

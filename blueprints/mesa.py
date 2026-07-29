@@ -211,6 +211,8 @@ def register(app) -> None:
         token_cliente = ag_novo.get("token_avaliar") if ag_novo else None
         return jsonify({"ok": True, "ag_id": novo_id, "cliente": nome,
                         "servico_nome": s["nome"], "valor": valor,
+                        # preço de tabela → pré-preenche o campo ao terminar
+                        "preco": s.get("preco") or 0,
                         "token_cliente": token_cliente})
 
 

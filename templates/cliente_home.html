@@ -150,6 +150,14 @@
             <div style="font-size:0.72rem;color:var(--text2);margin-top:5px">
                 Paga ao {{ vocab.profissional | lower }} ao balcão
             </div>
+            {% elif a.preco %}
+            {# Fallback: o profissional terminou sem indicar valor → mostrar preço de tabela #}
+            <div style="font-size:1.5rem;font-weight:900;color:var(--text)">
+                💳 A pagar: {{ a.preco | moeda }} {{ moeda_simbolo }}
+            </div>
+            <div style="font-size:0.72rem;color:var(--text2);margin-top:5px">
+                Preço de tabela — confirma ao balcão
+            </div>
             {% endif %}
         </div>
         {% endfor %}
@@ -247,6 +255,11 @@
                     {% if a.status == 'concluido' and a.valor %}
                     <div style="font-size:0.8rem;font-weight:700;color:var(--accent);margin-top:3px">
                         💳 Pago: {{ a.valor | moeda }} {{ moeda_simbolo }}
+                    </div>
+                    {% elif a.status == 'concluido' and a.preco %}
+                    {# Sem valor registado → preço de tabela. Nunca dizer "Pago" (não foi confirmado) #}
+                    <div style="font-size:0.8rem;font-weight:700;color:var(--text2);margin-top:3px">
+                        💳 Preço: {{ a.preco | moeda }} {{ moeda_simbolo }}
                     </div>
                     {% endif %}
                 </div>
