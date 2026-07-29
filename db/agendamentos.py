@@ -385,10 +385,19 @@ def iniciar_trabalho(id: int) -> bool:
 def terminar_trabalho(id: int, valor: int = 0) -> None:
     barbearia_id_cache = None
     with _write_exclusive() as conn:
-        ag_row = conn.execute("SELECT barbearia_id FROM agendamentos WHERE id=?", (id,)).fetchone()
+        ag_row = conn.execute("SELECT barbearia_id, servico_id FROM agendamentos WHERE id=?",
+                              (id,)).fetchone()
         if not ag_row:
             return
         barbearia_id_cache = ag_row["barbearia_id"]
+        # valor=0 → o profissional não indicou nada (esquecimento). Usa o preço de
+        # tabela do serviço para a receita não ficar subavaliada. Fica aqui, na
+        # camada de BD, para cobrir os dois caminhos (dashboard e mesa) de uma vez.
+        if not valor:
+            _p = conn.execute("SELECT preco FROM servicos WHERE id=?",
+                              (ag_row["servico_id"],)).fetchone()
+            if _p and _p["preco"]:
+                valor = _p["preco"]
         # `fim` no fuso da barbearia (não o default global) — consistente com
         # limpar_em_andamento_presos e com a janela "recem_concluido" do cliente,
         # que comparam contra _agora(barbearia_id). Sem isto, barbearias fora de

@@ -606,6 +606,8 @@ body::after {
 .badge-pending { background: var(--surface2);       color: var(--text2);  border: 1px solid var(--border); }
 .badge-walkin  { background: rgba(59,130,246,0.09); color: var(--blue);   border: 1px solid rgba(59,130,246,0.22); }
 .badge-noshow  { background: var(--surface2);       color: var(--text3);  border: 1px solid var(--border); font-size: 0.6rem; letter-spacing: 0.5px; }
+/* Serviço concluído sem valor — não entra na receita. Âmbar = requer atenção. */
+.badge-aviso   { background: rgba(240,180,41,0.1);  color: var(--accent); border: 1px dashed rgba(240,180,41,0.5); }
 
 /* ── Barra de progresso do cronómetro ───────────────────────── */
 .cron-barra-wrap {

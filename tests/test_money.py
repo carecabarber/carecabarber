@@ -97,12 +97,44 @@ def test_terminar_regista_valor(ctx):
     assert row["fim"]
 
 
-def test_terminar_valor_none_vira_zero(ctx):
+def test_terminar_sem_valor_usa_preco_de_tabela(ctx):
+    """valor None/0 = o profissional esqueceu-se de indicar.
+
+    Passa a gravar o preço de tabela do serviço, senão a receita ficava
+    subavaliada. O serviço da fixture custa 500.
+    """
+    db = ctx["db"]
+    for valor_omisso in (None, 0):
+        ag = ctx["novo"]("10:00:00")
+        db.iniciar_trabalho(ag)
+        db.terminar_trabalho(ag, valor_omisso)
+        assert db.get_agendamento(ag)["valor"] == 500, f"falhou com valor={valor_omisso!r}"
+
+
+def test_terminar_sem_valor_com_servico_sem_preco_fica_zero(ctx):
+    """Serviço sem preço definido → não se inventa valor nenhum."""
+    db  = ctx["db"]
+    bid = ctx["bid"]
+    db.criar_servico("Cortesia", 30, bid, preco=0)
+    with db._read() as c:
+        svc_gratis = c.execute(
+            "SELECT id FROM servicos WHERE barbearia_id=? AND nome=?",
+            (bid, "Cortesia")).fetchone()["id"]
+    amanha = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    ag = db.criar_agendamento("Cliente Money", svc_gratis, f"{amanha} 15:00:00",
+                              bid, barbeiro_id=ctx["barb_id"])
+    db.iniciar_trabalho(ag)
+    db.terminar_trabalho(ag, 0)
+    assert db.get_agendamento(ag)["valor"] == 0
+
+
+def test_terminar_valor_explicito_ganha_ao_preco_de_tabela(ctx):
+    """O profissional pode cobrar diferente do preço de tabela."""
     db = ctx["db"]
     ag = ctx["novo"]("10:00:00")
     db.iniciar_trabalho(ag)
-    db.terminar_trabalho(ag, None)
-    assert db.get_agendamento(ag)["valor"] == 0
+    db.terminar_trabalho(ag, 900)          # tabela é 500
+    assert db.get_agendamento(ag)["valor"] == 900
 
 
 def test_terminar_so_afeta_em_andamento(ctx):

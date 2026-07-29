@@ -332,7 +332,14 @@
                 {% elif a.status == 'em_andamento' %}
                 <span class="badge badge-active">Ativo</span>
                 {% elif a.status == 'concluido' %}
+                {% if a.valor %}
                 <span class="badge badge-done">✓ {{ a.valor | moeda }} {{ moeda_simbolo }}</span>
+                {% else %}
+                {# Concluído a zero: só acontece se o serviço não tem preço definido,
+                   já que terminar_trabalho usa o preço de tabela quando o valor vem a 0. #}
+                <span class="badge badge-aviso"
+                      title="Concluído sem valor — não conta para a receita. Define o preço do serviço em Serviços.">⚠ sem valor</span>
+                {% endif %}
                 {% elif a.status == 'cancelado' %}
                 <span class="badge badge-cancel">✕ Cancelado</span>
                 {% elif a.status == 'nao_compareceu' %}
