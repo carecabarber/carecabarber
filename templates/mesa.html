@@ -130,6 +130,16 @@
                 Imprime e coloca na mesa. Clientes e chefe podem iniciar/terminar serviços ao escanear.
             </p>
             <div id="qr-container" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
+            {% if barbeiro.mesa_codigo %}
+            <div class="mesa-codigo-print" style="margin-bottom:12px">
+                <div style="font-size:0.72rem;color:var(--text2);margin-bottom:4px">
+                    Sem câmara? Escreve este código na app:
+                </div>
+                <div style="font-size:1.6rem;font-weight:800;letter-spacing:6px;color:var(--text)">
+                    {{ barbeiro.mesa_codigo }}
+                </div>
+            </div>
+            {% endif %}
             <div style="font-size:0.7rem;color:var(--text2);word-break:break-all;margin-bottom:12px" id="qr-url"></div>
             <div>
                 <button class="btn btn-outline-small" style="padding:8px 18px"
@@ -440,6 +450,8 @@ window.addEventListener("pagehide", function() {
     main { padding: 0; }
     .card { box-shadow: none; border: 1px solid #ccc; }
     #btn-imprimir { display: none !important; }
+    /* O código tem de sair legível em papel — forçar preto */
+    .mesa-codigo-print, .mesa-codigo-print div { color: #000 !important; }
 }
 </style>
 </body>

@@ -8,6 +8,55 @@ from helpers import (
 )
 
 
+def _acao_iniciar(barb: dict, ag_id: int):
+    """Valida e inicia um serviço em nome do barbeiro `barb`.
+    Devolve (payload_json, status_http). Partilhado pela via QR e pela via
+    código manual — a validação tem de ser exactamente a mesma nas duas."""
+    if not ag_id:
+        return {"ok": False, "error": "Agendamento não especificado"}, 400
+    ag = db.get_agendamento(ag_id)
+    if not ag or ag.get("barbeiro_id") != barb["id"] or ag.get("barbearia_id") != barb["barbearia_id"]:
+        return {"ok": False, "error": "Agendamento não pertence a este barbeiro"}, 403
+    if ag["status"] not in (ST_AGENDADO, ST_WALKIN):
+        return {"ok": False, "error": "Já iniciado ou concluído"}, 400
+    ag_preso = db.get_servico_em_andamento(barb["id"])
+    if ag_preso:
+        return {"ok": False,
+                "error": "Já tens um serviço em curso. Termina-o primeiro.",
+                "ag_em_curso_id": ag_preso["id"]}, 400
+    try:
+        ok = db.iniciar_trabalho(ag_id)
+    except Exception:
+        return {"ok": False, "error": "Erro interno. Tenta novamente."}, 500
+    if not ok:
+        return {"ok": False, "error": "Não foi possível iniciar. Verifica se já está em curso."}, 400
+    _invalidar_idx(barb["barbearia_id"])
+    return {"ok": True}, 200
+
+
+def _acao_terminar(barb: dict, ag_id: int, valor_pedido=0):
+    """Valida e termina um serviço. Devolve (payload_json, status_http)."""
+    if not ag_id:
+        return {"ok": False, "error": "Agendamento não especificado"}, 400
+    ag = db.get_agendamento(ag_id)
+    if not ag or ag.get("barbeiro_id") != barb["id"] or ag.get("barbearia_id") != barb["barbearia_id"]:
+        return {"ok": False, "error": "Agendamento não pertence a este barbeiro"}, 403
+    if ag["status"] != ST_EM_ANDAMENTO:
+        return {"ok": False, "error": "Serviço não está em andamento"}, 400
+    try:
+        valor = max(0, min(int(valor_pedido or 0), 999_999))
+    except (TypeError, ValueError):
+        valor = 0
+    # Protecção anti-fraude: valor=0 usa preço configurado no serviço
+    if valor == 0:
+        _srv = db.servico_por_id(ag.get("servico_id"))
+        if _srv and _srv.get("preco"):
+            valor = _srv["preco"]
+    db.terminar_trabalho(ag_id, valor)
+    _invalidar_idx(barb["barbearia_id"])
+    return {"ok": True, "valor": valor}, 200
+
+
 def register(app) -> None:
 
     @app.route("/mesa/<token>/entrar")
@@ -68,28 +117,8 @@ def register(app) -> None:
             ag_id = int(data.get("ag_id", 0))
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "Agendamento inválido"}), 400
-        if not ag_id:
-            return jsonify({"ok": False, "error": "Agendamento não especificado"}), 400
-        ag = db.get_agendamento(ag_id)
-        if not ag or ag.get("barbeiro_id") != barb["id"] or ag.get("barbearia_id") != barb["barbearia_id"]:
-            return jsonify({"ok": False, "error": "Agendamento não pertence a este barbeiro"}), 403
-        if ag["status"] not in (ST_AGENDADO, ST_WALKIN):
-            return jsonify({"ok": False, "error": "Já iniciado ou concluído"}), 400
-        ag_preso = db.get_servico_em_andamento(barb["id"])
-        if ag_preso:
-            return jsonify({
-                "ok": False,
-                "error": "Já tens um serviço em curso. Termina-o primeiro.",
-                "ag_em_curso_id": ag_preso["id"],
-            }), 400
-        try:
-            ok = db.iniciar_trabalho(ag_id)
-        except Exception:
-            return jsonify({"ok": False, "error": "Erro interno. Tenta novamente."}), 500
-        if not ok:
-            return jsonify({"ok": False, "error": "Não foi possível iniciar. Verifica se já está em curso."}), 400
-        _invalidar_idx(barb["barbearia_id"])
-        return jsonify({"ok": True})
+        payload, http = _acao_iniciar(barb, ag_id)
+        return jsonify(payload), http
 
 
     @app.route("/mesa/<token>/terminar", methods=["POST"])
@@ -105,25 +134,8 @@ def register(app) -> None:
             ag_id = int(data.get("ag_id", 0))
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "Agendamento inválido"}), 400
-        if not ag_id:
-            return jsonify({"ok": False, "error": "Agendamento não especificado"}), 400
-        ag = db.get_agendamento(ag_id)
-        if not ag or ag.get("barbeiro_id") != barb["id"] or ag.get("barbearia_id") != barb["barbearia_id"]:
-            return jsonify({"ok": False, "error": "Agendamento não pertence a este barbeiro"}), 403
-        if ag["status"] != ST_EM_ANDAMENTO:
-            return jsonify({"ok": False, "error": "Serviço não está em andamento"}), 400
-        try:
-            valor = max(0, min(int(data.get("valor", 0)), 999_999))
-        except (TypeError, ValueError):
-            valor = 0
-        # Protecção anti-fraude: valor=0 usa preço configurado no serviço
-        if valor == 0:
-            _srv = db.servico_por_id(ag.get("servico_id"))
-            if _srv and _srv.get("preco"):
-                valor = _srv["preco"]
-        db.terminar_trabalho(ag_id, valor)
-        _invalidar_idx(barb["barbearia_id"])
-        return jsonify({"ok": True})
+        payload, http = _acao_terminar(barb, ag_id, data.get("valor", 0))
+        return jsonify(payload), http
 
 
     @app.route("/mesa/<token>/info", methods=["GET"])
@@ -214,6 +226,48 @@ def register(app) -> None:
                         # preço de tabela → pré-preenche o campo ao terminar
                         "preco": s.get("preco") or 0,
                         "token_cliente": token_cliente})
+
+
+    @app.route("/cliente/<slug>/mesa-codigo/<acao>", methods=["POST"])
+    def cliente_mesa_codigo(slug, acao):
+        """Alternativa à câmara: o cliente escreve o código impresso na mesa.
+
+        Segurança — este código é curto, por isso NÃO substitui o mesa_token:
+        nunca é devolvido nem dá acesso à página da mesa. Só permite agir sobre
+        um agendamento do próprio cliente (sessão) e só se o código pertencer
+        precisamente ao profissional dessa marcação.
+        """
+        if acao not in ("iniciar", "terminar"):
+            return jsonify({"ok": False, "error": "Acção inválida"}), 400
+        barbearia = db.get_barbearia_por_slug(slug)
+        if not barbearia or not barbearia["ativa"]:
+            return jsonify({"ok": False, "error": "Estabelecimento indisponível"}), 404
+        if (session.get("role") != "cliente"
+                or session.get("barbearia_id") != barbearia["id"]):
+            return jsonify({"ok": False, "error": "Sessão expirada. Volta a entrar."}), 403
+        if not _api_ok(f"{request.remote_addr or '?'}:cod"):
+            return jsonify({"ok": False, "error": "Demasiadas tentativas. Aguarda."}), 429
+
+        data = request.get_json(silent=True) or {}
+        try:
+            ag_id = int(data.get("ag_id", 0))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Agendamento inválido"}), 400
+        ag = db.get_agendamento(ag_id) if ag_id else None
+        if (not ag or ag.get("barbearia_id") != barbearia["id"]
+                or ag.get("telefone") != session.get("telefone")):
+            return jsonify({"ok": False, "error": "Marcação não encontrada"}), 403
+
+        barb = db.get_barbeiro_por_mesa_codigo(data.get("codigo"), barbearia["id"])
+        if not barb or barb["id"] != ag.get("barbeiro_id"):
+            return jsonify({"ok": False,
+                            "error": "Código errado — confirma o código impresso na mesa."}), 403
+
+        if acao == "iniciar":
+            payload, http = _acao_iniciar(barb, ag_id)
+        else:
+            payload, http = _acao_terminar(barb, ag_id, 0)
+        return jsonify(payload), http
 
 
     @app.route("/ag/<token>", methods=["GET", "POST"])

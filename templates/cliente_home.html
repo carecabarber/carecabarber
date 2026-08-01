@@ -209,7 +209,7 @@
                     <button class="btn btn-qr-scan btn-terminar-qr"
                             data-ag-id="{{ a.id }}" data-acao="terminar"
                             data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
-                            title="Escanear QR da mesa para terminar"
+                            title="Escanear QR da mesa (ou introduzir o código) para terminar"
                             style="width:100%">
                         📷 Terminar
                     </button>
@@ -218,7 +218,7 @@
                     <button class="btn btn-qr-scan"
                             data-ag-id="{{ a.id }}" data-acao="iniciar"
                             data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
-                            title="Escanear QR da mesa para iniciar"
+                            title="Escanear QR da mesa (ou introduzir o código) para iniciar"
                             style="width:100%">
                         📷 Iniciar
                     </button>
@@ -305,6 +305,32 @@
                 </div>
             </div>
             <div id="qr-msg" style="margin-top:14px;font-size:0.85rem;color:#f5c842;min-height:20px"></div>
+
+            <!-- Alternativa sem câmara: código impresso na mesa -->
+            <button id="qr-toggle-codigo" type="button"
+                    style="margin-top:10px;background:none;border:none;color:#f5c842;
+                           text-decoration:underline;font-size:0.85rem;cursor:pointer">
+                ⌨️ Não consigo usar a câmara — introduzir código
+            </button>
+            <div id="qr-codigo-bloco" style="display:none;margin-top:12px;
+                 background:rgba(255,255,255,0.07);border-radius:12px;padding:14px">
+                <div style="font-size:0.8rem;color:#ddd;margin-bottom:8px">
+                    Escreve o código que está impresso na mesa, por baixo do QR.
+                </div>
+                <input id="qr-codigo-input" type="text" inputmode="latin" autocomplete="off"
+                       autocapitalize="characters" spellcheck="false" maxlength="12"
+                       placeholder="Ex.: K7P2QF"
+                       style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.25);
+                              background:#111;color:#fff;font-size:1.3rem;letter-spacing:4px;
+                              text-align:center;text-transform:uppercase;font-weight:700">
+                <button id="qr-codigo-enviar" type="button"
+                        style="width:100%;margin-top:10px;padding:12px;border:none;border-radius:10px;
+                               background:#f5c842;color:#111;font-size:0.95rem;font-weight:700;cursor:pointer">
+                    Confirmar
+                </button>
+                <div id="qr-codigo-msg" style="margin-top:10px;font-size:0.85rem;color:#f5c842;min-height:18px"></div>
+            </div>
+
             <button id="qr-fechar" style="margin-top:16px;background:none;border:1px solid rgba(255,255,255,0.3);
                     color:#fff;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer">
                 Cancelar
@@ -350,6 +376,13 @@
         const msg       = document.getElementById("qr-msg");
         const titulo    = document.getElementById("qr-modal-titulo");
         const btnFechar = document.getElementById("qr-fechar");
+        const videoBox  = video.parentElement;
+        const togCod    = document.getElementById("qr-toggle-codigo");
+        const blocoCod  = document.getElementById("qr-codigo-bloco");
+        const inputCod  = document.getElementById("qr-codigo-input");
+        const btnCod    = document.getElementById("qr-codigo-enviar");
+        const msgCod    = document.getElementById("qr-codigo-msg");
+        const _csrfMeta = document.querySelector('meta[name="csrf-token"]');
         let _stream = null, _rafId = null;
         let _agId = null, _acao = null, _processando = false;
         const _qrCanvas = document.createElement("canvas");
@@ -365,6 +398,50 @@
 
         btnFechar.addEventListener("click", pararScanner);
 
+        // ── Alternativa sem câmara ───────────────────────────
+        function mostrarCodigo(esconderVideo) {
+            blocoCod.style.display = "block";
+            togCod.style.display   = "none";
+            if (esconderVideo) videoBox.style.display = "none";
+            inputCod.focus();
+        }
+        togCod.addEventListener("click", function() { mostrarCodigo(false); });
+
+        async function enviarCodigo() {
+            const cod = (inputCod.value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+            if (cod.length < 4) {
+                msgCod.textContent = "Escreve o código completo da mesa.";
+                return;
+            }
+            btnCod.disabled = true;
+            msgCod.textContent = "A confirmar…";
+            try {
+                const resp = await fetch("{{ url_for('cliente_mesa_codigo', slug=barbearia.slug, acao='ACAO') }}".replace("ACAO", _acao), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": _csrfMeta ? _csrfMeta.content : ""
+                    },
+                    body: JSON.stringify({ ag_id: _agId, codigo: cod })
+                });
+                const r = await resp.json();
+                if (r.ok) {
+                    msgCod.textContent = _acao === "terminar" ? "Serviço concluído!" : "▶ Serviço iniciado!";
+                    setTimeout(() => { pararScanner(); location.reload(); }, 900);
+                } else {
+                    msgCod.textContent = r.error || "Não foi possível confirmar.";
+                    btnCod.disabled = false;
+                }
+            } catch (e) {
+                msgCod.textContent = "Erro de ligação. Tenta novamente.";
+                btnCod.disabled = false;
+            }
+        }
+        btnCod.addEventListener("click", enviarCodigo);
+        inputCod.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") { e.preventDefault(); enviarCodigo(); }
+        });
+
         async function iniciarScanner(agId, acao, barbeiro) {
             _agId = agId; _acao = acao; _processando = false;
             const alvo = (barbeiro && barbeiro.trim()) ? barbeiro.trim() : _PROF;
@@ -372,6 +449,11 @@
                 ? "Aponta para o QR da mesa do " + alvo + " para INICIAR"
                 : "Aponta para o QR da mesa do " + alvo + " para TERMINAR";
             msg.textContent = "";
+            // Repor o estado do bloco de código a cada abertura
+            blocoCod.style.display  = "none";
+            togCod.style.display    = "inline-block";
+            videoBox.style.display  = "block";
+            inputCod.value = ""; msgCod.textContent = ""; btnCod.disabled = false;
             scanEcrã.style.display = "block";
             modal.style.display = "flex";
             try {
@@ -384,6 +466,11 @@
             } catch(e) {
                 if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
                 msg.textContent = _msgCamera(e);
+                // Sem câmara não há beco sem saída: abrir logo a via do código
+                titulo.textContent = _acao === "iniciar"
+                    ? "Introduz o código da mesa para INICIAR"
+                    : "Introduz o código da mesa para TERMINAR";
+                mostrarCodigo(true);
             }
         }
 

@@ -24,7 +24,7 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
+_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, mesa_codigo, pausa_almoco_inicio, pausa_almoco_fim, telefone"
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
@@ -535,7 +535,31 @@ def backup_db(dest_path: str) -> None:
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 26   # versão actual do schema
+_SCHEMA_VERSION = 27   # versão actual do schema
+
+# Alfabeto sem caracteres ambíguos (sem 0/O, 1/I/L) — o código é lido em papel
+# e escrito à mão pelo cliente.
+_ALFABETO_CODIGO = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def gerar_mesa_codigo(usados: set | None = None, tamanho: int = 6) -> str:
+    """Gera um código de mesa curto e legível, evitando colisões com `usados`."""
+    usados = usados or set()
+    for _ in range(200):
+        cod = "".join(secrets.choice(_ALFABETO_CODIGO) for _ in range(tamanho))
+        if cod not in usados:
+            return cod
+    return "".join(secrets.choice(_ALFABETO_CODIGO) for _ in range(tamanho + 2))
+
+
+def normalizar_mesa_codigo(valor: str | None) -> str:
+    """Normaliza o que o cliente escreveu: maiúsculas, sem espaços nem hífens.
+    O alfabeto não tem O/0/I/1/L, por isso não há enganos a corrigir — basta
+    limpar o que não é alfanumérico."""
+    if not valor:
+        return ""
+    return "".join(ch for ch in str(valor).upper() if ch.isalnum())[:12]
+
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Aplica todas as migrações pendentes de forma idempotente."""
@@ -825,6 +849,31 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             except sqlite3.OperationalError:
                 pass
             _done(26)
+
+        elif _v == 27:
+            # barbeiros: mesa_codigo — código curto imprimível ao lado do QR.
+            # Serve de alternativa à câmara: o cliente escreve-o à mão quando
+            # não consegue (ou não quer) usar o scanner. NUNCA substitui o
+            # mesa_token — o código só permite agir sobre um agendamento
+            # próprio, não dá acesso à página da mesa.
+            if not _col_existe("barbeiros", "mesa_codigo"):
+                conn.execute("ALTER TABLE barbeiros ADD COLUMN mesa_codigo TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_barbeiros_mesa_codigo "
+                    "ON barbeiros(mesa_codigo) WHERE mesa_codigo IS NOT NULL")
+            except sqlite3.OperationalError:
+                pass
+            _usados = {r[0] for r in conn.execute(
+                "SELECT mesa_codigo FROM barbeiros WHERE mesa_codigo IS NOT NULL")}
+            _sem = conn.execute(
+                "SELECT id FROM barbeiros WHERE mesa_codigo IS NULL "
+                "AND role IN ('barbeiro','chefe') AND barbearia_id IS NOT NULL").fetchall()
+            for _b in _sem:
+                _cod = gerar_mesa_codigo(_usados)
+                _usados.add(_cod)
+                conn.execute("UPDATE barbeiros SET mesa_codigo=? WHERE id=?", (_cod, _b["id"]))
+            _done(27)
 
         conn.commit()
         _done(_v)

@@ -158,6 +158,12 @@
                 <div id="qr-box-{{ b.id }}"
                      data-mesa-token="{{ b.mesa_token | e }}"
                      style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:10px"></div>
+                {% if b.mesa_codigo %}
+                <div style="margin-bottom:10px">
+                    <div style="font-size:0.72rem;color:var(--text2)">Código para quem não usa a câmara</div>
+                    <div style="font-size:1.3rem;font-weight:800;letter-spacing:5px;color:var(--accent)">{{ b.mesa_codigo }}</div>
+                </div>
+                {% endif %}
             </div>
             <div style="display:flex;gap:8px;margin-top:4px">
                 <a href="{{ url_for('mesa_entrar', token=b.mesa_token) }}" target="_blank"
@@ -169,7 +175,8 @@
                     Gestão
                 </a>
                 <button class="btn btn-outline-small js-imprimir-qr" style="flex:1;padding:9px"
-                        data-target="qr-box-{{ b.id }}" data-nome="{{ b.nome | e }}">
+                        data-target="qr-box-{{ b.id }}" data-nome="{{ b.nome | e }}"
+                        data-codigo="{{ b.mesa_codigo | e if b.mesa_codigo else '' }}">
                     Imprimir
                 </button>
             </div>
@@ -452,6 +459,11 @@ document.addEventListener("click", function(e) {
     const nome = (btn.dataset.nome || _PROF).replace(/`/g, "'");
     if (!box) return;
     const mesaUrl = window.location.origin + "/mesa/" + (box.dataset.mesaToken || "") + "/entrar";
+    const codigo  = (btn.dataset.codigo || "").replace(/[^A-Za-z0-9]/g, "");
+    const blocoCod = codigo
+        ? `<div style="margin-top:14px"><div style="font-size:0.72rem;color:#666">Sem câmara? Escreve este código na app:</div>
+           <div style="font-size:1.6rem;font-weight:800;letter-spacing:6px">${codigo}</div></div>`
+        : "";
     const w = window.open("", "_blank", "width=400,height=500");
     if (!w) { alert("Popup bloqueado. Autoriza popups para imprimir o QR."); return; }
     w.document.write(`<!DOCTYPE html><html><head><title>QR — ${nome}</title>
@@ -460,6 +472,7 @@ document.addEventListener("click", function(e) {
         </head><body>
         <h2>Mesa de ${nome}</h2>
         ${box.innerHTML}
+        ${blocoCod}
         <p style="margin-top:12px">${mesaUrl}</p>
         <script>window.onload=function(){window.print();window.close();}<\/script>
         </body></html>`);
