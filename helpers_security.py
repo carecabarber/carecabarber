@@ -161,6 +161,25 @@ def _push_espera(entrada: dict, barbearia_id: int) -> None:
                      name=f"push-espera-{barbearia_id}").start()
 
 
+def notificar_vaga_livre(barbearia_id, data_hora: str | None,
+                         barbeiro_id=None, contexto: str = "") -> None:
+    """Avisa o próximo da fila de espera que abriu uma vaga.
+
+    Usar sempre que um horário deixa de estar ocupado — cancelamento ou
+    reagendamento. `data_hora` é a hora que ficou livre (a antiga, no caso do
+    reagendamento). Nunca levanta excepção: a vaga já está livre na BD, falhar
+    a notificação não pode fazer cair o pedido.
+    """
+    if not data_hora:
+        return
+    try:
+        entrada = db.espera_notificar_proximo(barbearia_id, data_hora[:10], barbeiro_id)
+        if entrada:
+            _push_espera(entrada, barbearia_id)
+    except Exception as e:
+        _log(f"ESPERA_NOTIF_ERR {contexto} bid={barbearia_id} err={e}")
+
+
 # ── Caminho do ficheiro de alertas críticos ──────────────────
 _ALERT_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alerts_criticos.log")

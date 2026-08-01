@@ -7,7 +7,7 @@ from helpers import (
     _invalidar_idx, _api_ok, _booking_lock,
     get_vocab, _MOEDA_MAP, _TEL_RE, _MAX_TEL, _MAX_MOTIVO,
     _normalizar_tel, enriquecer_lista, enriquecer,
-    _VAPID_PUBLIC_KEY, _PUSH_OK,
+    _VAPID_PUBLIC_KEY, _PUSH_OK, notificar_vaga_livre,
 )
 
 
@@ -280,16 +280,9 @@ def register(app) -> None:
             cancelado = db.cancelar_agendamento(id)
             if cancelado:
                 _invalidar_idx(barbearia_id)
-                # Notificar fila de espera — push ao próximo cliente se tiver subscrição
-                try:
-                    from helpers import _push_espera
-                    data_cancelada = ag["data_hora"][:10]
-                    _entrada = db.espera_notificar_proximo(barbearia_id, data_cancelada, ag.get("barbeiro_id"))
-                    if _entrada:
-                        _push_espera(_entrada, barbearia_id)
-                except Exception as _e:
-                    import logging as _lg
-                    _lg.getLogger("fila_espera").warning("espera_notificar_proximo falhou: %s", _e)
+                # O horário ficou livre — avisar a fila de espera
+                notificar_vaga_livre(barbearia_id, ag["data_hora"], ag.get("barbeiro_id"),
+                                     contexto=f"cancelar-cliente ag={id}")
             else:
                 flash("Não foi possível cancelar — a marcação já não está activa.", "aviso")
         return redirect(url_for("cliente_home", slug=slug))
@@ -365,9 +358,14 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
+                            _dh_antiga = ag.get("data_hora")
+                            _barb_antigo = ag.get("barbeiro_id")
                             if db.reagendar_agendamento(id, dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
                                 db.invalidar_cache_slots(barbearia_id)
                                 _invalidar_idx(barbearia_id)
+                                # O horário antigo ficou livre — avisar a fila de espera
+                                notificar_vaga_livre(barbearia_id, _dh_antiga, _barb_antigo,
+                                                     contexto=f"reagendar-cliente ag={id}")
                                 return redirect(url_for("cliente_home", slug=slug))
                             erro = "Esse horário acabou de ser ocupado. Escolhe outro."
         hoje = _agora().strftime("%Y-%m-%d")
@@ -446,9 +444,14 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
+                            _dh_antiga = ag.get("data_hora")
+                            _barb_antigo = ag.get("barbeiro_id")
                             if db.reagendar_agendamento(ag["id"], dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
                                 db.invalidar_cache_slots(barbearia_id)
                                 _invalidar_idx(barbearia_id)
+                                # O horário antigo ficou livre — avisar a fila de espera
+                                notificar_vaga_livre(barbearia_id, _dh_antiga, _barb_antigo,
+                                                     contexto=f"reagendar-link ag={ag['id']}")
                                 return render_template("reagendar_link_ok.html",
                                                        ag=enriquecer(db.get_agendamento(ag["id"])),
                                                        barbearia=barbearia,

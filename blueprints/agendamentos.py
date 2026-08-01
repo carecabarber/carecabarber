@@ -10,7 +10,7 @@ from helpers import (
     _parse_booking_form, _enriquecer_row, enriquecer_lista, enriquecer,
     _invalidar_idx, _pc_get, _pc_set, _pc_del, _api_ok, _booking_lock,
     staff_required, chefe_required, pode_gerir_agendamento, bid,
-    _push_async, _push_espera, get_vocab, DIAS_PT, _MOEDA_MAP,
+    _push_async, notificar_vaga_livre, get_vocab, DIAS_PT, _MOEDA_MAP,
     _MAX_TEL, _MAX_MOTIVO, _HISTORY_PER_PAGE, _DASHBOARD_CACHE_TTL,
     _BLOQ_CACHE_TTL, _CLEANUP_LOCK_TTL, _HORA_RE,
     _normalizar_tel,
@@ -527,14 +527,9 @@ def register(app) -> None:
             db.cancelar_agendamento(id, incluir_em_andamento=True)
             _blog("CANCELAR", bid=ag["barbearia_id"], ag_id=id, uid=session.get("user_id"))
             _invalidar_idx(ag["barbearia_id"])
-            # Notificar fila de espera — push ao próximo cliente se tiver subscrição
-            try:
-                data_cancelada = ag["data_hora"][:10]
-                _entrada = db.espera_notificar_proximo(ag["barbearia_id"], data_cancelada, ag.get("barbeiro_id"))
-                if _entrada:
-                    _push_espera(_entrada, ag["barbearia_id"])
-            except Exception as _e:
-                _log(f"ESPERA_NOTIF_ERR ag={id} err={_e}")
+            # O horário ficou livre — avisar a fila de espera
+            notificar_vaga_livre(ag["barbearia_id"], ag["data_hora"], ag.get("barbeiro_id"),
+                                 contexto=f"cancelar-staff ag={id}")
         return redirect(url_for("index", fresh=1))
 
 
@@ -598,9 +593,14 @@ def register(app) -> None:
                         if not livre:
                             erro = f"Conflito às {hora_conf or '?'}. Escolhe outro horário."
                         if not erro:
+                            _dh_antiga = ag.get("data_hora")
+                            _barb_antigo = ag.get("barbeiro_id")
                             if db.reagendar_agendamento(id, dh, bid_, sid, duracao_min=dur, verificar_conflito=True):
                                 db.invalidar_cache_slots(barbearia_id)
                                 _invalidar_idx(barbearia_id)
+                                # O horário antigo ficou livre — avisar a fila de espera
+                                notificar_vaga_livre(barbearia_id, _dh_antiga, _barb_antigo,
+                                                     contexto=f"reagendar-staff ag={id}")
                                 return redirect(url_for("index"))
                             erro = "Esse horário acabou de ser ocupado. Escolhe outro."
         hoje = _agora().strftime("%Y-%m-%d")
