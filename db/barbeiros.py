@@ -4,8 +4,7 @@ import sqlite3
 import secrets
 import threading
 from werkzeug.security import generate_password_hash, check_password_hash
-from db._conn import (_read, _write, _write_exclusive, _agora, FMT, _BARB_COLS, ST_AGENDADO,
-                      gerar_mesa_codigo, normalizar_mesa_codigo)
+from db._conn import _read, _write, _write_exclusive, _agora, FMT, _BARB_COLS, ST_AGENDADO
 
 _S_AG = f"'{ST_AGENDADO}'"  # 'agendado'
 
@@ -179,9 +178,8 @@ def criar_barbeiro(nome: str, barbearia_id: int, telefone: str | None = None) ->
     tok = secrets.token_urlsafe(32)   # 256 bits
     with _write() as conn:
         conn.execute(
-            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token, mesa_codigo, telefone) "
-            "VALUES (?, 'barbeiro', ?, ?, ?, ?)",
-            (nome, barbearia_id, tok, _novo_mesa_codigo(conn), telefone or None))
+            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token, telefone) VALUES (?, 'barbeiro', ?, ?, ?)",
+            (nome, barbearia_id, tok, telefone or None))
 
 
 def criar_chefe(nome: str, username: str, senha: str, barbearia_id: int) -> bool:
@@ -189,10 +187,8 @@ def criar_chefe(nome: str, username: str, senha: str, barbearia_id: int) -> bool
     try:
         with _write() as conn:
             conn.execute(
-                "INSERT INTO barbeiros (nome, role, barbearia_id, username, password_hash, mesa_token, mesa_codigo) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (nome, "chefe", barbearia_id, username,
-                 generate_password_hash(senha, method="pbkdf2:sha256:10000"), tok, _novo_mesa_codigo(conn)))
+                "INSERT INTO barbeiros (nome, role, barbearia_id, username, password_hash, mesa_token) VALUES (?,?,?,?,?,?)",
+                (nome, "chefe", barbearia_id, username, generate_password_hash(senha, method="pbkdf2:sha256:10000"), tok))
         return True
     except sqlite3.IntegrityError:
         return False
@@ -245,7 +241,7 @@ def apagar_barbeiro(barbeiro_id: int, barbearia_id: int) -> str:
         else:
             # Soft: desativar + limpar credenciais de acesso
             conn.execute(
-                "UPDATE barbeiros SET ativo=0, username=NULL, password_hash=NULL, mesa_token=NULL, mesa_codigo=NULL "
+                "UPDATE barbeiros SET ativo=0, username=NULL, password_hash=NULL, mesa_token=NULL "
                 "WHERE id=? AND barbearia_id=?",
                 (barbeiro_id, barbearia_id))
             return "soft"
@@ -267,33 +263,6 @@ def get_barbeiro_por_mesa_token(token: str | None) -> dict | None:
         row = conn.execute(
             "SELECT " + _BARB_COLS + " FROM barbeiros WHERE mesa_token=? AND ativo=1", (token,)).fetchone()
     return dict(row) if row else None
-
-
-def get_barbeiro_por_mesa_codigo(codigo: str | None, barbearia_id: int | None = None) -> dict | None:
-    """Devolve barbeiro activo pelo código curto da mesa (alternativa à câmara).
-
-    Ao contrário do mesa_token, este código é curto e legível — por isso NUNCA
-    pode ser trocado pelo token nem dar acesso à página da mesa. Serve apenas
-    para o cliente confirmar presencialmente que está naquela mesa.
-    """
-    cod = normalizar_mesa_codigo(codigo)
-    if not cod:
-        return None
-    q = "SELECT " + _BARB_COLS + " FROM barbeiros WHERE mesa_codigo=? AND ativo=1"
-    params: list = [cod]
-    if barbearia_id:
-        q += " AND barbearia_id=?"
-        params.append(barbearia_id)
-    with _read() as conn:
-        row = conn.execute(q, tuple(params)).fetchone()
-    return dict(row) if row else None
-
-
-def _novo_mesa_codigo(conn) -> str:
-    """Gera um mesa_codigo livre usando a ligação já aberta."""
-    usados = {r[0] for r in conn.execute(
-        "SELECT mesa_codigo FROM barbeiros WHERE mesa_codigo IS NOT NULL")}
-    return gerar_mesa_codigo(usados)
 
 
 def get_agendamentos_mesa(barbeiro_id: int, barbearia_id: int, data: str) -> list[dict]:

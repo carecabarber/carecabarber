@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, session, jsonify
+from flask import render_template, request, redirect, url_for, session, jsonify, flash
 import database as db
 from database import ST_AGENDADO, ST_EM_ANDAMENTO, ST_WALKIN
 from helpers import (
@@ -228,46 +228,44 @@ def register(app) -> None:
                         "token_cliente": token_cliente})
 
 
-    @app.route("/cliente/<slug>/mesa-codigo/<acao>", methods=["POST"])
-    def cliente_mesa_codigo(slug, acao):
-        """Alternativa à câmara: o cliente escreve o código impresso na mesa.
+    @app.route("/cliente/<slug>/servico/<int:ag_id>/<acao>", methods=["POST"])
+    def cliente_acao_servico(slug, ag_id, acao):
+        """Um clique: o cliente inicia ou termina a sua própria marcação.
 
-        Segurança — este código é curto, por isso NÃO substitui o mesa_token:
-        nunca é devolvido nem dá acesso à página da mesa. Só permite agir sobre
-        um agendamento do próprio cliente (sessão) e só se o código pertencer
-        precisamente ao profissional dessa marcação.
+        Sem câmara e sem código — a marcação já está identificada pela sessão
+        do cliente (telefone) e o resto da validação (dono, estado, serviço em
+        curso) é a mesma da via QR da mesa.
         """
-        if acao not in ("iniciar", "terminar"):
-            return jsonify({"ok": False, "error": "Acção inválida"}), 400
         barbearia = db.get_barbearia_por_slug(slug)
         if not barbearia or not barbearia["ativa"]:
-            return jsonify({"ok": False, "error": "Estabelecimento indisponível"}), 404
+            return redirect(url_for("login"))
         if (session.get("role") != "cliente"
                 or session.get("barbearia_id") != barbearia["id"]):
-            return jsonify({"ok": False, "error": "Sessão expirada. Volta a entrar."}), 403
-        if not _api_ok(f"{request.remote_addr or '?'}:cod"):
-            return jsonify({"ok": False, "error": "Demasiadas tentativas. Aguarda."}), 429
+            return redirect(url_for("cliente_entrada", slug=slug))
+        _volta = redirect(url_for("cliente_home", slug=slug))
+        if acao not in ("iniciar", "terminar"):
+            return _volta
+        if not _api_ok(request.remote_addr or "?"):
+            flash("Demasiados pedidos. Aguarda um momento.", "aviso")
+            return _volta
 
-        data = request.get_json(silent=True) or {}
-        try:
-            ag_id = int(data.get("ag_id", 0))
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Agendamento inválido"}), 400
-        ag = db.get_agendamento(ag_id) if ag_id else None
+        ag = db.get_agendamento(ag_id)
         if (not ag or ag.get("barbearia_id") != barbearia["id"]
                 or ag.get("telefone") != session.get("telefone")):
-            return jsonify({"ok": False, "error": "Marcação não encontrada"}), 403
-
-        barb = db.get_barbeiro_por_mesa_codigo(data.get("codigo"), barbearia["id"])
-        if not barb or barb["id"] != ag.get("barbeiro_id"):
-            return jsonify({"ok": False,
-                            "error": "Código errado — confirma o código impresso na mesa."}), 403
+            flash("Marcação não encontrada.", "aviso")
+            return _volta
+        barb = db.get_barbeiro(ag.get("barbeiro_id"))
+        if not barb:
+            flash(f"Marcação sem {get_vocab(barbearia.get('tipo'), barbearia.get('vocab_custom'))['profissional'].lower()} atribuído.", "aviso")
+            return _volta
 
         if acao == "iniciar":
-            payload, http = _acao_iniciar(barb, ag_id)
+            payload, _http = _acao_iniciar(barb, ag_id)
         else:
-            payload, http = _acao_terminar(barb, ag_id, 0)
-        return jsonify(payload), http
+            payload, _http = _acao_terminar(barb, ag_id, 0)
+        if not payload.get("ok"):
+            flash(payload.get("error", "Não foi possível concluir a acção."), "aviso")
+        return _volta
 
 
     @app.route("/ag/<token>", methods=["GET", "POST"])

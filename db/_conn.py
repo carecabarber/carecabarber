@@ -24,7 +24,7 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, mesa_codigo, pausa_almoco_inicio, pausa_almoco_fim, telefone"
+_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
@@ -552,15 +552,6 @@ def gerar_mesa_codigo(usados: set | None = None, tamanho: int = 6) -> str:
     return "".join(secrets.choice(_ALFABETO_CODIGO) for _ in range(tamanho + 2))
 
 
-def normalizar_mesa_codigo(valor: str | None) -> str:
-    """Normaliza o que o cliente escreveu: maiúsculas, sem espaços nem hífens.
-    O alfabeto não tem O/0/I/1/L, por isso não há enganos a corrigir — basta
-    limpar o que não é alfanumérico."""
-    if not valor:
-        return ""
-    return "".join(ch for ch in str(valor).upper() if ch.isalnum())[:12]
-
-
 def _run_migrations(conn: sqlite3.Connection) -> None:
     """Aplica todas as migrações pendentes de forma idempotente."""
 
@@ -851,11 +842,10 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             _done(26)
 
         elif _v == 27:
-            # barbeiros: mesa_codigo — código curto imprimível ao lado do QR.
-            # Serve de alternativa à câmara: o cliente escreve-o à mão quando
-            # não consegue (ou não quer) usar o scanner. NUNCA substitui o
-            # mesa_token — o código só permite agir sobre um agendamento
-            # próprio, não dá acesso à página da mesa.
+            # barbeiros: mesa_codigo — código curto que chegou a ser usado como
+            # alternativa à câmara. A funcionalidade foi retirada (o cliente
+            # inicia/termina com um clique), mas a coluna fica: já existe em
+            # produção e o SQLite não gosta de DROP COLUMN.
             if not _col_existe("barbeiros", "mesa_codigo"):
                 conn.execute("ALTER TABLE barbeiros ADD COLUMN mesa_codigo TEXT")
             try:

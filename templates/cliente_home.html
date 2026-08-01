@@ -205,23 +205,21 @@
                 </div>
                 <div class="item-acoes" style="min-width:110px">
                     {% if a.status == 'em_andamento' %}
-                    <!-- Terminar via QR (único método — preço definido pelo serviço) -->
-                    <button class="btn btn-qr-scan btn-terminar-qr"
-                            data-ag-id="{{ a.id }}" data-acao="terminar"
-                            data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
-                            title="Escanear QR da mesa (ou introduzir o código) para terminar"
-                            style="width:100%">
-                        📷 Terminar
-                    </button>
+                    <!-- Um clique: terminar (preço definido pelo serviço) -->
+                    <form action="{{ url_for('cliente_acao_servico', slug=barbearia.slug, ag_id=a.id, acao='terminar') }}"
+                          method="post" style="width:100%"
+                          data-confirm="Terminar {{ a.servico_nome | e }}?">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-primary" style="width:100%">⏹ Terminar</button>
+                    </form>
                     {% else %}
-                    <!-- QR para iniciar -->
-                    <button class="btn btn-qr-scan"
-                            data-ag-id="{{ a.id }}" data-acao="iniciar"
-                            data-barbeiro="{{ a.barbeiro_nome if a.barbeiro_nome != '—' else '' }}"
-                            title="Escanear QR da mesa (ou introduzir o código) para iniciar"
-                            style="width:100%">
-                        📷 Iniciar
-                    </button>
+                    <!-- Um clique: iniciar -->
+                    <form action="{{ url_for('cliente_acao_servico', slug=barbearia.slug, ag_id=a.id, acao='iniciar') }}"
+                          method="post" style="width:100%"
+                          data-confirm="Iniciar {{ a.servico_nome | e }} agora?">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-primary" style="width:100%">▶ Iniciar</button>
+                    </form>
                     <!-- Reagendar + Cancelar -->
                     <a href="{{ url_for('cliente_reagendar', slug=barbearia.slug, id=a.id) }}"
                        class="btn btn-reagendar" style="width:100%;text-align:center">✏️ Reagendar</a>
@@ -286,59 +284,6 @@
         {% endif %}
     </main>
 
-    <!-- Modal Scanner QR -->
-    <div id="qr-modal" style="display:none;position:fixed;inset:0;z-index:9999;
-         background:rgba(0,0,0,0.92);flex-direction:column;align-items:center;justify-content:center">
-        <!-- Ecrã de scan -->
-        <div id="qr-scan-ecrã" style="width:100%;max-width:380px;padding:0 16px;text-align:center">
-            <div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:12px" id="qr-modal-titulo">
-                Aponta para o QR da mesa do {{ vocab.profissional | lower }}
-            </div>
-            <div style="position:relative;border-radius:16px;overflow:hidden;background:#000;
-                        aspect-ratio:1;max-height:320px">
-                <video id="qr-video" autoplay playsinline muted
-                       style="width:100%;height:100%;object-fit:cover"></video>
-                <!-- Mira central -->
-                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
-                    <div style="width:200px;height:200px;border:3px solid #f5c842;border-radius:12px;
-                                box-shadow:0 0 0 9999px rgba(0,0,0,0.4)"></div>
-                </div>
-            </div>
-            <div id="qr-msg" style="margin-top:14px;font-size:0.85rem;color:#f5c842;min-height:20px"></div>
-
-            <!-- Alternativa sem câmara: código impresso na mesa -->
-            <button id="qr-toggle-codigo" type="button"
-                    style="margin-top:10px;background:none;border:none;color:#f5c842;
-                           text-decoration:underline;font-size:0.85rem;cursor:pointer">
-                ⌨️ Não consigo usar a câmara — introduzir código
-            </button>
-            <div id="qr-codigo-bloco" style="display:none;margin-top:12px;
-                 background:rgba(255,255,255,0.07);border-radius:12px;padding:14px">
-                <div style="font-size:0.8rem;color:#ddd;margin-bottom:8px">
-                    Escreve o código que está impresso na mesa, por baixo do QR.
-                </div>
-                <input id="qr-codigo-input" type="text" inputmode="latin" autocomplete="off"
-                       autocapitalize="characters" spellcheck="false" maxlength="12"
-                       placeholder="Ex.: K7P2QF"
-                       style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.25);
-                              background:#111;color:#fff;font-size:1.3rem;letter-spacing:4px;
-                              text-align:center;text-transform:uppercase;font-weight:700">
-                <button id="qr-codigo-enviar" type="button"
-                        style="width:100%;margin-top:10px;padding:12px;border:none;border-radius:10px;
-                               background:#f5c842;color:#111;font-size:0.95rem;font-weight:700;cursor:pointer">
-                    Confirmar
-                </button>
-                <div id="qr-codigo-msg" style="margin-top:10px;font-size:0.85rem;color:#f5c842;min-height:18px"></div>
-            </div>
-
-            <button id="qr-fechar" style="margin-top:16px;background:none;border:1px solid rgba(255,255,255,0.3);
-                    color:#fff;padding:10px 28px;border-radius:10px;font-size:0.9rem;cursor:pointer">
-                Cancelar
-            </button>
-        </div>
-        <!-- (qr-valor-ecrã removido — terminar ocorre logo após scan) -->
-    </div>
-
     <script src="{{ url_for('static', filename='app.js') }}"></script>
     <script src="{{ url_for('static', filename='jsqr.js') }}"></script>
     <script nonce="{{ csp_nonce }}">
@@ -365,174 +310,6 @@
                 inp.type = 'hidden'; inp.name = 'csrf_token'; inp.value = token;
                 f.prepend(inp);
             }
-        });
-    })();
-
-    // ── Scanner QR para iniciar/terminar serviço ─────────────
-    (function() {
-        const modal     = document.getElementById("qr-modal");
-        const scanEcrã  = document.getElementById("qr-scan-ecrã");
-        const video     = document.getElementById("qr-video");
-        const msg       = document.getElementById("qr-msg");
-        const titulo    = document.getElementById("qr-modal-titulo");
-        const btnFechar = document.getElementById("qr-fechar");
-        const videoBox  = video.parentElement;
-        const togCod    = document.getElementById("qr-toggle-codigo");
-        const blocoCod  = document.getElementById("qr-codigo-bloco");
-        const inputCod  = document.getElementById("qr-codigo-input");
-        const btnCod    = document.getElementById("qr-codigo-enviar");
-        const msgCod    = document.getElementById("qr-codigo-msg");
-        const _csrfMeta = document.querySelector('meta[name="csrf-token"]');
-        let _stream = null, _rafId = null;
-        let _agId = null, _acao = null, _processando = false;
-        const _qrCanvas = document.createElement("canvas");
-        const _qrCtx    = _qrCanvas.getContext("2d", { willReadFrequently: true });
-
-        function pararScanner() {
-            if (_rafId)  { cancelAnimationFrame(_rafId); _rafId = null; }
-            if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
-            video.srcObject = null;
-            modal.style.display = "none";
-            _processando = false;
-        }
-
-        btnFechar.addEventListener("click", pararScanner);
-
-        // ── Alternativa sem câmara ───────────────────────────
-        function mostrarCodigo(esconderVideo) {
-            blocoCod.style.display = "block";
-            togCod.style.display   = "none";
-            if (esconderVideo) videoBox.style.display = "none";
-            inputCod.focus();
-        }
-        togCod.addEventListener("click", function() { mostrarCodigo(false); });
-
-        async function enviarCodigo() {
-            const cod = (inputCod.value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-            if (cod.length < 4) {
-                msgCod.textContent = "Escreve o código completo da mesa.";
-                return;
-            }
-            btnCod.disabled = true;
-            msgCod.textContent = "A confirmar…";
-            try {
-                const resp = await fetch("{{ url_for('cliente_mesa_codigo', slug=barbearia.slug, acao='ACAO') }}".replace("ACAO", _acao), {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRFToken": _csrfMeta ? _csrfMeta.content : ""
-                    },
-                    body: JSON.stringify({ ag_id: _agId, codigo: cod })
-                });
-                const r = await resp.json();
-                if (r.ok) {
-                    msgCod.textContent = _acao === "terminar" ? "Serviço concluído!" : "▶ Serviço iniciado!";
-                    setTimeout(() => { pararScanner(); location.reload(); }, 900);
-                } else {
-                    msgCod.textContent = r.error || "Não foi possível confirmar.";
-                    btnCod.disabled = false;
-                }
-            } catch (e) {
-                msgCod.textContent = "Erro de ligação. Tenta novamente.";
-                btnCod.disabled = false;
-            }
-        }
-        btnCod.addEventListener("click", enviarCodigo);
-        inputCod.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") { e.preventDefault(); enviarCodigo(); }
-        });
-
-        async function iniciarScanner(agId, acao, barbeiro) {
-            _agId = agId; _acao = acao; _processando = false;
-            const alvo = (barbeiro && barbeiro.trim()) ? barbeiro.trim() : _PROF;
-            titulo.textContent = acao === "iniciar"
-                ? "Aponta para o QR da mesa do " + alvo + " para INICIAR"
-                : "Aponta para o QR da mesa do " + alvo + " para TERMINAR";
-            msg.textContent = "";
-            // Repor o estado do bloco de código a cada abertura
-            blocoCod.style.display  = "none";
-            togCod.style.display    = "inline-block";
-            videoBox.style.display  = "block";
-            inputCod.value = ""; msgCod.textContent = ""; btnCod.disabled = false;
-            scanEcrã.style.display = "block";
-            modal.style.display = "flex";
-            try {
-                _stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: { ideal: 1280 } }
-                });
-                video.srcObject = _stream;
-                await video.play();
-                _rafId = requestAnimationFrame(scanFrame);
-            } catch(e) {
-                if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
-                msg.textContent = _msgCamera(e);
-                // Sem câmara não há beco sem saída: abrir logo a via do código
-                titulo.textContent = _acao === "iniciar"
-                    ? "Introduz o código da mesa para INICIAR"
-                    : "Introduz o código da mesa para TERMINAR";
-                mostrarCodigo(true);
-            }
-        }
-
-        function scanFrame() {
-            if (!_stream || _processando) { _rafId = requestAnimationFrame(scanFrame); return; }
-            if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
-                _qrCanvas.width = video.videoWidth; _qrCanvas.height = video.videoHeight;
-                _qrCtx.drawImage(video, 0, 0);
-                const imageData = _qrCtx.getImageData(0, 0, _qrCanvas.width, _qrCanvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code) {
-                    const match = code.data.match(/\/mesa\/([A-Za-z0-9_-]+)/);
-                    if (match) {
-                        _processando = true;
-                        msg.textContent = _acao === "terminar"
-                            ? "QR lido! A terminar…"
-                            : "QR lido! A processar…";
-                        chamarAPI(match[1]).catch(() => {
-                            msg.textContent = "Erro inesperado. Tenta novamente.";
-                            _processando = false;
-                        });
-                        return;
-                    } else {
-                        msg.textContent = "QR não reconhecido. Aponta para o QR da mesa do " + _PROF + ".";
-                        setTimeout(() => { if (!_processando) msg.textContent = ""; }, 2500);
-                    }
-                }
-            }
-            _rafId = requestAnimationFrame(scanFrame);
-        }
-
-        async function chamarAPI(mesaToken) {
-            const endpoint = "/mesa/" + mesaToken + "/" + _acao;
-            const body = { ag_id: _agId };
-            try {
-                const resp = await fetch(endpoint, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body)
-                });
-                const r = await resp.json();
-                if (r.ok) {
-                    msg.textContent = _acao === "terminar" ? "Serviço concluído!" : "▶ Serviço iniciado!";
-                    setTimeout(() => { pararScanner(); location.reload(); }, 1000);
-                } else {
-                    const erroTxt = r.error || "Erro ao processar.";
-                    const dica = erroTxt.includes("não pertence") ? " Escaneia o QR da mesa do teu " + _PROF + "." : "";
-                    msg.textContent = "" + erroTxt + dica;
-                    // Resetar _processando sempre (incluindo "terminar") para o scanner não ficar morto
-                    setTimeout(() => { _processando = false; _rafId = requestAnimationFrame(scanFrame); }, 2500);
-                }
-            } catch(e) {
-                msg.textContent = "Erro de ligação.";
-                // Resetar _processando sempre para o scanner poder reler após erro de rede
-                setTimeout(() => { _processando = false; _rafId = requestAnimationFrame(scanFrame); }, 2000);
-            }
-        }
-
-        document.addEventListener("click", function(e) {
-            const btn = e.target.closest(".btn-qr-scan[data-ag-id]");
-            if (!btn) return;
-            iniciarScanner(parseInt(btn.dataset.agId), btn.dataset.acao, btn.dataset.barbeiro);
         });
     })();
 
