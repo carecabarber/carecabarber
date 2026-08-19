@@ -446,7 +446,7 @@ media_avaliacoes(bid, barbeiro_id)
 | `index.html` | `agendamentos`, `agora`, `resumo`, `resumo_fim_dia`, `tz_barbearia`, `csp_nonce` |
 | `perfil.html` | `erro`, `ok`, `credenciais`, `mesa_token`, `qr_token`, `barbeiro`, `tem_foto`, `csp_nonce` |
 | `mesa.html` | `ag`, `barbearia`, `barbeiro`, `mesa_token`, `s` (servico), `csp_nonce` |
-| `mesa_entrar.html` | `barbearia`, `barbeiro`, `mesa_token` *(recebe o `qr_token` — nome por renomear)*, `s` (servicos), `csp_nonce` |
+| `mesa_entrar.html` | `barbearia`, `barbeiro`, `qr_token` *(público — nunca o `mesa_token`)*, `servicos`, `moeda_simbolo`, `vocab`, `csp_nonce` |
 | `novo.html` | `b` (barbeiros), `s` (servicos), `hoje`, `erro`, `csp_nonce` |
 | `walkin.html` | `b` (barbeiros), `s` (servicos), `hora_fecho`, `csp_nonce` |
 | `barbeiros.html` | `b` (barbeiros), `barbeiros`, `aus` (ausencias), `hoje`, `csp_nonce` |

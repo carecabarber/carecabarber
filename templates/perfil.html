@@ -290,12 +290,16 @@
 </form>
 
 <!-- ── QR da minha mesa ────────────────────────────────── -->
-{% if mesa_token %}
+{% if mesa_token and qr_token %}
 <h2 class="section-title" style="margin-top:28px">QR da minha mesa</h2>
 <div class="card" style="text-align:center;padding:20px">
     <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
         Coloca este QR na tua estação. O cliente escaneia para se registar à chegada (walk-in). Iniciar e terminar és tu.
     </p>
+    <div class="aviso-reimprimir" style="text-align:left">
+        ⚠️ <strong>Se já tens um QR impresso, substitui-o por este.</strong>
+        O antigo continua a funcionar, mas dá acesso ao teu painel de gestão a quem o escanear.
+    </div>
     <div id="qr-mesa-perfil" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:4px">
         <a href="{{ url_for('mesa_entrar', token=qr_token) }}" target="_blank"

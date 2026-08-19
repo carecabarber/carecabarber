@@ -29,7 +29,7 @@
     <!-- Ecrã: formulário walk-in -->
     <div id="ecrã-form">
         <div style="font-size:1rem;font-weight:700;margin-bottom:16px;text-align:center">
-            Iniciar sem marcação
+            Registar chegada
         </div>
         <div class="form-card" style="padding:20px">
             <div class="field" style="margin-bottom:14px">
@@ -56,21 +56,22 @@
             <div id="wi-erro" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
                  border-radius:8px;padding:10px;font-size:0.82rem;color:var(--red);margin-bottom:12px"></div>
             <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="font-size:1rem;padding:14px">
-                Começar agora
+                Entrar na fila
             </button>
         </div>
     </div>
 
-    <!-- Ecrã: serviço em curso -->
+    <!-- Ecrã: chegada registada, à espera do profissional -->
     <div id="ecrã-ativo" style="display:none;text-align:center">
         <div class="form-card" style="padding:28px 20px">
-            <div style="font-size:3rem;margin-bottom:12px">◈</div>
+            <div style="font-size:3rem;margin-bottom:12px">🕐</div>
             <div style="font-size:1.2rem;font-weight:800;color:var(--accent);margin-bottom:8px">
-                {{ vocab.servico }} em curso!
+                Estás na fila!
             </div>
             <div id="ativo-info" style="font-size:0.88rem;color:var(--text2);margin-bottom:6px"></div>
             <div style="font-size:0.78rem;color:var(--text2);margin-bottom:20px">
-                O {{ vocab.profissional | lower }} termina o {{ vocab.servico | lower }} e regista o valor a pagar.
+                O {{ vocab.profissional | lower }} já te vê na lista. É ele que inicia
+                e termina o {{ vocab.servico | lower }}, e regista o valor a pagar.
             </div>
             <div id="wi-preco-display" style="display:none;margin-bottom:18px;
                  background:rgba(var(--accent-rgb,212,175,55),0.1);border:1px solid rgba(var(--accent-rgb,212,175,55),0.3);
@@ -82,48 +83,37 @@
         </div>
     </div>
 
-    <!-- Ecrã: concluído -->
-    <div id="ecrã-fim" style="display:none;text-align:center">
-        <div class="form-card" style="padding:32px 20px">
-            <div style="font-size:3rem;margin-bottom:12px"></div>
-            <div style="font-size:1.2rem;font-weight:800;margin-bottom:8px">Obrigado!</div>
-            <div style="font-size:0.88rem;color:var(--text2);margin-bottom:20px">
-                {{ vocab.servico }} concluído. Volta sempre!
-            </div>
-            <button id="btn-novo-walkin" class="btn btn-outline-small" style="padding:10px 24px">
-                Novo walk-in
-            </button>
-        </div>
-    </div>
-
 </div>
 
 <script nonce="{{ csp_nonce }}">
 (function() {
     const LS_KEY     = "wi_mesa_sessao";
-    const MESA_TOKEN = {{ mesa_token | tojson }};
+    const QR_TOKEN   = {{ qr_token | tojson }};   // token público do QR — nunca o do painel
     const _SERVC     = {{ vocab.servico | lower | tojson }};
     const eForm      = document.getElementById("ecrã-form");
     const eAtivo     = document.getElementById("ecrã-ativo");
-    const eFim       = document.getElementById("ecrã-fim");
     const erroDiv    = document.getElementById("wi-erro");
     const ativoMsg   = document.getElementById("ativo-msg");
     let _agId = null;
 
     function mostrar(ecrã) {
-        [eForm, eAtivo, eFim].forEach(e => e.style.display = "none");
+        [eForm, eAtivo].forEach(e => e.style.display = "none");
         ecrã.style.display = "block";
     }
+    function hoje() { return new Date().toDateString(); }
 
     function mostrarErro(txt) {
         erroDiv.textContent = txt;
         erroDiv.style.display = "block";
     }
 
-    // Recuperar sessão activa (ex: voltou à página)
+    // Recuperar sessão activa (ex: voltou à página). Um walk-in é do próprio
+    // dia — de outro dia é lixo e mostraria uma fila que já não existe.
     try {
         const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
-        if (s && s.agId) {
+        if (s && s.dia && s.dia !== hoje()) {
+            localStorage.removeItem(LS_KEY);
+        } else if (s && s.agId) {
             _agId = s.agId;
             document.getElementById("ativo-info").textContent = s.nome + " · " + s.servico;
             if (s.preco > 0) {
@@ -144,9 +134,9 @@
         erroDiv.style.display = "none";
         if (!nome || nome.length < 2) { mostrarErro("Escreve o teu nome (mín. 2 letras)."); return; }
         if (!sid) { mostrarErro("Escolhe um " + _SERVC + "."); return; }
-        this.disabled = true; this.textContent = "A iniciar…";
+        this.disabled = true; this.textContent = "A registar…";
         try {
-            const resp = await fetch("/q/" + MESA_TOKEN + "/walkin", {
+            const resp = await fetch("/q/" + QR_TOKEN + "/walkin", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ nome, servico_id: sid })
@@ -158,7 +148,8 @@
                 const selOpt = sel.options[sel.selectedIndex];
                 const preco = selOpt ? parseFloat(selOpt.dataset.preco || "0") || 0 : 0;
                 localStorage.setItem(LS_KEY, JSON.stringify({
-                    agId: _agId, mesaToken: MESA_TOKEN, nome: r.cliente, servico: r.servico_nome, preco: preco
+                    agId: _agId, nome: r.cliente,
+                    servico: r.servico_nome, preco: preco, dia: hoje()
                 }));
                 document.getElementById("ativo-info").textContent = r.cliente + " · " + r.servico_nome;
                 if (preco > 0) {
@@ -170,19 +161,10 @@
                 ativoMsg.textContent = "";
                 mostrar(eAtivo);
             } else {
-                mostrarErro(r.error || "Erro ao iniciar.");
+                mostrarErro(r.error || "Erro ao registar.");
             }
         } catch(e) { mostrarErro("Erro de ligação. Tenta novamente."); }
-        this.disabled = false; this.textContent = "Começar agora";
-    });
-
-    // Terminar é trabalho do profissional — esta página é só para o cliente
-    // se registar à chegada.
-
-    // Botão "Novo walk-in" (substitui onclick= inline — CSP)
-    var _btnNovo = document.getElementById("btn-novo-walkin");
-    if (_btnNovo) _btnNovo.addEventListener("click", function() {
-        location.reload();
+        this.disabled = false; this.textContent = "Entrar na fila";
     });
 
     // Logo onerror (substitui onerror= inline — CSP)

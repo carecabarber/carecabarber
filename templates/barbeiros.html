@@ -148,12 +148,16 @@
         </div>
 
         <!-- Painel: QR da mesa -->
-        {% if b.mesa_token %}
+        {% if b.mesa_token and b.qr_token %}
         <div id="qr-{{ b.id }}" class="barb-panel" style="display:none">
             <div class="barb-panel-titulo">QR da mesa — <span style="color:var(--accent)">{{ b.nome }}</span></div>
             <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px">
                 Imprime e coloca na estação de {{ b.nome }}. Quem escanear só pode registar-se à chegada — o painel de gestão fica reservado ao {{ vocab.profissional | lower }}.
             </p>
+            <div class="aviso-reimprimir">
+                ⚠️ <strong>Se já tens um QR impresso, substitui-o por este.</strong>
+                Os QRs antigos continuam a funcionar, mas dão acesso ao painel de gestão a quem os escanear.
+            </div>
             <div style="text-align:center">
                 <div id="qr-box-{{ b.id }}"
                      data-qr-token="{{ b.qr_token | e }}"

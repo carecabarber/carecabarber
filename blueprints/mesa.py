@@ -77,7 +77,7 @@ def register(app) -> None:
         _moeda_cod = db.get_config("moeda", barb["barbearia_id"], "ECV") or "ECV"
         return render_template("mesa_entrar.html",
                                barbeiro=barb, barbearia=barbearia,
-                               servicos=servicos, mesa_token=token,
+                               servicos=servicos, qr_token=token,
                                moeda_simbolo=_MOEDA_MAP.get(_moeda_cod, _moeda_cod),
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
 

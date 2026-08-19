@@ -772,6 +772,20 @@ body::after {
 }
 .btn-reagendar:hover { background: rgba(59,130,246,0.14); }
 
+/* Aviso de reimpressão do QR da mesa — os QRs antigos levavam o token do
+   painel. Sai daqui quando a frota de QRs estiver substituída. */
+.aviso-reimprimir {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.28);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    color: var(--text2);
+}
+.aviso-reimprimir strong { color: var(--red); }
+
 /* Estado do atendimento no ecrã do cliente — só informativo.
    Iniciar/terminar é trabalho do profissional. */
 .estado-cliente {
