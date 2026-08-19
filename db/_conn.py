@@ -24,7 +24,7 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
+_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, qr_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
@@ -535,7 +535,7 @@ def backup_db(dest_path: str) -> None:
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 27   # versão actual do schema
+_SCHEMA_VERSION = 28   # versão actual do schema
 
 # Alfabeto sem caracteres ambíguos (sem 0/O, 1/I/L) — o código é lido em papel
 # e escrito à mão pelo cliente.
@@ -864,6 +864,25 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
                 _usados.add(_cod)
                 conn.execute("UPDATE barbeiros SET mesa_codigo=? WHERE id=?", (_cod, _b["id"]))
             _done(27)
+
+        elif _v == 28:
+            # barbeiros: qr_token — token PÚBLICO, é o que vai impresso no QR da
+            # mesa. O mesa_token passa a ser privado do profissional (painel).
+            # Antes eram o mesmo: quem lia o QR ficava com a chave do painel.
+            if not _col_existe("barbeiros", "qr_token"):
+                conn.execute("ALTER TABLE barbeiros ADD COLUMN qr_token TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_barbeiros_qr_token "
+                    "ON barbeiros(qr_token) WHERE qr_token IS NOT NULL")
+            except sqlite3.OperationalError:
+                pass
+            _sem = conn.execute(
+                "SELECT id FROM barbeiros WHERE qr_token IS NULL "
+                "AND role IN ('barbeiro','chefe') AND barbearia_id IS NOT NULL").fetchall()
+            for _b in _sem:
+                conn.execute("UPDATE barbeiros SET qr_token=? WHERE id=?",
+                             (secrets.token_urlsafe(32), _b["id"]))
 
         conn.commit()
         _done(_v)

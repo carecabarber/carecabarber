@@ -59,11 +59,15 @@ def _acao_terminar(barb: dict, ag_id: int, valor_pedido=0):
 
 def register(app) -> None:
 
-    @app.route("/mesa/<token>/entrar")
+    @app.route("/q/<token>")
     @app.csrf.exempt
     def mesa_entrar(token):
-        """Página pública para clientes — abre ao escanear o QR da mesa."""
-        barb = db.get_barbeiro_por_mesa_token(token)
+        """Página pública do cliente — abre ao escanear o QR da mesa.
+
+        Usa o qr_token (público). O mesa_token nunca aparece aqui: quem lê o QR
+        não pode chegar ao painel do profissional.
+        """
+        barb = db.get_barbeiro_por_qr_token(token)
         if not barb or not barb.get("barbearia_id"):
             return render_template("404.html"), 404
         barbearia = db.get_barbearia(barb["barbearia_id"])
@@ -76,6 +80,18 @@ def register(app) -> None:
                                servicos=servicos, mesa_token=token,
                                moeda_simbolo=_MOEDA_MAP.get(_moeda_cod, _moeda_cod),
                                vocab=get_vocab(barbearia.get("tipo"), barbearia.get("vocab_custom")))
+
+
+    @app.route("/mesa/<token>/entrar")
+    @app.csrf.exempt
+    def mesa_entrar_legado(token):
+        """QRs antigos apontam para aqui (traziam o mesa_token). Redirecciona
+        para o endereço público novo. Vale a pena reimprimir os QRs — o link
+        antigo continua a expor o token do painel a quem o escanear."""
+        barb = db.get_barbeiro_por_mesa_token(token)
+        if not barb or not barb.get("qr_token"):
+            return render_template("404.html"), 404
+        return redirect(url_for("mesa_entrar", token=barb["qr_token"]))
 
 
     @app.route("/mesa/<token>")
@@ -138,11 +154,24 @@ def register(app) -> None:
         return jsonify(payload), http
 
 
+    def _barb_por_qualquer_token(token):
+        """Aceita o qr_token (cliente) ou o mesa_token (profissional).
+
+        Devolve (barbeiro, publico) — `publico=True` quando veio pelo QR, para
+        as rotas saberem que não podem confiar em valores enviados pelo cliente.
+        """
+        barb = db.get_barbeiro_por_qr_token(token)
+        if barb:
+            return barb, True
+        return db.get_barbeiro_por_mesa_token(token), False
+
+
+    @app.route("/q/<token>/info", methods=["GET"])
     @app.route("/mesa/<token>/info", methods=["GET"])
     @app.csrf.exempt
     def mesa_info(token):
         """API pública — devolve info do barbeiro + serviços para walk-in do cliente."""
-        barb = db.get_barbeiro_por_mesa_token(token)
+        barb, _pub = _barb_por_qualquer_token(token)
         if not barb or not barb.get("barbearia_id"):
             return jsonify({"ok": False, "error": "Token inválido"}), 403
         barbearia = db.get_barbearia(barb["barbearia_id"])
@@ -159,12 +188,13 @@ def register(app) -> None:
         })
 
 
+    @app.route("/q/<token>/walkin", methods=["POST"])
     @app.route("/mesa/<token>/walkin", methods=["POST"])
     @app.csrf.exempt
     def mesa_walkin_post(token):
         if not _api_ok(request.remote_addr or "?"):
             return jsonify({"ok": False, "error": "Demasiados pedidos. Aguarda."}), 429
-        barb = db.get_barbeiro_por_mesa_token(token)
+        barb, _publico = _barb_por_qualquer_token(token)
         if not barb or not barb.get("barbearia_id"):
             return jsonify({"ok": False, "error": "Token inválido"}), 403
         if not barb.get("ativo", 1):
@@ -206,10 +236,14 @@ def register(app) -> None:
                 return jsonify({"ok": False,
                                 "error": f"Não há tempo suficiente — próxima marcação em {minutos_ate_proxima} min "
                                          f"e este serviço demora ~{duracao_servico} min."}), 400
-            try:
-                valor = max(0, min(int(data.get("valor", 0)), 999_999))
-            except (TypeError, ValueError):
+            if _publico:
+                # Veio pelo QR da mesa: o valor não é do cliente. Usa a tabela.
                 valor = 0
+            else:
+                try:
+                    valor = max(0, min(int(data.get("valor", 0)), 999_999))
+                except (TypeError, ValueError):
+                    valor = 0
             agora_str = _agora_wi.strftime("%Y-%m-%d %H:%M:%S")
             novo_id = db.criar_agendamento(nome, sid, agora_str,
                                            barb["barbearia_id"], barb["id"], ST_WALKIN, valor)

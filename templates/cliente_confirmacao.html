@@ -82,7 +82,7 @@
         <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
         <script nonce="{{ csp_nonce }}">
         (function() {
-            const mesaUrl = window.location.origin + "/mesa/" + {{ barbeiro.mesa_token | tojson }} + "/entrar";
+            const mesaUrl = window.location.origin + "/q/" + {{ barbeiro.qr_token | tojson }};
             try {
                 const qr = qrcode(0, "M");
                 qr.addData(mesaUrl);

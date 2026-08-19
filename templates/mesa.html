@@ -143,6 +143,7 @@
 <script nonce="{{ csp_nonce }}">
 'use strict';
 const MESA_TOKEN    = {{ mesa_token | tojson }};
+const QR_TOKEN      = {{ barbeiro.qr_token | tojson }};
 const MOEDA_SIMBOLO = {{ moeda_simbolo | tojson }};
 
 // ── Utilitário de escaping ───────────────────────────────────
@@ -154,7 +155,7 @@ function escHtml(s) {
 
 // ── Gerar QR code da mesa ───────────────────────────────────
 (function() {
-    const mesaUrl = window.location.origin + "/mesa/" + MESA_TOKEN + "/entrar";
+    const mesaUrl = window.location.origin + "/q/" + QR_TOKEN;
     document.getElementById("qr-url").textContent = mesaUrl;
     try {
         const qr = qrcode(0, "M");

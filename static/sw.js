@@ -73,6 +73,7 @@ self.addEventListener('fetch', event => {
         url.pathname.startsWith('/cliente/') ||  // páginas pessoais do cliente (dados privados)
         url.pathname.startsWith('/ag/') ||        // páginas de ação via QR (dados da marcação)
         url.pathname.startsWith('/mesa/') ||      // páginas de mesa (dados privados)
+        url.pathname.startsWith('/q/') ||         // página pública do QR (serviços e estado em tempo real)
         url.pathname === '/sw.js' ||
         url.pathname === '/manifest.json' ||
         STAFF_PAGES.includes(url.pathname) ||     // páginas de staff (dados privados da barbearia)

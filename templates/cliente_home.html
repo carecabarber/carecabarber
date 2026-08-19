@@ -452,7 +452,7 @@
                 const imageData = _wiCtx.getImageData(0, 0, _wiCanvas.width, _wiCanvas.height);
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
                 if (code) {
-                    const m = code.data.match(/\/mesa\/([A-Za-z0-9_-]+)/);
+                    const m = code.data.match(/\/q\/([A-Za-z0-9_-]+)/);
                     if (m) {
                         _processando = true; _mesaToken = m[1]; pararCamera();
                         carregarInfo();
@@ -468,7 +468,7 @@
         async function carregarInfo() {
             scanMsg.textContent = "QR lido! A carregar…";
             try {
-                const d = await (await fetch("/mesa/" + _mesaToken + "/info")).json();
+                const d = await (await fetch("/q/" + _mesaToken + "/info")).json();
                 if (!d.ok) { scanMsg.textContent = "" + d.error; _processando = false; return; }
                 document.getElementById("wi-barbeiro-nome").textContent = _MESA_ICON + " " + d.barbeiro;
                 document.getElementById("wi-barbearia-nome").textContent = d.barbearia;
@@ -488,7 +488,7 @@
             if (!sid) { formMsg.textContent = "Escolhe um " + _SERVC + "."; formMsg.style.display = "block"; return; }
             this.disabled = true; this.textContent = "A iniciar…";
             try {
-                const r = await (await fetch("/mesa/" + _mesaToken + "/walkin", {
+                const r = await (await fetch("/q/" + _mesaToken + "/walkin", {
                     method: "POST", headers: {"Content-Type":"application/json"},
                     body: JSON.stringify({ nome, servico_id: sid })
                 })).json();

@@ -470,7 +470,7 @@ class TestMesaBlueprint:
 
     def test_mesa_entrar_token_valido(self, client):
         c, ctx = client
-        r = c.get(f"/mesa/{ctx['mesa_token']}/entrar")
+        r = c.get(f"/mesa/{ctx['mesa_token']}/entrar", follow_redirects=True)
         assert r.status_code == 200
 
     def test_mesa_entrar_token_invalido(self, client):

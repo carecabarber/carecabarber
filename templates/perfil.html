@@ -294,11 +294,11 @@
 <h2 class="section-title" style="margin-top:28px">QR da minha mesa</h2>
 <div class="card" style="text-align:center;padding:20px">
     <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
-        Coloca este QR na tua estação. Clientes e chefe podem iniciar e terminar serviços ao escanear.
+        Coloca este QR na tua estação. O cliente escaneia para se registar à chegada (walk-in). Iniciar e terminar és tu.
     </p>
     <div id="qr-mesa-perfil" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:4px">
-        <a href="{{ url_for('mesa_entrar', token=mesa_token) }}" target="_blank"
+        <a href="{{ url_for('mesa_entrar', token=qr_token) }}" target="_blank"
            class="btn btn-outline-small" style="padding:9px 18px">
             Vista cliente
         </a>
@@ -314,7 +314,7 @@
 <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
 <script nonce="{{ csp_nonce }}">
 (function() {
-    const mesaUrl = window.location.origin + "/mesa/" + {{ mesa_token | tojson }} + "/entrar";
+    const mesaUrl = window.location.origin + "/q/" + {{ qr_token | tojson }};
     try {
         const qr = qrcode(0, "M");
         qr.addData(mesaUrl);

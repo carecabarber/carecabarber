@@ -294,9 +294,11 @@ def register(app) -> None:
         credenciais  = []
         barb_atual   = db.get_barbeiro(session["user_id"])
         mesa_token   = barb_atual.get("mesa_token") if barb_atual else None
+        qr_token     = barb_atual.get("qr_token") if barb_atual else None
         tem_foto     = bool(barb_atual and barb_atual.get("foto_perfil"))
         return render_template("perfil.html", erro=erro, ok=ok,
                                credenciais=credenciais, mesa_token=mesa_token,
+                               qr_token=qr_token,
                                barbeiro=barb_atual, tem_foto=tem_foto)
 
 

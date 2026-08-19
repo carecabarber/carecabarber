@@ -152,15 +152,15 @@
         <div id="qr-{{ b.id }}" class="barb-panel" style="display:none">
             <div class="barb-panel-titulo">QR da mesa — <span style="color:var(--accent)">{{ b.nome }}</span></div>
             <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px">
-                Imprime e coloca na estação de {{ b.nome }}. Qualquer telemóvel que escanear abre a mesa do {{ vocab.profissional | lower }}.
+                Imprime e coloca na estação de {{ b.nome }}. Quem escanear só pode registar-se à chegada — o painel de gestão fica reservado ao {{ vocab.profissional | lower }}.
             </p>
             <div style="text-align:center">
                 <div id="qr-box-{{ b.id }}"
-                     data-mesa-token="{{ b.mesa_token | e }}"
+                     data-qr-token="{{ b.qr_token | e }}"
                      style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:10px"></div>
             </div>
             <div style="display:flex;gap:8px;margin-top:4px">
-                <a href="{{ url_for('mesa_entrar', token=b.mesa_token) }}" target="_blank"
+                <a href="{{ url_for('mesa_entrar', token=b.qr_token) }}" target="_blank"
                    class="btn btn-outline-small" style="flex:1;text-align:center;padding:9px">
                     Vista cliente
                 </a>
@@ -424,10 +424,10 @@ const _qrGerados = new Set();
 function _gerarQrSeNecessario(panelId) {
     const box = document.getElementById("qr-box-" + panelId.replace("qr-", ""));
     if (!box || _qrGerados.has(box.id)) return;
-    const token = box.dataset.mesaToken;
+    const token = box.dataset.qrToken;
     if (!token) return;
     try {
-        const url = window.location.origin + "/mesa/" + token + "/entrar";
+        const url = window.location.origin + "/q/" + token;
         const qr  = qrcode(0, "M");
         qr.addData(url);
         qr.make();
@@ -451,7 +451,7 @@ document.addEventListener("click", function(e) {
     // Escapar backticks para evitar quebra de template string
     const nome = (btn.dataset.nome || _PROF).replace(/`/g, "'");
     if (!box) return;
-    const mesaUrl = window.location.origin + "/mesa/" + (box.dataset.mesaToken || "") + "/entrar";
+    const mesaUrl = window.location.origin + "/q/" + (box.dataset.qrToken || "");
     const w = window.open("", "_blank", "width=400,height=500");
     if (!w) { alert("Popup bloqueado. Autoriza popups para imprimir o QR."); return; }
     w.document.write(`<!DOCTYPE html><html><head><title>QR — ${nome}</title>

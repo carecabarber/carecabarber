@@ -157,10 +157,13 @@ def client(ctx):
 class TestMesaEntrar:
 
     def test_entrar_barbearia_ativa(self, client):
-        """GET /mesa/<token>/entrar com barbearia activa → 200."""
+        """GET /mesa/<token>/entrar (legado) → redirecciona para /q/<qr_token>."""
         c, ctx = client
         r = c.get(f"/mesa/{ctx['mesa_token']}/entrar")
-        assert r.status_code == 200
+        assert r.status_code == 302
+        assert r.headers["Location"].startswith("/q/")
+        assert ctx["mesa_token"] not in r.headers["Location"]
+        assert c.get(r.headers["Location"]).status_code == 200
 
     def test_entrar_token_invalido(self, client):
         """GET /mesa/token-invalido/entrar → 404."""
@@ -169,9 +172,9 @@ class TestMesaEntrar:
         assert r.status_code == 404
 
     def test_entrar_barbearia_inativa(self, client):
-        """Line 21: barbearia inativa → 404."""
+        """Barbearia inativa → 404 (o redireccionamento acaba em 404)."""
         c, ctx = client
-        r = c.get(f"/mesa/{ctx['mesa_token_inativa']}/entrar")
+        r = c.get(f"/mesa/{ctx['mesa_token_inativa']}/entrar", follow_redirects=True)
         assert r.status_code == 404
 
 

@@ -146,7 +146,7 @@
         if (!sid) { mostrarErro("Escolhe um " + _SERVC + "."); return; }
         this.disabled = true; this.textContent = "A iniciar…";
         try {
-            const resp = await fetch("/mesa/" + MESA_TOKEN + "/walkin", {
+            const resp = await fetch("/q/" + MESA_TOKEN + "/walkin", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ nome, servico_id: sid })

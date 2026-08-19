@@ -81,9 +81,10 @@
 | `/perfil` | Staff | Perfil + QR da mesa + biometria |
 | `/cliente/<slug>` | Cliente | Página pública |
 | `/cliente/<slug>/marcar` | Cliente | Marcação online |
-| `/mesa/<token>` | Tablet | Autoatendimento QR (sem auth) |
-| `/mesa/<token>/entrar` | Cliente | Escanear QR → escolher serviço |
-| `/ag/<token>` | Cliente | Iniciar/terminar via QR pessoal |
+| `/mesa/<token>` | Tablet | Painel da mesa — `mesa_token` (privado, nunca num QR) |
+| `/q/<token>` | Cliente | QR da mesa — `qr_token` (público): registo à chegada (walk-in) |
+| `/mesa/<token>/entrar` | Cliente | Legado — redirecciona para `/q/<qr_token>` (QRs já impressos) |
+| `/ag/<token>` | Cliente | Estado da marcação — só consulta |
 | `/root` | Root | Gerir todas as barbearias |
 
 ## Receitas Comuns
@@ -262,7 +263,10 @@ toggleFab()  // toggle #fabBtn e #fabMenu com classe "open"
 | `notas` | TEXT | notas internas |
 
 ### barbeiros
-`id`, `nome`, `barbearia_id`, `ativo` (1/0), `role` (barbeiro\|chefe\|root), `username`, `password_hash`, `mesa_token`
+`id`, `nome`, `barbearia_id`, `ativo` (1/0), `role` (barbeiro\|chefe\|root), `username`, `password_hash`, `mesa_token`, `qr_token`
+
+- `mesa_token` — **privado**: abre o painel da mesa (`/mesa/<token>`, iniciar/terminar). Nunca vai para um QR nem para uma página pública.
+- `qr_token` — **público**: é o que vai impresso no QR (`/q/<token>`). Só serve para o cliente se registar à chegada.
 
 ### servicos
 `id`, `barbearia_id`, `nome`, `duracao_min` (default 30), `preco` (default 0), `ativo` (1/0)
@@ -292,7 +296,8 @@ listar_dias_fechados(bid) / adicionar_dia_fechado(data, motivo, bid) / dia_esta_
 listar_barbeiros(bid, apenas_ativos, incluir_chefe) / criar_barbeiro(nome, bid)
 get_barbeiro(id) / get_barbeiro_por_username(username) / toggle_barbeiro(id)
 set_credenciais(id, username, senha) / alterar_senha(id, nova_senha)
-get_barbeiro_por_mesa_token(token)
+get_barbeiro_por_mesa_token(token)   # token privado — painel da mesa
+get_barbeiro_por_qr_token(token)     # token público — QR impresso
 
 # Ausências
 listar_ausencias(bid, barbeiro_id) / criar_ausencia(barbeiro_id, data_ini, data_fim, tipo, motivo, hora_ini, hora_fim)
@@ -437,9 +442,9 @@ media_avaliacoes(bid, barbeiro_id)
 | Template | Variáveis passadas pela rota |
 |----------|------------------------------|
 | `index.html` | `agendamentos`, `agora`, `resumo`, `resumo_fim_dia`, `tz_barbearia`, `csp_nonce` |
-| `perfil.html` | `erro`, `ok`, `credenciais`, `mesa_token`, `barbeiro`, `csp_nonce` |
+| `perfil.html` | `erro`, `ok`, `credenciais`, `mesa_token`, `qr_token`, `barbeiro`, `tem_foto`, `csp_nonce` |
 | `mesa.html` | `ag`, `barbearia`, `barbeiro`, `mesa_token`, `s` (servico), `csp_nonce` |
-| `mesa_entrar.html` | `barbearia`, `barbeiro`, `mesa_token`, `s` (servicos), `csp_nonce` |
+| `mesa_entrar.html` | `barbearia`, `barbeiro`, `mesa_token` *(recebe o `qr_token` — nome por renomear)*, `s` (servicos), `csp_nonce` |
 | `novo.html` | `b` (barbeiros), `s` (servicos), `hoje`, `erro`, `csp_nonce` |
 | `walkin.html` | `b` (barbeiros), `s` (servicos), `hora_fecho`, `csp_nonce` |
 | `barbeiros.html` | `b` (barbeiros), `barbeiros`, `aus` (ausencias), `hoje`, `csp_nonce` |

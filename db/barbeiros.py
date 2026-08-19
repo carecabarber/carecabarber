@@ -175,20 +175,27 @@ def listar_barbeiros(barbearia_id: int, apenas_ativos: bool = True, incluir_chef
 
 
 def criar_barbeiro(nome: str, barbearia_id: int, telefone: str | None = None) -> None:
+    # Dois tokens distintos: mesa_token é privado (painel do profissional),
+    # qr_token é o que vai impresso no QR da mesa, à vista de toda a gente.
     tok = secrets.token_urlsafe(32)   # 256 bits
+    qtok = secrets.token_urlsafe(32)
     with _write() as conn:
         conn.execute(
-            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token, telefone) VALUES (?, 'barbeiro', ?, ?, ?)",
-            (nome, barbearia_id, tok, telefone or None))
+            "INSERT INTO barbeiros (nome, role, barbearia_id, mesa_token, qr_token, telefone) "
+            "VALUES (?, 'barbeiro', ?, ?, ?, ?)",
+            (nome, barbearia_id, tok, qtok, telefone or None))
 
 
 def criar_chefe(nome: str, username: str, senha: str, barbearia_id: int) -> bool:
     tok = secrets.token_urlsafe(32)   # 256 bits
+    qtok = secrets.token_urlsafe(32)
     try:
         with _write() as conn:
             conn.execute(
-                "INSERT INTO barbeiros (nome, role, barbearia_id, username, password_hash, mesa_token) VALUES (?,?,?,?,?,?)",
-                (nome, "chefe", barbearia_id, username, generate_password_hash(senha, method="pbkdf2:sha256:10000"), tok))
+                "INSERT INTO barbeiros (nome, role, barbearia_id, username, password_hash, mesa_token, qr_token) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (nome, "chefe", barbearia_id, username,
+                 generate_password_hash(senha, method="pbkdf2:sha256:10000"), tok, qtok))
         return True
     except sqlite3.IntegrityError:
         return False
@@ -241,7 +248,8 @@ def apagar_barbeiro(barbeiro_id: int, barbearia_id: int) -> str:
         else:
             # Soft: desativar + limpar credenciais de acesso
             conn.execute(
-                "UPDATE barbeiros SET ativo=0, username=NULL, password_hash=NULL, mesa_token=NULL "
+                "UPDATE barbeiros SET ativo=0, username=NULL, password_hash=NULL, "
+                "mesa_token=NULL, qr_token=NULL "
                 "WHERE id=? AND barbearia_id=?",
                 (barbeiro_id, barbearia_id))
             return "soft"
@@ -256,12 +264,29 @@ def get_barbeiro(id: int | None) -> dict | None:
 
 
 def get_barbeiro_por_mesa_token(token: str | None) -> dict | None:
-    """Devolve barbeiro activo associado ao mesa_token (URL do QR de mesa)."""
+    """Barbeiro activo pelo mesa_token — token PRIVADO do profissional.
+
+    Dá acesso ao painel da mesa (iniciar/terminar). Nunca deve aparecer num QR
+    nem numa página pública.
+    """
     if not token:
         return None
     with _read() as conn:
         row = conn.execute(
             "SELECT " + _BARB_COLS + " FROM barbeiros WHERE mesa_token=? AND ativo=1", (token,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_barbeiro_por_qr_token(token: str | None) -> dict | None:
+    """Barbeiro activo pelo qr_token — token PÚBLICO, o que vai impresso no QR.
+
+    Só serve para o cliente se apresentar (walk-in). Não abre o painel.
+    """
+    if not token:
+        return None
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT " + _BARB_COLS + " FROM barbeiros WHERE qr_token=? AND ativo=1", (token,)).fetchone()
     return dict(row) if row else None
 
 
