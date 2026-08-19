@@ -45,10 +45,11 @@ def ctx():
     db.criar_barbeiro("Barbeiro Mesa", bid)
     with db._read() as c:
         row = c.execute(
-            "SELECT id, mesa_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+            "SELECT id, mesa_token, qr_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
             ("Barbeiro Mesa", bid)).fetchone()
         barb_id    = row["id"]
         mesa_token = row["mesa_token"]
+        qr_token   = row["qr_token"]
 
     # 4. Barbeiro da barbearia inactiva
     db.criar_barbeiro("Barb Inativa", bid_inativa)
@@ -116,6 +117,7 @@ def ctx():
         "bid_inativa": bid_inativa,
         "barb_id": barb_id,
         "mesa_token": mesa_token,
+        "qr_token": qr_token,
         "barb_inativa_id": barb_inativa_id,
         "mesa_token_inativa": mesa_token_inativa,
         "svc_id": svc_id,
@@ -513,6 +515,63 @@ class TestMesaWalkin:
                                 content_type="application/json")
         # valor='abc' → valor=0 → continues; success or may fail on criar_agendamento in mock context
         assert r.status_code in (200, 400)
+
+    def test_walkin_publico_fica_na_fila(self, client):
+        """Pelo QR o cliente só se regista — não arranca o serviço.
+
+        Com o barbeiro a meio de um serviço: registar a chegada tem de
+        funcionar à mesma, que é justamente quando é preciso.
+        """
+        c, ctx = client
+        db = ctx["db"]
+        with patch("blueprints.mesa.db.get_servico_em_andamento", return_value={"id": 999}), \
+             patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
+            r = c.post(f"/q/{ctx['qr_token']}/walkin",
+                       data=json.dumps({"nome": "Cliente Fila", "servico_id": ctx["svc_id"]}),
+                       content_type="application/json")
+        assert r.status_code == 200, r.data
+        d = json.loads(r.data)
+        assert d["ok"] is True
+        assert d["iniciado"] is False
+        ag = db.get_agendamento(d["ag_id"])
+        assert ag["tipo"] == "walk-in"
+        assert ag["status"] == "walk-in"   # não 'agendado': ver test_walkin_publico_nao_bloqueia_o_seguinte
+        assert not ag["inicio"]
+        # O que interessa: o profissional vê-o na lista da mesa
+        fila = db.get_agendamentos_mesa(ctx["barb_id"], ctx["bid"], ag["data_hora"][:10])
+        assert d["ag_id"] in [a["id"] for a in fila]
+
+    def test_walkin_publico_nao_bloqueia_o_seguinte(self, client):
+        """Quem fica em fila não pode passar a contar como próxima marcação.
+
+        Sem status='walk-in' o registo entrava como 'agendado' à hora actual;
+        barbeiro_proxima_marcacao_minutos() apanhava-o e o cliente seguinte
+        levava com "não há tempo suficiente — próxima marcação em 0 min".
+
+        Mede-se o antes/depois em vez de assumir a fila vazia: a fixture é
+        de módulo e os testes anteriores deixam marcações no caminho.
+        """
+        c, ctx = client
+        db = ctx["db"]
+        antes = db.barbeiro_proxima_marcacao_minutos(ctx["barb_id"], ctx["bid"])
+        with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
+            r = c.post(f"/q/{ctx['qr_token']}/walkin",
+                       data=json.dumps({"nome": "Cliente Fila 2", "servico_id": ctx["svc_id"]}),
+                       content_type="application/json")
+        assert r.status_code == 200, r.data
+        depois = db.barbeiro_proxima_marcacao_minutos(ctx["barb_id"], ctx["bid"])
+        assert depois == antes
+
+    def test_walkin_publico_ignora_valor(self, client):
+        """O valor vem da tabela de preços — nunca do que o cliente envia."""
+        c, ctx = client
+        with patch("blueprints.mesa.db.barbeiro_proxima_marcacao_minutos", return_value=120):
+            r = c.post(f"/q/{ctx['qr_token']}/walkin",
+                       data=json.dumps({"nome": "Cliente Esperto",
+                                        "servico_id": ctx["svc_id"], "valor": 1}),
+                       content_type="application/json")
+        assert r.status_code == 200, r.data
+        assert json.loads(r.data)["valor"] == 0
 
     def test_walkin_iniciar_trabalho_fails(self, client):
         """iniciar_trabalho returns False → 400."""

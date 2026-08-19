@@ -385,18 +385,19 @@
                     </select>
                 </div>
                 <div id="wi-form-msg" style="font-size:0.82rem;color:var(--red);margin-bottom:10px;display:none"></div>
-                <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="margin-bottom:10px">Começar agora</button>
+                <button id="wi-btn-comecar" class="btn btn-primary btn-full" style="margin-bottom:10px">Entrar na fila</button>
                 <button id="wi-fechar-form" style="width:100%;background:none;border:1px solid var(--border);
                         color:var(--text2);padding:10px;border-radius:10px;font-size:0.88rem;cursor:pointer">Cancelar</button>
             </div>
         </div>
         <div id="wi-ecrã-ativo" style="display:none;width:100%;max-width:380px;text-align:center">
             <div style="background:var(--surface2);border-radius:16px;padding:28px 20px">
-                <div style="font-size:2rem;margin-bottom:12px;opacity:.5">{{ vocab.mesa_icon }}</div>
-                <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:6px">{{ vocab.servico }} em curso</div>
+                <div style="font-size:2rem;margin-bottom:12px;opacity:.5">🕐</div>
+                <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:6px">Estás na fila</div>
                 <div style="font-size:0.85rem;color:var(--text2);margin-bottom:6px" id="wi-ativo-info"></div>
                 <div style="font-size:0.78rem;color:var(--text2);margin-bottom:16px">
-                    O {{ vocab.profissional | lower }} termina o atendimento e regista o valor a pagar.
+                    O {{ vocab.profissional | lower }} já te vê na lista. É ele que inicia
+                    e termina o atendimento, e regista o valor a pagar.
                 </div>
                 <div id="wi-ativo-msg" style="margin-top:12px;font-size:0.82rem;color:#f5c842;min-height:18px"></div>
                 <button id="wi-fechar-ativo" style="margin-top:12px;width:100%;background:none;border:1px solid var(--border);
@@ -486,7 +487,7 @@
             const sid  = parseInt(document.getElementById("wi-servico").value || "0");
             if (!nome || nome.length < 2) { formMsg.textContent = "Escreve o teu nome."; formMsg.style.display = "block"; return; }
             if (!sid) { formMsg.textContent = "Escolhe um " + _SERVC + "."; formMsg.style.display = "block"; return; }
-            this.disabled = true; this.textContent = "A iniciar…";
+            this.disabled = true; this.textContent = "A registar…";
             try {
                 const r = await (await fetch("/q/" + _mesaToken + "/walkin", {
                     method: "POST", headers: {"Content-Type":"application/json"},
@@ -494,23 +495,25 @@
                 })).json();
                 if (r.ok) {
                     _agId = r.ag_id;
-                    localStorage.setItem(LS_KEY, JSON.stringify({ agId: _agId, mesaToken: _mesaToken, nome: r.cliente, servico: r.servico_nome }));
+                    localStorage.setItem(LS_KEY, JSON.stringify({ agId: _agId, mesaToken: _mesaToken, nome: r.cliente, servico: r.servico_nome, dia: new Date().toDateString() }));
                     mostrarAtivo(r.cliente, r.servico_nome);
                 } else { formMsg.textContent = r.error || "Erro."; formMsg.style.display = "block"; }
             } catch(e) { formMsg.textContent = "Erro de ligação."; formMsg.style.display = "block"; }
-            this.disabled = false; this.textContent = "Começar agora";
+            this.disabled = false; this.textContent = "Entrar na fila";
         });
         function mostrarAtivo(nome, servico) {
             document.getElementById("wi-ativo-info").textContent = nome + " · " + servico;
             ativoMsg.textContent = ""; mostrarEcrã(ecrãAtivo);
         }
-        // Terminar é trabalho do profissional — o cliente só regista a chegada.
+        // Iniciar e terminar é trabalho do profissional — o cliente só regista a chegada.
         document.getElementById("btn-walkin-scan").addEventListener("click", function() {
             try {
                 const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
-                // Se sessão activa no localStorage, mostrar ecrã de serviço em curso.
-                // O profissional é que termina — aqui só mostramos que está em curso.
-                if (s && s.agId && s.mesaToken) {
+                // Um walk-in é do próprio dia — de outro dia mostraria uma fila
+                // que já não existe.
+                if (s && s.dia && s.dia !== new Date().toDateString()) {
+                    localStorage.removeItem(LS_KEY);
+                } else if (s && s.agId && s.mesaToken) {
                     _agId = s.agId; _mesaToken = s.mesaToken;
                     mostrarAtivo(s.nome, s.servico); return;
                 }

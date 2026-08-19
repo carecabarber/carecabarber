@@ -56,11 +56,15 @@ def _hora_conflito(conn, barbeiro_id: int | None, barbearia_id: int, data_hora_s
 def criar_agendamento(cliente_nome: str, servico_id: int, data_hora: str, barbearia_id: int,
                       barbeiro_id: int | None = None, tipo: str = ST_AGENDADO, valor: int = 0,
                       telefone: str | None = None, notas: str | None = None,
-                      duracao_min: int | None = None, verificar_conflito: bool = False) -> int:
+                      duracao_min: int | None = None, verificar_conflito: bool = False,
+                      status: str | None = None) -> int:
     """Cria um agendamento. Se verificar_conflito=True (e barbeiro_id + duracao_min dados),
     re-verifica a sobreposição DENTRO da transação BEGIN IMMEDIATE — impede double-booking
     entre workers/processos (o _booking_lock é só por-processo e não protege multi-worker).
-    Devolve o id criado, ou -1 se houver conflito (slot ocupado)."""
+    Devolve o id criado, ou -1 se houver conflito (slot ocupado).
+
+    `status` só é preciso para o walk-in que fica em fila: sem ele o registo
+    entrava como 'agendado' e contava como próxima marcação do barbeiro."""
     token    = secrets.token_urlsafe(32)   # 256 bits — tokens públicos de longa duração
     token_av = secrets.token_urlsafe(32)
     token_cf = secrets.token_urlsafe(20)   # token de confirmação de presença
@@ -85,11 +89,11 @@ def criar_agendamento(cliente_nome: str, servico_id: int, data_hora: str, barbea
         cur = conn.execute(
             "INSERT INTO agendamentos "
             "(barbearia_id,cliente,telefone,servico_id,data_hora,barbeiro_id,tipo,valor,"
-            "token_reagendar,criado_em,notas,token_avaliar,barbeiro_nome_snap,token_confirmar) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "token_reagendar,criado_em,notas,token_avaliar,barbeiro_nome_snap,token_confirmar,status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (barbearia_id, cliente_nome, tel, servico_id, data_hora,
              barbeiro_id or None, tipo, valor or 0, token, criado, notas or None, token_av,
-             barb_snap, token_cf))
+             barb_snap, token_cf, status or ST_AGENDADO))
         lid = cur.lastrowid
     invalidar_cache_slots(barbearia_id)
     return lid

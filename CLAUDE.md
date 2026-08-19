@@ -82,7 +82,7 @@
 | `/cliente/<slug>` | Cliente | Página pública |
 | `/cliente/<slug>/marcar` | Cliente | Marcação online |
 | `/mesa/<token>` | Tablet | Painel da mesa — `mesa_token` (privado, nunca num QR) |
-| `/q/<token>` | Cliente | QR da mesa — `qr_token` (público): registo à chegada (walk-in) |
+| `/q/<token>` | Cliente | QR da mesa — `qr_token` (público): entra na fila (walk-in por iniciar) |
 | `/mesa/<token>/entrar` | Cliente | Legado — redirecciona para `/q/<qr_token>` (QRs já impressos) |
 | `/ag/<token>` | Cliente | Estado da marcação — só consulta |
 | `/root` | Root | Gerir todas as barbearias |
@@ -266,7 +266,7 @@ toggleFab()  // toggle #fabBtn e #fabMenu com classe "open"
 `id`, `nome`, `barbearia_id`, `ativo` (1/0), `role` (barbeiro\|chefe\|root), `username`, `password_hash`, `mesa_token`, `qr_token`
 
 - `mesa_token` — **privado**: abre o painel da mesa (`/mesa/<token>`, iniciar/terminar). Nunca vai para um QR nem para uma página pública.
-- `qr_token` — **público**: é o que vai impresso no QR (`/q/<token>`). Só serve para o cliente se registar à chegada.
+- `qr_token` — **público**: é o que vai impresso no QR (`/q/<token>`). Só serve para o cliente entrar na fila; iniciar e terminar é sempre do profissional.
 
 ### servicos
 `id`, `barbearia_id`, `nome`, `duracao_min` (default 30), `preco` (default 0), `ativo` (1/0)
@@ -307,7 +307,9 @@ ausencia_ativa(barbeiro_id, data_str, hora_str) / apagar_ausencia(id)
 listar_servicos(bid) / servico_por_id(id) / criar_servico(...) / editar_servico(...) / apagar_servico(id)
 
 # Agendamentos
-criar_agendamento(cliente_nome, servico_id, data_hora, bid, barbeiro_id, tipo, valor)
+criar_agendamento(cliente_nome, servico_id, data_hora, bid, barbeiro_id, tipo, valor, ..., status=None)
+  # status: sem ele entra como 'agendado' e conta como próxima marcação do barbeiro.
+  #         O walk-in em fila (QR) tem de passar status='walk-in'.
 get_agendamento(id) / listar_hoje(bid, barbeiro_id) / listar_todos(bid, ...)
 cancelar_agendamento(id) / reagendar_agendamento(id, nova_data_hora, novo_barbeiro_id, novo_servico_id)
 iniciar_trabalho(id) / terminar_trabalho(id, valor) / marcar_nao_compareceu(id)

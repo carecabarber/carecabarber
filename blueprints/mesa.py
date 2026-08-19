@@ -224,11 +224,15 @@ def register(app) -> None:
             if _bloq:
                 return jsonify({"ok": False,
                                 "error": f"Barbeiro em pausa até {_bloq.get('hora_fim','?')}"}), 400
-            _ag_preso = db.get_servico_em_andamento(barb["id"])
-            if _ag_preso:
-                return jsonify({"ok": False,
-                                "error": "Já tens um serviço em curso. Termina-o primeiro.",
-                                "ag_em_curso_id": _ag_preso["id"]}), 400
+            # Só bloqueia quem arranca o serviço já a seguir (o profissional).
+            # Pelo QR o cliente fica em fila, e é justamente quando o
+            # profissional está ocupado que ele precisa de se registar.
+            if not _publico:
+                _ag_preso = db.get_servico_em_andamento(barb["id"])
+                if _ag_preso:
+                    return jsonify({"ok": False,
+                                    "error": "Já tens um serviço em curso. Termina-o primeiro.",
+                                    "ag_em_curso_id": _ag_preso["id"]}), 400
             duracao_servico = s.get("duracao_min") or 30
             buffer = int(db.get_config("buffer_minutos", barb["barbearia_id"]) or 10)
             minutos_ate_proxima = db.barbeiro_proxima_marcacao_minutos(barb["id"], barb["barbearia_id"])
@@ -246,17 +250,22 @@ def register(app) -> None:
                     valor = 0
             agora_str = _agora_wi.strftime("%Y-%m-%d %H:%M:%S")
             novo_id = db.criar_agendamento(nome, sid, agora_str,
-                                           barb["barbearia_id"], barb["id"], ST_WALKIN, valor)
-            ok = db.iniciar_trabalho(novo_id)
-            if not ok:
-                db.deletar_walkin_orfao(novo_id)
-                return jsonify({"ok": False,
-                                "error": "Já tens um serviço em curso. Termina-o primeiro."}), 400
+                                           barb["barbearia_id"], barb["id"], ST_WALKIN, valor,
+                                           status=ST_WALKIN if _publico else None)
+            # Arrancar o serviço lança o cronómetro e o valor na facturação —
+            # é do profissional. Pelo QR fica em fila, à espera que ele inicie.
+            if not _publico:
+                ok = db.iniciar_trabalho(novo_id)
+                if not ok:
+                    db.deletar_walkin_orfao(novo_id)
+                    return jsonify({"ok": False,
+                                    "error": "Já tens um serviço em curso. Termina-o primeiro."}), 400
         _invalidar_idx(barb["barbearia_id"])
         ag_novo = db.get_agendamento(novo_id)
         token_cliente = ag_novo.get("token_avaliar") if ag_novo else None
         return jsonify({"ok": True, "ag_id": novo_id, "cliente": nome,
                         "servico_nome": s["nome"], "valor": valor,
+                        "iniciado": not _publico,
                         # preço de tabela → pré-preenche o campo ao terminar
                         "preco": s.get("preco") or 0,
                         "token_cliente": token_cliente})
