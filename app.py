@@ -146,6 +146,19 @@ _CSP_TMPL = (
 )
 
 
+# ── URLs em que o segredo é o próprio caminho ──────────────────────
+# Estas rotas não têm login: o token no URL É a credencial. Duas consequências
+# práticas — não podem ir para um índice de motor de busca, e não podem ficar
+# em cache no disco do tablet da mesa, onde o cliente seguinte lhes chegaria
+# com o botão "voltar". O `/cliente/` genérico fica de fora de propósito (a
+# página pública da barbearia deve ser indexável); só o link de confirmação,
+# que traz token, entra — daí o teste extra em `set_security_headers`.
+_PATHS_COM_SEGREDO = (
+    "/mesa/", "/q/", "/ag/",
+    "/avaliar-link/", "/cancelar-link/", "/reagendar-link/",
+)
+
+
 # ── Crawlers de IA / scrapers de clonagem ──────────────────────────
 # Bots que raspam conteúdo para treinar modelos ou clonar sites. Bloqueá-los
 # não impede um humano de copiar (impossível na web), mas trava a via
@@ -292,8 +305,12 @@ def robots():
              "Disallow: /wp-admin/\n"
              "Disallow: /.git/\n"
              "Disallow: /api/\n"
-             "Disallow: /mesa/\n"
-             "Disallow: /root/\n")
+             "Disallow: /root/\n"
+             # Gerado de _PATHS_COM_SEGREDO, não escrito à mão: o /q/ passou dias
+             # fora desta lista por a rota ter sido criada sem ninguém se lembrar
+             # do robots.txt. Agora quem acrescenta um caminho com token
+             # acrescenta-o aqui de graça.
+             + "".join(f"Disallow: {p}\n" for p in _PATHS_COM_SEGREDO))
     return app.response_class(corpo, mimetype="text/plain")
 
 
@@ -499,7 +516,15 @@ def set_security_headers(response):
     rid = getattr(g, "request_id", None)
     if rid:
         h['X-Request-ID'] = rid   # visível em DevTools — utilizador pode reportar este ID
-    if (response.content_type.startswith('text/html') and
+    # URLs cujo segredo é o próprio caminho: o painel da mesa, o QR e os links
+    # que vão por SMS não têm login — quem tem o URL entra. Não podem ser
+    # indexados nem ficar no disco do tablet à espera do próximo cliente.
+    if (request.path.startswith(_PATHS_COM_SEGREDO)
+            or "/confirmar/" in request.path):
+        h['X-Robots-Tag']  = 'noindex, nofollow, noarchive'
+        h['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        h.setdefault('Pragma', 'no-cache')
+    elif (response.content_type.startswith('text/html') and
             'user_id' in session):
         h.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, private')
         h.setdefault('Pragma', 'no-cache')

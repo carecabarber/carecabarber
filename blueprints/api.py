@@ -47,7 +47,9 @@ def register(app) -> None:
     def api_tempo(id):
         if not _api_ok(request.remote_addr or "?"):
             return jsonify({"segundos": 0, "estimado": 0, "em_atraso": False}), 429
-        if "user_id" not in session:
+        # Cliente fora, como nas APIs vizinhas: o id é sequencial, e sem este
+        # filtro qualquer sessão de cliente enumera os cronómetros da barbearia.
+        if "user_id" not in session or session.get("role") == "cliente":
             return jsonify({"segundos": 0, "estimado": 0, "em_atraso": False})
         ag = db.get_agendamento(id)
         if not ag or not ag["inicio"] or ag.get("barbearia_id") != session.get("barbearia_id"):

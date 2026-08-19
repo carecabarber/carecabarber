@@ -21,14 +21,18 @@
 ## Ficheiros principais
 | Ficheiro | O que faz |
 |----------|-----------|
-| `app.py` | Toda a lógica Flask (~2950 linhas) |
-| `database.py` | Acesso SQLite, cache de slots, fusos horários (~1950 linhas) |
+| `app.py` | Criação da app, middleware, cabeçalhos de segurança, robots, registo dos blueprints (~1200 linhas) |
+| `blueprints/` | 11 módulos com as rotas — `agenda`, `api`, `barbeiros`, `cliente`, `mesa`, `root`, `servicos`… |
+| `database.py` | Fachada — só reexporta o que vive em `db/` (~120 linhas) |
+| `db/` | 11 módulos: `_conn` (ligação, `_BARB_COLS`, migrações), `agendamentos`, `barbeiros`, `rate_limit`… |
+| `helpers.py` / `helpers_security.py` | Utilitários; decoradores `@staff_required` etc., `_log`/`_audit`, rate limiting |
 | `barbearia.db` | Base de dados SQLite |
 | `wsgi.py` | Entry point WSGI (Railway + local) |
 | `backup.py` | Backups automáticos |
-| `templates/` | 25+ templates Jinja2 |
+| `templates/` | 37 templates Jinja2 |
 | `static/style.css` | CSS com design system (variáveis CSS) |
 | `static/app.js` | JS principal do frontend |
+| `tests/test_autorizacao.py` | Matriz de autorização — ver secção abaixo |
 
 ## Arquitectura multi-tenant
 - `root` — superadmin que gere todas as barbearias via `/root`
@@ -49,6 +53,32 @@
 - Validação de imagens por magic bytes (`_IMG_MAGIC`) — não confiar só na extensão
 - Logging de segurança → stderr (`logging.basicConfig(stream=sys.stderr)`)
 - `_booking_lock` — threading.Lock para operações de agendamento (evita race conditions)
+- `_PATHS_COM_SEGREDO` (app.py) — prefixos cujo segredo é o próprio URL (`/mesa/`, `/q/`, `/ag/`,
+  `/avaliar-link/`, `/cancelar-link/`, `/reagendar-link/`). Recebem `X-Robots-Tag: noindex` e
+  `Cache-Control: no-store`, e o `robots.txt` é **gerado** desta lista — acrescentar um caminho
+  com token aqui chega.
+
+## Matriz de autorização (`tests/test_autorizacao.py`)
+
+**Ao criar uma rota nova, classifica-a no dicionário `EXIGE`.** Sem isso, o
+`test_todas_as_rotas_estao_classificadas` fica vermelho — de propósito: a rota não vai para
+produção sem alguém escrever quem lá pode chegar.
+
+Níveis: `publico` · `token` (sem sessão, segredo no URL) · `cliente` · `staff` · `chefe` · `root`.
+
+O que a matriz corre, sozinha, contra o `url_map` real:
+- cada rota × cada persona abaixo do nível exigido → tem de ser recusada
+- **canários** (`ZzCanarioClienteA`, `ZzCanarioNotaPrivadaA`) — nenhuma resposta recusada pode
+  trazer dados de dentro; apanha o "200 vazio" que na verdade não estava vazio
+- isolamento entre barbearias: chefe da Beta a atacar recursos da Alfa, com verificação do
+  estado da BD depois (não basta o HTTP recusar)
+- tokens: `qr_token` não abre o painel, `mesa_token` não é QR, tokens de outra barbearia, inventados
+
+**Não usar decoradores como prova de autorização** — várias APIs falham em silêncio (devolvem
+`[]` ou zeros em vez de 403). A verificação é comportamental, não estrutural.
+
+`_NAO_VISITAR` — rotas classificadas mas não visitadas (o `_honeypot` bane o IP, que em testes
+é o 127.0.0.1 de toda a gente).
 
 ## Cache de slots
 - Em memória, TTL 60s (datas futuras) / 15s (hoje)
