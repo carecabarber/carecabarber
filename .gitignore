@@ -23,3 +23,6 @@ qr_clientes.png
 qr_site.png
 alerts_criticos.log
 auditoria.log
+
+# Config local do Preview (arranque do servidor de dev) — só da máquina
+.claude/launch.json
