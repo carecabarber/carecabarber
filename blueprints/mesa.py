@@ -86,9 +86,15 @@ def register(app) -> None:
     @app.csrf.exempt
     def mesa_entrar_legado(token):
         """QRs antigos apontam para aqui (traziam o mesa_token). Redirecciona
-        para o endereço público novo. Vale a pena reimprimir os QRs — o link
-        antigo continua a expor o token do painel a quem o escanear."""
-        barb = db.get_barbeiro_por_mesa_token(token)
+        para o endereço público novo.
+
+        Aceita duas coisas: o mesa_token ainda em uso (quem não revogou) e o
+        mesa_token já revogado (quem revogou, mas ainda tem o papel velho na
+        mesa). Em qualquer dos casos só devolve o qr_token — daqui não se chega
+        ao painel. Depois de revogar, o papel antigo passa a valer só para isto.
+        """
+        barb = (db.get_barbeiro_por_mesa_token(token)
+                or db.get_barbeiro_por_mesa_token_revogado(token))
         if not barb or not barb.get("qr_token"):
             return render_template("404.html"), 404
         return redirect(url_for("mesa_entrar", token=barb["qr_token"]))

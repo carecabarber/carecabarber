@@ -62,6 +62,7 @@ from db.barbeiros import (
     toggle_barbeiro, contar_agendamentos_futuros_barbeiro,
     contar_chefes_ativos, apagar_barbeiro,
     get_barbeiro, get_barbeiro_por_mesa_token, get_barbeiro_por_qr_token,
+    get_barbeiro_por_mesa_token_revogado, revogar_mesa_token,
     get_agendamentos_mesa,
     get_barbeiros_por_ids, editar_barbeiro, repor_senha_barbeiro,
     set_pausa_almoco,

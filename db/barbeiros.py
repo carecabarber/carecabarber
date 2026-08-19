@@ -290,6 +290,43 @@ def get_barbeiro_por_qr_token(token: str | None) -> dict | None:
     return dict(row) if row else None
 
 
+def get_barbeiro_por_mesa_token_revogado(token: str | None) -> dict | None:
+    """Barbeiro activo pelo mesa_token REVOGADO — o que está nos QRs antigos.
+
+    Só serve para o `/mesa/<token>/entrar` legado saber para onde mandar quem
+    escaneia um papel velho. Não abre o painel: o token já não é `mesa_token`.
+    """
+    if not token:
+        return None
+    with _read() as conn:
+        row = conn.execute(
+            "SELECT " + _BARB_COLS + " FROM barbeiros "
+            "WHERE mesa_token_revogado=? AND ativo=1", (token,)).fetchone()
+    return dict(row) if row else None
+
+
+def revogar_mesa_token(barbeiro_id: int) -> str | None:
+    """Troca o mesa_token do profissional e arquiva o antigo.
+
+    Fecha o acesso ao painel a partir dos QRs já impressos (que traziam este
+    token no URL). O `qr_token` não é tocado — quem escanear o papel velho
+    continua a entrar na fila, via `/mesa/<token>/entrar`.
+
+    Devolve o novo token, ou None se o barbeiro não existir ou não tiver token.
+    """
+    novo = secrets.token_urlsafe(32)   # 256 bits
+    with _write() as conn:
+        row = conn.execute(
+            "SELECT mesa_token FROM barbeiros WHERE id=?", (barbeiro_id,)).fetchone()
+        if not row or not row["mesa_token"]:
+            return None
+        conn.execute(
+            "UPDATE barbeiros SET mesa_token=?, mesa_token_revogado=mesa_token, "
+            "mesa_token_revogado_em=datetime('now') WHERE id=?",
+            (novo, barbeiro_id))
+    return novo
+
+
 def get_agendamentos_mesa(barbeiro_id: int, barbearia_id: int, data: str) -> list[dict]:
     """Agendamentos para a mesa: hoje (activos) + em_andamento de qualquer dia (serviços presos).
     em_andamento fica sempre no topo para que o barbeiro possa terminar imediatamente."""

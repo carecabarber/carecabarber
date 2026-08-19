@@ -154,10 +154,26 @@
             <p style="font-size:0.78rem;color:var(--text2);margin-bottom:12px">
                 Imprime e coloca na estação de {{ b.nome }}. Quem escanear só pode registar-se à chegada — o painel de gestão fica reservado ao {{ vocab.profissional | lower }}.
             </p>
-            <div class="aviso-reimprimir">
-                ⚠️ <strong>Se já tens um QR impresso, substitui-o por este.</strong>
-                Os QRs antigos continuam a funcionar, mas dão acesso ao painel de gestão a quem os escanear.
+            {% if b.mesa_token_revogado_em %}
+            <div class="aviso-reimprimir aviso-resolvido">
+                ✅ <strong>QR antigo revogado.</strong>
+                Já não abre o painel. Quem escanear o papel velho entra na fila na
+                mesma, por isso a reimpressão pode esperar.
             </div>
+            {% else %}
+            <div class="aviso-reimprimir">
+                ⚠️ <strong>Se já há um QR impresso desta mesa, revoga-o.</strong>
+                O papel antigo leva o token do painel no endereço — quem o escanear
+                chega à gestão de {{ b.nome }}. Revogar fecha isso já; quem escanear
+                o papel velho passa a entrar só na fila.
+                <form method="post" action="{{ url_for('revogar_qr_barbeiro', id=b.id) }}" style="margin-top:10px"
+                      data-confirm="Revogar o QR antigo de {{ b.nome }}? O painel da mesa passa a ter um endereço novo — se estiver aberto num tablet, tem de ser reaberto a partir daqui.">
+                    <button type="submit" class="btn btn-outline-small" style="padding:9px 18px">
+                        Revogar QR antigo
+                    </button>
+                </form>
+            </div>
+            {% endif %}
             <div style="text-align:center">
                 <div id="qr-box-{{ b.id }}"
                      data-qr-token="{{ b.qr_token | e }}"

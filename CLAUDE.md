@@ -83,7 +83,9 @@
 | `/cliente/<slug>/marcar` | Cliente | Marcação online |
 | `/mesa/<token>` | Tablet | Painel da mesa — `mesa_token` (privado, nunca num QR) |
 | `/q/<token>` | Cliente | QR da mesa — `qr_token` (público): entra na fila (walk-in por iniciar) |
-| `/mesa/<token>/entrar` | Cliente | Legado — redirecciona para `/q/<qr_token>` (QRs já impressos) |
+| `/mesa/<token>/entrar` | Cliente | Legado — redirecciona para `/q/<qr_token>`. Aceita o `mesa_token` **e** o `mesa_token_revogado` (QRs já impressos) |
+| `/perfil/revogar-qr` | Staff | Revoga o próprio `mesa_token` — fecha o painel aos QRs impressos |
+| `/barbeiros/<id>/revogar-qr` | Chefe | Idem, pela equipa — única via para quem não tem credenciais |
 | `/ag/<token>` | Cliente | Estado da marcação — só consulta |
 | `/root` | Root | Gerir todas as barbearias |
 
@@ -263,10 +265,14 @@ toggleFab()  // toggle #fabBtn e #fabMenu com classe "open"
 | `notas` | TEXT | notas internas |
 
 ### barbeiros
-`id`, `nome`, `barbearia_id`, `ativo` (1/0), `role` (barbeiro\|chefe\|root), `username`, `password_hash`, `mesa_token`, `qr_token`
+`id`, `nome`, `barbearia_id`, `ativo` (1/0), `role` (barbeiro\|chefe\|root), `username`, `password_hash`, `mesa_token`, `qr_token`, `mesa_token_revogado`, `mesa_token_revogado_em`
 
 - `mesa_token` — **privado**: abre o painel da mesa (`/mesa/<token>`, iniciar/terminar). Nunca vai para um QR nem para uma página pública.
 - `qr_token` — **público**: é o que vai impresso no QR (`/q/<token>`). Só serve para o cliente entrar na fila; iniciar e terminar é sempre do profissional.
+- `mesa_token_revogado` — o `mesa_token` anterior, arquivado ao revogar. Só o `/mesa/<token>/entrar` legado o consulta, para o QR já impresso continuar a mandar o cliente para a fila. **Não** está em `_BARB_COLS` — é um token morto, mas não anda pelos templates.
+- `mesa_token_revogado_em` — timestamp da revogação. Está em `_BARB_COLS` (não é segredo): é o que diz ao `/perfil` e ao `/barbeiros` se ainda há aviso a mostrar.
+
+**Porquê:** os QRs impressos antes da migração 28 levavam o `mesa_token` no próprio URL — o papel É a chave do painel. Apagar a rota legada não resolveria (bastava cortar o `/entrar` do fim); o que revoga é trocar o token. Guardar o antigo evita obrigar a reimprimir tudo no mesmo dia.
 
 ### servicos
 `id`, `barbearia_id`, `nome`, `duracao_min` (default 30), `preco` (default 0), `ativo` (1/0)
@@ -298,6 +304,8 @@ get_barbeiro(id) / get_barbeiro_por_username(username) / toggle_barbeiro(id)
 set_credenciais(id, username, senha) / alterar_senha(id, nova_senha)
 get_barbeiro_por_mesa_token(token)   # token privado — painel da mesa
 get_barbeiro_por_qr_token(token)     # token público — QR impresso
+get_barbeiro_por_mesa_token_revogado(token)  # token antigo — só o /entrar legado
+revogar_mesa_token(barbeiro_id) → novo token | None   # arquiva o antigo
 
 # Ausências
 listar_ausencias(bid, barbeiro_id) / criar_ausencia(barbeiro_id, data_ini, data_fim, tipo, motivo, hora_ini, hora_fim)
@@ -444,7 +452,7 @@ media_avaliacoes(bid, barbeiro_id)
 | Template | Variáveis passadas pela rota |
 |----------|------------------------------|
 | `index.html` | `agendamentos`, `agora`, `resumo`, `resumo_fim_dia`, `tz_barbearia`, `csp_nonce` |
-| `perfil.html` | `erro`, `ok`, `credenciais`, `mesa_token`, `qr_token`, `barbeiro`, `tem_foto`, `csp_nonce` |
+| `perfil.html` | `erro`, `ok`, `credenciais`, `mesa_token`, `qr_token`, `qr_revogado_em`, `barbeiro`, `tem_foto`, `csp_nonce` |
 | `mesa.html` | `ag`, `barbearia`, `barbeiro`, `mesa_token`, `s` (servico), `csp_nonce` |
 | `mesa_entrar.html` | `barbearia`, `barbeiro`, `qr_token` *(público — nunca o `mesa_token`)*, `servicos`, `moeda_simbolo`, `vocab`, `csp_nonce` |
 | `novo.html` | `b` (barbeiros), `s` (servicos), `hoje`, `erro`, `csp_nonce` |

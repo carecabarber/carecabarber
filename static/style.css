@@ -786,6 +786,14 @@ body::after {
 }
 .aviso-reimprimir strong { color: var(--red); }
 
+/* O mesmo aviso depois de o token antigo ser revogado — deixa de ser um
+   problema por resolver e passa a ser uma confirmação. */
+.aviso-reimprimir.aviso-resolvido {
+    background: rgba(34,197,94,0.08);
+    border-color: rgba(34,197,94,0.28);
+}
+.aviso-reimprimir.aviso-resolvido strong { color: var(--green); }
+
 /* Estado do atendimento no ecrã do cliente — só informativo.
    Iniciar/terminar é trabalho do profissional. */
 .estado-cliente {

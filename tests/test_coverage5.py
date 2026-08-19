@@ -681,3 +681,95 @@ class TestBarbeirosGaps:
         # Tentar apagar (sem futuros → deve conseguir; com passados → soft delete)
         r = c.post(f"/barbeiros/apagar/{soft_id}")
         assert r.status_code in (302, 200)
+
+
+# ══════════════════════════════════════════════════════════════
+#  blueprints/barbeiros.py — revogar o QR antigo
+# ══════════════════════════════════════════════════════════════
+
+class TestRevogarQR:
+    """Rotas que fecham o painel aos QRs já impressos.
+
+    Há duas de propósito: o /perfil serve o próprio, mas um barbeiro criado
+    sem credenciais nunca lá chega — para esse, a do chefe é a única via.
+    """
+
+    def _token(self, ctx, barbeiro_id):
+        return ctx["db"].get_barbeiro(barbeiro_id)["mesa_token"]
+
+    def test_chefe_revoga_da_equipa(self, client):
+        c, ctx = client
+        _chefe(c, ctx)
+        antes = self._token(ctx, ctx["barb_livre_id"])
+        r = c.post(f"/barbeiros/{ctx['barb_livre_id']}/revogar-qr")
+        assert r.status_code in (302, 200)
+        assert self._token(ctx, ctx["barb_livre_id"]) != antes
+
+    def test_chefe_nao_revoga_de_outra_barbearia(self, client):
+        """IDOR: id de fora da barbearia do chefe não pode ser tocado."""
+        c, ctx = client
+        db = ctx["db"]
+        outra = db.criar_barbearia("Alheia Cov5", tipo="barbearia")
+        db.criar_barbeiro("Barbeiro Alheio", outra)
+        with db._read() as conn:
+            alheio = conn.execute(
+                "SELECT id, mesa_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+                ("Barbeiro Alheio", outra)).fetchone()
+        _chefe(c, ctx)
+        r = c.post(f"/barbeiros/{alheio['id']}/revogar-qr")
+        assert r.status_code in (302, 200)
+        assert self._token(ctx, alheio["id"]) == alheio["mesa_token"]
+
+    def test_chefe_revoga_id_inexistente(self, client):
+        c, ctx = client
+        _chefe(c, ctx)
+        r = c.post("/barbeiros/999999/revogar-qr")
+        assert r.status_code in (302, 200)
+
+    def test_barbeiro_nao_pode_usar_rota_do_chefe(self, client):
+        c, ctx = client
+        db = ctx["db"]
+        db.criar_barbeiro("Barbeiro Sem Poder", ctx["bid"])
+        with db._read() as conn:
+            alvo = conn.execute(
+                "SELECT id, mesa_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+                ("Barbeiro Sem Poder", ctx["bid"])).fetchone()
+        _barbeiro(c, ctx)
+        c.post(f"/barbeiros/{alvo['id']}/revogar-qr")
+        assert self._token(ctx, alvo["id"]) == alvo["mesa_token"]
+
+    def test_perfil_revoga_o_proprio(self, client):
+        c, ctx = client
+        db = ctx["db"]
+        db.criar_barbeiro("Revoga Proprio", ctx["bid"])
+        with db._read() as conn:
+            eu = conn.execute(
+                "SELECT id, mesa_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+                ("Revoga Proprio", ctx["bid"])).fetchone()
+        with c.session_transaction() as s:
+            s["user_id"]      = eu["id"]
+            s["role"]         = "barbeiro"
+            s["barbearia_id"] = ctx["bid"]
+            s["user_nome"]    = "Revoga Proprio"
+        r = c.post("/perfil/revogar-qr")
+        assert r.status_code in (302, 200)
+        assert self._token(ctx, eu["id"]) != eu["mesa_token"]
+
+    def test_perfil_bloqueado_em_modo_root(self, client):
+        """Root a gerir outra barbearia não mexe em tokens alheios."""
+        c, ctx = client
+        db = ctx["db"]
+        db.criar_barbeiro("Root Nao Toca", ctx["bid"])
+        with db._read() as conn:
+            alvo = conn.execute(
+                "SELECT id, mesa_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+                ("Root Nao Toca", ctx["bid"])).fetchone()
+        with c.session_transaction() as s:
+            s["user_id"]      = alvo["id"]
+            s["role"]         = "barbeiro"
+            s["barbearia_id"] = ctx["bid"]
+            s["root_gerir"]   = True
+        c.post("/perfil/revogar-qr")
+        with c.session_transaction() as s:
+            s.pop("root_gerir", None)
+        assert self._token(ctx, alvo["id"]) == alvo["mesa_token"]

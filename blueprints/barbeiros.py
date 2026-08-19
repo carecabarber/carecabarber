@@ -3,7 +3,7 @@ import binascii
 from flask import render_template, request, redirect, url_for, session, flash, Response, jsonify, make_response
 import database as db
 from helpers import (
-    _log, _blog, _agora, _limpar, _val_data, _val_hora,
+    _log, _blog, _audit, _agora, _limpar, _val_data, _val_hora,
     _invalidar_idx, _pc_del, _api_ok,
     staff_required, chefe_required, bid,
     get_vocab, _USER_RE, _MAX_USERNAME, _MAX_MOTIVO, _MAX_TEL, _HORA_RE,
@@ -107,6 +107,27 @@ def register(app) -> None:
             return redirect(url_for("barbeiros"))
         db.repor_senha_barbeiro(id, senha)
         flash(f"✓ Senha de {b['nome']} reposta com sucesso.", "sucesso")
+        return redirect(url_for("barbeiros"))
+
+
+    @app.route("/barbeiros/<int:id>/revogar-qr", methods=["POST"])
+    @chefe_required
+    def revogar_qr_barbeiro(id):
+        """Revoga o QR antigo de um membro da equipa.
+
+        Existe além do /perfil/revogar-qr porque um barbeiro criado sem
+        credenciais nunca chega ao perfil — sem isto ficaria sem maneira
+        nenhuma de fechar o acesso ao painel a partir do papel velho.
+        """
+        b = db.get_barbeiro(id)
+        if not (b and b.get("barbearia_id") == bid()):
+            return redirect(url_for("barbeiros"))
+        if not db.revogar_mesa_token(id):
+            flash(f"⚠️ {b['nome']} não tem QR de mesa para revogar.", "erro")
+        else:
+            _audit("revogar-mesa-token", alvo=id)
+            flash(f"✓ QR antigo de {b['nome']} revogado — já não abre o painel. "
+                  f"Se a gestão estava aberta num tablet, reabre-a a partir daqui.", "sucesso")
         return redirect(url_for("barbeiros"))
 
 
@@ -295,11 +316,36 @@ def register(app) -> None:
         barb_atual   = db.get_barbeiro(session["user_id"])
         mesa_token   = barb_atual.get("mesa_token") if barb_atual else None
         qr_token     = barb_atual.get("qr_token") if barb_atual else None
+        revogado_em  = barb_atual.get("mesa_token_revogado_em") if barb_atual else None
         tem_foto     = bool(barb_atual and barb_atual.get("foto_perfil"))
         return render_template("perfil.html", erro=erro, ok=ok,
                                credenciais=credenciais, mesa_token=mesa_token,
-                               qr_token=qr_token,
+                               qr_token=qr_token, qr_revogado_em=revogado_em,
                                barbeiro=barb_atual, tem_foto=tem_foto)
+
+
+    @app.route("/perfil/revogar-qr", methods=["POST"])
+    @staff_required
+    def perfil_revogar_qr():
+        """Fecha o painel aos QRs já impressos.
+
+        Os QRs anteriores à separação de tokens levavam o mesa_token no URL — o
+        papel é, literalmente, a chave do painel. Isto troca o token; o antigo
+        fica arquivado só para o `/mesa/<token>/entrar` legado continuar a mandar
+        o cliente para a fila. Quem estiver com o painel aberto num tablet tem de
+        voltar aqui buscar o link novo.
+        """
+        if session.get("root_gerir"):
+            flash("⚠️ Em modo root não é possível revogar o QR.", "erro")
+            return redirect(url_for("index"))
+        novo = db.revogar_mesa_token(session["user_id"])
+        if not novo:
+            flash("Não foi possível revogar — não tens QR de mesa.", "erro")
+        else:
+            _audit("revogar-mesa-token", alvo=session["user_id"])
+            flash("QR antigo revogado. Já não abre o teu painel. "
+                  "Abre a gestão a partir daqui — o link antigo deixou de servir.", "sucesso")
+        return redirect(url_for("perfil"))
 
 
     @app.route("/perfil/foto", methods=["POST"])

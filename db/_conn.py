@@ -24,7 +24,12 @@ FMT = "%Y-%m-%d %H:%M:%S"
 
 # Colunas da tabela barbeiros SEM os BLOBs de foto — usar em todos os SELECT gerais
 # para evitar arrastar megabytes de imagem em cada pedido.
-_BARB_COLS = "id, nome, barbearia_id, ativo, role, username, password_hash, mesa_token, qr_token, pausa_almoco_inicio, pausa_almoco_fim, telefone"
+# `mesa_token_revogado` fica de fora de propósito: é um token morto, mas continua a
+# ser um token e não tem de andar a passear pelos templates. Só a data da revogação
+# (que não é segredo) vem, para o /perfil saber que estado mostrar.
+_BARB_COLS = ("id, nome, barbearia_id, ativo, role, username, password_hash, "
+              "mesa_token, qr_token, mesa_token_revogado_em, "
+              "pausa_almoco_inicio, pausa_almoco_fim, telefone")
 
 # ── Cache de slots disponíveis ────────────────────────────────────────────────
 # TTL de 60 s para datas futuras, 15 s para hoje (dados mudam mais depressa)
@@ -535,7 +540,7 @@ def backup_db(dest_path: str) -> None:
 #  "if _v == N:" no corpo de _run_migrations.
 # ══════════════════════════════════════════════════════════════
 
-_SCHEMA_VERSION = 28   # versão actual do schema
+_SCHEMA_VERSION = 29   # versão actual do schema
 
 # Alfabeto sem caracteres ambíguos (sem 0/O, 1/I/L) — o código é lido em papel
 # e escrito à mão pelo cliente.
@@ -883,6 +888,23 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             for _b in _sem:
                 conn.execute("UPDATE barbeiros SET qr_token=? WHERE id=?",
                              (secrets.token_urlsafe(32), _b["id"]))
+
+        elif _v == 29:
+            # Revogação do mesa_token antigo. Os QRs impressos antes da migração 28
+            # levavam o mesa_token no URL — o papel É a chave do painel, e apagar a
+            # rota legada não resolve (basta cortar o "/entrar" do fim).
+            # Guardamos o token revogado à parte para o /entrar legado continuar a
+            # resolver: o papel velho passa a valer só para a fila.
+            if not _col_existe("barbeiros", "mesa_token_revogado"):
+                conn.execute("ALTER TABLE barbeiros ADD COLUMN mesa_token_revogado TEXT")
+            if not _col_existe("barbeiros", "mesa_token_revogado_em"):
+                conn.execute("ALTER TABLE barbeiros ADD COLUMN mesa_token_revogado_em TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_barbeiros_mesa_token_revogado "
+                    "ON barbeiros(mesa_token_revogado) WHERE mesa_token_revogado IS NOT NULL")
+            except sqlite3.OperationalError:
+                pass
 
         conn.commit()
         _done(_v)

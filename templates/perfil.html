@@ -296,10 +296,26 @@
     <p style="font-size:0.82rem;color:var(--text2);margin-bottom:14px">
         Coloca este QR na tua estação. O cliente escaneia para se registar à chegada (walk-in). Iniciar e terminar és tu.
     </p>
-    <div class="aviso-reimprimir" style="text-align:left">
-        ⚠️ <strong>Se já tens um QR impresso, substitui-o por este.</strong>
-        O antigo continua a funcionar, mas dá acesso ao teu painel de gestão a quem o escanear.
+    {% if qr_revogado_em %}
+    <div class="aviso-reimprimir aviso-resolvido" style="text-align:left">
+        ✅ <strong>QR antigo revogado.</strong>
+        Já não abre o teu painel. Quem escanear o papel velho entra na fila na mesma,
+        por isso podes reimprimir quando te der jeito.
     </div>
+    {% else %}
+    <div class="aviso-reimprimir" style="text-align:left">
+        ⚠️ <strong>Se já tens um QR impresso, revoga-o.</strong>
+        O papel antigo leva o token do teu painel no endereço — quem o escanear
+        chega à tua gestão. Revogar fecha isso já; quem escanear o papel velho
+        passa a entrar só na fila, e reimprimes quando quiseres.
+        <form method="post" action="{{ url_for('perfil_revogar_qr') }}" style="margin-top:10px"
+              data-confirm="Revogar o QR antigo? O painel da mesa vai passar a ter um endereço novo — se o tens aberto num tablet, tens de o reabrir a partir daqui.">
+            <button type="submit" class="btn btn-outline-small" style="padding:9px 18px">
+                Revogar QR antigo
+            </button>
+        </form>
+    </div>
+    {% endif %}
     <div id="qr-mesa-perfil" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:4px">
         <a href="{{ url_for('mesa_entrar', token=qr_token) }}" target="_blank"

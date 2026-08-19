@@ -688,3 +688,101 @@ class TestAgAcaoCliente:
                     f"/ag/{ctx['token_acao']}",
                     data={"acao": "iniciar"})
         assert r.status_code in (200, 302)
+
+
+# ══════════════════════════════════════════════════════════════
+#  TestRevogarMesaToken
+# ══════════════════════════════════════════════════════════════
+
+class TestRevogarMesaToken:
+    """Revogar o mesa_token fecha o painel aos QRs já impressos.
+
+    Os QRs anteriores à separação de tokens traziam o mesa_token no próprio
+    endereço, portanto o papel É a chave do painel — tirar a rota legada não
+    resolvia nada, bastava cortar o "/entrar" do fim. O que resolve é trocar
+    o token. O papel velho tem de continuar a servir para a fila, senão a
+    revogação obrigava a reimprimir tudo no mesmo dia.
+
+    Cada teste cria o seu próprio barbeiro: revogar o da fixture (que é de
+    módulo) partia os testes seguintes.
+    """
+
+    def _barbeiro_novo(self, ctx, nome):
+        db = ctx["db"]
+        db.criar_barbeiro(nome, ctx["bid"])
+        with db._read() as conn:
+            r = conn.execute(
+                "SELECT id, mesa_token, qr_token FROM barbeiros WHERE nome=? AND barbearia_id=?",
+                (nome, ctx["bid"])).fetchone()
+        return r["id"], r["mesa_token"], r["qr_token"]
+
+    def test_painel_fecha_ao_token_antigo(self, client):
+        """O que estava impresso no papel deixa de abrir o painel."""
+        c, ctx = client
+        bid_, antigo, _qr = self._barbeiro_novo(ctx, "Revoga Painel")
+        assert c.get(f"/mesa/{antigo}").status_code == 200      # antes: abre
+        novo = ctx["db"].revogar_mesa_token(bid_)
+        assert novo and novo != antigo
+        assert c.get(f"/mesa/{antigo}").status_code == 404      # depois: fechado
+        assert c.get(f"/mesa/{novo}").status_code == 200        # e o novo serve
+
+    def test_papel_velho_continua_a_dar_fila(self, client):
+        """Revogar não pode partir o QR que está na mesa nesse momento.
+
+        O /entrar legado resolve pelo token arquivado e devolve o qr_token —
+        o cliente entra na fila na mesma, e a reimpressão pode esperar.
+        """
+        c, ctx = client
+        bid_, antigo, qr = self._barbeiro_novo(ctx, "Revoga Fila")
+        ctx["db"].revogar_mesa_token(bid_)
+        r = c.get(f"/mesa/{antigo}/entrar")
+        assert r.status_code == 302
+        assert r.headers["Location"] == f"/q/{qr}"
+        assert antigo not in r.headers["Location"]
+        assert c.get(r.headers["Location"]).status_code == 200
+
+    def test_qr_token_nao_e_tocado(self, client):
+        """A revogação é do token do painel — o QR público mantém-se."""
+        c, ctx = client
+        bid_, _antigo, qr = self._barbeiro_novo(ctx, "Revoga QR Intacto")
+        ctx["db"].revogar_mesa_token(bid_)
+        assert ctx["db"].get_barbeiro(bid_)["qr_token"] == qr
+        assert c.get(f"/q/{qr}").status_code == 200
+
+    def test_token_revogado_nao_abre_painel_por_engano(self, client):
+        """Rede de segurança: o token arquivado só serve para o /entrar legado."""
+        c, ctx = client
+        bid_, antigo, _qr = self._barbeiro_novo(ctx, "Revoga Arquivo")
+        ctx["db"].revogar_mesa_token(bid_)
+        db = ctx["db"]
+        assert db.get_barbeiro_por_mesa_token(antigo) is None
+        assert db.get_barbeiro_por_mesa_token_revogado(antigo)["id"] == bid_
+        # E não aparece em lado nenhum que vá para um template
+        assert "mesa_token_revogado" not in db.get_barbeiro(bid_)
+
+    def test_revogar_marca_a_data(self, client):
+        """O /perfil usa a data para saber se ainda há aviso a mostrar."""
+        c, ctx = client
+        bid_, _a, _q = self._barbeiro_novo(ctx, "Revoga Data")
+        assert ctx["db"].get_barbeiro(bid_)["mesa_token_revogado_em"] is None
+        ctx["db"].revogar_mesa_token(bid_)
+        assert ctx["db"].get_barbeiro(bid_)["mesa_token_revogado_em"]
+
+    def test_revogar_sem_token_devolve_none(self, client):
+        """Barbeiro sem mesa_token não rebenta — devolve None."""
+        c, ctx = client
+        bid_, _a, _q = self._barbeiro_novo(ctx, "Revoga Sem Token")
+        db = ctx["db"]
+        with db._write() as conn:
+            conn.execute("UPDATE barbeiros SET mesa_token=NULL WHERE id=?", (bid_,))
+        assert db.revogar_mesa_token(bid_) is None
+
+    def test_revogar_duas_vezes_mata_o_primeiro_papel(self, client):
+        """Só se arquiva um token. Revogar outra vez mata o papel anterior."""
+        c, ctx = client
+        bid_, t1, _q = self._barbeiro_novo(ctx, "Revoga Duas Vezes")
+        ctx["db"].revogar_mesa_token(bid_)
+        t2 = ctx["db"].get_barbeiro(bid_)["mesa_token"]
+        ctx["db"].revogar_mesa_token(bid_)
+        assert c.get(f"/mesa/{t1}/entrar").status_code == 404   # 1.º papel: morto
+        assert c.get(f"/mesa/{t2}/entrar").status_code == 302   # 2.º papel: fila
