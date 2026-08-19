@@ -230,11 +230,12 @@ def register(app) -> None:
 
     @app.route("/cliente/<slug>/servico/<int:ag_id>/<acao>", methods=["POST"])
     def cliente_acao_servico(slug, ag_id, acao):
-        """Um clique: o cliente inicia ou termina a sua própria marcação.
+        """Descontinuada — iniciar/terminar é trabalho do staff.
 
-        Sem câmara e sem código — a marcação já está identificada pela sessão
-        do cliente (telefone) e o resto da validação (dono, estado, serviço em
-        curso) é a mesma da via QR da mesa.
+        Mantida só para não partir links/marcadores antigos: avisa e devolve
+        o cliente à sua página. O cliente marca, reagenda e cancela; quem
+        arranca e fecha o serviço (e portanto lança o valor na facturação)
+        é o profissional, no painel ou no ecrã da mesa.
         """
         barbearia = db.get_barbearia_por_slug(slug)
         if not barbearia or not barbearia["ativa"]:
@@ -242,30 +243,10 @@ def register(app) -> None:
         if (session.get("role") != "cliente"
                 or session.get("barbearia_id") != barbearia["id"]):
             return redirect(url_for("cliente_entrada", slug=slug))
-        _volta = redirect(url_for("cliente_home", slug=slug))
-        if acao not in ("iniciar", "terminar"):
-            return _volta
-        if not _api_ok(request.remote_addr or "?"):
-            flash("Demasiados pedidos. Aguarda um momento.", "aviso")
-            return _volta
-
-        ag = db.get_agendamento(ag_id)
-        if (not ag or ag.get("barbearia_id") != barbearia["id"]
-                or ag.get("telefone") != session.get("telefone")):
-            flash("Marcação não encontrada.", "aviso")
-            return _volta
-        barb = db.get_barbeiro(ag.get("barbeiro_id"))
-        if not barb:
-            flash(f"Marcação sem {get_vocab(barbearia.get('tipo'), barbearia.get('vocab_custom'))['profissional'].lower()} atribuído.", "aviso")
-            return _volta
-
-        if acao == "iniciar":
-            payload, _http = _acao_iniciar(barb, ag_id)
-        else:
-            payload, _http = _acao_terminar(barb, ag_id, 0)
-        if not payload.get("ok"):
-            flash(payload.get("error", "Não foi possível concluir a acção."), "aviso")
-        return _volta
+        _prof = get_vocab(barbearia.get("tipo"),
+                          barbearia.get("vocab_custom"))["profissional"].lower()
+        flash(f"Só o {_prof} pode iniciar ou terminar o atendimento.", "aviso")
+        return redirect(url_for("cliente_home", slug=slug))
 
 
     @app.route("/ag/<token>", methods=["GET", "POST"])
@@ -288,25 +269,10 @@ def register(app) -> None:
 
         erro = None
         if request.method == "POST":
-            if not _api_ok(request.remote_addr or "?"):
-                return render_template("erro_simples.html",
-                                       msg="Demasiados pedidos. Aguarda um momento."), 429
-            acao = request.form.get("acao")
-            if acao == "iniciar" and ag["status"] in (ST_AGENDADO, ST_WALKIN):
-                if not ag.get("barbeiro_id"):
-                    erro = f"Marcação sem {_prof.lower()} atribuído."
-                elif db.barbeiro_tem_em_andamento(ag["barbeiro_id"]):
-                    erro = f"O {_prof.lower()} já tem um {_servc.lower()} em curso. Aguarda um momento."
-                else:
-                    if db.iniciar_trabalho(ag["id"]):
-                        _invalidar_idx(ag["barbearia_id"])
-                        return redirect(url_for("ag_acao_cliente", token=token))
-                    else:
-                        erro = "Não foi possível iniciar — serviço já em curso."
-            elif acao == "terminar" and ag["status"] == ST_EM_ANDAMENTO:
-                # Terminação via token público bloqueada — só staff autenticado pode terminar
-                erro = "Acção não permitida por este link."
-            ag = db.get_agendamento_por_token_avaliar(token) or ag
+            # Iniciar/terminar é trabalho do staff — este link é só de consulta.
+            # Evita que o cliente arranque o cronómetro ou feche o serviço
+            # (o valor do serviço entra na facturação).
+            erro = f"Só o {_prof.lower()} pode iniciar ou terminar o {_servc.lower()}."
 
         return render_template("ag_acao.html",
                                ag=ag, barbearia=barbearia,

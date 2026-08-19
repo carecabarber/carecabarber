@@ -559,14 +559,12 @@ class TestAgAcaoCliente:
         r = c.get(f"/ag/{ctx['token_avaliar']}")
         assert r.status_code == 200
 
-    def test_post_rate_limit(self, client):
-        """Line 217-218: _api_ok returns False → 429."""
+    def test_post_iniciar_bloqueado(self, client):
+        """Cliente não pode iniciar pelo link público — só o profissional."""
         c, ctx = client
-        with patch("blueprints.mesa._api_ok", return_value=False):
-            r = c.post(
-                f"/ag/{ctx['token_acao']}",
-                data={"acao": "iniciar"})
-        assert r.status_code == 429
+        r = c.post(f"/ag/{ctx['token_acao']}", data={"acao": "iniciar"})
+        assert r.status_code == 200
+        assert "pode iniciar ou terminar" in r.get_data(as_text=True)
 
     def test_post_iniciar_sem_barbeiro(self, client):
         """Line 222: acao=iniciar, ag has no barbeiro_id → erro rendered."""

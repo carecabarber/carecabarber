@@ -70,7 +70,7 @@
             </div>
             <div id="ativo-info" style="font-size:0.88rem;color:var(--text2);margin-bottom:6px"></div>
             <div style="font-size:0.78rem;color:var(--text2);margin-bottom:20px">
-                Quando o teu {{ vocab.servico | lower }} acabar, clica em terminar.
+                O {{ vocab.profissional | lower }} termina o {{ vocab.servico | lower }} e regista o valor a pagar.
             </div>
             <div id="wi-preco-display" style="display:none;margin-bottom:18px;
                  background:rgba(var(--accent-rgb,212,175,55),0.1);border:1px solid rgba(var(--accent-rgb,212,175,55),0.3);
@@ -78,11 +78,6 @@
                 <div style="font-size:0.75rem;color:var(--text2);margin-bottom:4px">Valor do serviço</div>
                 <div id="wi-preco-valor" style="font-size:1.4rem;font-weight:800;color:var(--accent)"></div>
             </div>
-            <button id="btn-terminar" class="btn btn-full"
-                    style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);
-                           color:var(--red);padding:14px;font-size:0.95rem;margin-bottom:12px">
-                Terminar serviço
-            </button>
             <div id="ativo-msg" style="font-size:0.85rem;color:#f5c842;min-height:18px"></div>
         </div>
     </div>
@@ -114,7 +109,6 @@
     const erroDiv    = document.getElementById("wi-erro");
     const ativoMsg   = document.getElementById("ativo-msg");
     let _agId = null;
-    let _mesaToken = MESA_TOKEN;  // pode ser sobreposto pelo token guardado na sessão
 
     function mostrar(ecrã) {
         [eForm, eAtivo, eFim].forEach(e => e.style.display = "none");
@@ -131,7 +125,6 @@
         const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
         if (s && s.agId) {
             _agId = s.agId;
-            _mesaToken = s.mesaToken || MESA_TOKEN;  // usar token guardado — não o do URL atual
             document.getElementById("ativo-info").textContent = s.nome + " · " + s.servico;
             if (s.preco > 0) {
                 var _pd = document.getElementById("wi-preco-display");
@@ -183,30 +176,8 @@
         this.disabled = false; this.textContent = "Começar agora";
     });
 
-    // Terminar serviço
-    document.getElementById("btn-terminar").addEventListener("click", async function() {
-        if (!_agId) return;
-        this.disabled = true; this.textContent = "A terminar…";
-        ativoMsg.textContent = "";
-        try {
-            const resp = await fetch("/mesa/" + _mesaToken + "/terminar", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ag_id: _agId, valor: 0 })
-            });
-            const r = await resp.json();
-            if (r.ok) {
-                localStorage.removeItem(LS_KEY);
-                mostrar(eFim);
-            } else {
-                ativoMsg.textContent = "" + (r.error || "Erro ao terminar.");
-                this.disabled = false; this.textContent = "Terminar serviço";
-            }
-        } catch(e) {
-            ativoMsg.textContent = "Erro de ligação.";
-            this.disabled = false; this.textContent = "Terminar serviço";
-        }
-    });
+    // Terminar é trabalho do profissional — esta página é só para o cliente
+    // se registar à chegada.
 
     // Botão "Novo walk-in" (substitui onclick= inline — CSP)
     var _btnNovo = document.getElementById("btn-novo-walkin");

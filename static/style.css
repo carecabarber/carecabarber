@@ -772,24 +772,35 @@ body::after {
 }
 .btn-reagendar:hover { background: rgba(59,130,246,0.14); }
 
-.btn-qr-scan {
-    background: rgba(245,200,66,0.1);
-    color: #f5c842;
-    border: 1px solid rgba(245,200,66,0.35);
+/* Estado do atendimento no ecrã do cliente — só informativo.
+   Iniciar/terminar é trabalho do profissional. */
+.estado-cliente {
+    width: 100%;
+    text-align: center;
     padding: 7px 10px;
     border-radius: 8px;
     font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
+    font-weight: 700;
     white-space: nowrap;
 }
-.btn-qr-scan:hover { background: rgba(245,200,66,0.2); }
-.btn-terminar-qr {
-    background: rgba(239,68,68,0.1);
-    color: var(--red);
-    border-color: rgba(239,68,68,0.3);
+.estado-cliente.estado-em-curso {
+    background: rgba(245,200,66,0.12);
+    color: #f5c842;
+    border: 1px solid rgba(245,200,66,0.35);
 }
-.btn-terminar-qr:hover { background: rgba(239,68,68,0.2); }
+.estado-cliente.estado-espera {
+    background: rgba(148,163,184,0.1);
+    color: var(--text2);
+    border: 1px solid rgba(148,163,184,0.25);
+}
+.estado-cliente-nota {
+    width: 100%;
+    text-align: center;
+    font-size: 0.68rem;
+    color: var(--text2);
+    line-height: 1.3;
+    margin-top: 2px;
+}
 
 .btn-noshow {
     background: var(--surface2);
